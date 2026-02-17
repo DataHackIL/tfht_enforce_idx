@@ -116,20 +116,19 @@ Notifier         - Protocol: send(items) -> None
 
 ## MVP Scope
 
-### In Scope
-- **4 news sources**: 2 via RSS (Ynet, Walla) + 2 via scraping (Mako, Maariv)
-- **Configurable time window**: scan last X days (e.g., 7 or 14 days)
-- **Hybrid fetching**: RSS feeds + search page scraping
-- **CLI output**: `denbust scan` prints unified items
-- **Telegram notifications**: optional, for new items
-- **LLM classification**: relevance + category + sub_category
-- **Cross-source deduplication**: same story = one item with multiple source links
-- **Simple persistence**: track seen URLs to avoid re-alerting
-- **Validation**: should find articles like those in articles_examples.md
+### In Scope (Priority Order)
+1. **Scraping/Fetching**: 2 RSS (Ynet, Walla) + 2 scrapers (Mako, Maariv)
+2. **Parsing**: Extract title, URL, snippet, date from each source
+3. **Classification**: LLM-based relevance + category + sub_category
+4. **Deduplication**: Group same story across sources
+5. **CLI output**: Print unified items in readable Hebrew format
+6. **Configurable time window**: Scan last X days (e.g., 7 or 14 days)
+7. **Seen URL tracking**: Simple JSON persistence to avoid re-processing
 
 ### Out of Scope (Phase 1)
+- Telegram notifications (add later once core pipeline works)
 - Court records scraping (Phase 2)
-- Full article text extraction (search snippets sufficient)
+- Full article text extraction (snippets sufficient)
 - Historical database / analytics
 - Web dashboard
 - Email notifications
@@ -248,8 +247,7 @@ dedup:
   similarity_threshold: 0.7  # Title similarity for grouping
 
 output:
-  format: cli  # or 'telegram'
-  # DENBUST_TELEGRAM_BOT_TOKEN, DENBUST_TELEGRAM_CHAT_ID from env
+  format: cli  # 'telegram' support added later
 
 store:
   path: data/seen.json
@@ -342,18 +340,27 @@ DENBUST_TELEGRAM_CHAT_ID=123456789        # Optional
 
 ## Done When
 
+### Core Pipeline
 - [ ] `denbust scan` fetches from 4 sources (2 RSS + 2 scrapers)
 - [ ] `--days` flag controls how far back to search (default from config)
 - [ ] RSS sources: fetch feed, filter by keywords + date
-- [ ] Scrapers: search with keywords, filter by date
+- [ ] Scrapers: search/browse, parse HTML, filter by date
 - [ ] LLM classifies relevance + category + sub_category
 - [ ] Same story from multiple sources = single unified item
 - [ ] Unified items printed to CLI in readable Hebrew format
-- [ ] Optional: Telegram notification for new items
-- [ ] seen.json tracks URLs to avoid duplicate alerts on re-run
-- [ ] **Validation**: system finds articles like those in articles_examples.md
+- [ ] seen.json tracks URLs to avoid re-processing on subsequent runs
+
+### Validation
+- [ ] System finds articles like those in articles_examples.md
+- [ ] Cross-source deduplication works correctly
+- [ ] Hebrew displays properly in terminal
+
+### Testing
 - [ ] Unit tests for RSS parsing, HTML scraping, dedup logic
 - [ ] Integration test with mocked responses
+
+### Later
+- [ ] Telegram notifications (add after core pipeline validated)
 
 ---
 

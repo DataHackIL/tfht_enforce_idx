@@ -22,10 +22,10 @@ Task list for implementing Phase 1 MVP as defined in [MVP_SPEC.md](./MVP_SPEC.md
                               │                    │
                               └────────┬───────────┘
                                        ▼
-                          #10 Telegram notifier (optional)
+                          #10 Validation + manual test
                                        │
                                        ▼
-                          #11 Validation + manual test
+                          #11 Telegram notifier (later)
 ```
 
 ---
@@ -196,10 +196,28 @@ Task list for implementing Phase 1 MVP as defined in [MVP_SPEC.md](./MVP_SPEC.md
 
 ---
 
-### Phase 1.5: Polish
+### Phase 1.5: Validation
 
-#### #10 Telegram notifier (optional)
-**Blocked by**: #7
+#### #10 Validation + manual test
+**Blocked by**: #9
+
+- [ ] Create `agents/news.yaml` with working config
+- [ ] Manual test: run against real sources (with delays!)
+- [ ] **Validate against articles_examples.md**:
+  - Run `denbust scan --days 14`
+  - Verify system finds Mako articles from examples
+  - Verify system finds Maariv articles from examples
+  - Check cross-source deduplication works
+- [ ] Verify Hebrew display is correct in CLI
+- [ ] Document rate limiting (delays between requests)
+- [ ] Update README with usage instructions
+
+---
+
+### Phase 1.6: Notifications (Later)
+
+#### #11 Telegram notifier
+**Blocked by**: #10 (add after core pipeline is validated)
 
 - [ ] Create `output/telegram.py`:
   - `TelegramNotifier` class
@@ -209,23 +227,11 @@ Task list for implementing Phase 1 MVP as defined in [MVP_SPEC.md](./MVP_SPEC.md
   - Never log bot token
 - [ ] Wire into pipeline based on config
 
-#### #11 Validation + manual test
-**Blocked by**: #9, #10
-
-- [ ] Create `agents/news.yaml` with working config
-- [ ] Manual test: run against real sources (with delays!)
-- [ ] **Validate against articles_examples.md**:
-  - Run `denbust scan --days 14`
-  - Verify system finds Mako articles from examples
-  - Verify system finds Maariv articles from examples
-  - Check cross-source deduplication works
-- [ ] Verify Hebrew display is correct
-- [ ] Document rate limiting (delays between requests)
-- [ ] Update README with usage instructions
-
 ---
 
 ## Estimated Effort
+
+### Core Pipeline (Priority)
 
 | Task | Complexity | Est. Time |
 |------|------------|-----------|
@@ -235,14 +241,19 @@ Task list for implementing Phase 1 MVP as defined in [MVP_SPEC.md](./MVP_SPEC.md
 | #3b Scrapers (Mako, Maariv) | Medium | 3h |
 | #4 LLM classifier | Medium | 2h |
 | #5 Deduplicator | Medium | 2h |
-| #6 Formatter | Low | 1h |
+| #6 Formatter (CLI) | Low | 1h |
 | #6a Seen tracker | Low | 1h |
 | #7 Pipeline + CLI | Medium | 2h |
 | #8 Unit tests | Medium | 2h |
 | #9 Integration tests | Medium | 2h |
-| #10 Telegram | Low | 1h |
-| #11 Validation + manual test | Low | 1h |
-| **Total** | | **~20h** |
+| #10 Validation | Low | 1h |
+| **Subtotal** | | **~19h** |
+
+### Later
+
+| Task | Complexity | Est. Time |
+|------|------------|-----------|
+| #11 Telegram notifier | Low | 1h |
 
 ---
 
