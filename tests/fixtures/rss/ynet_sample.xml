@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Ynet News</title>
+    <link>https://www.ynet.co.il</link>
+    <description>Israeli News</description>
+    <item>
+      <title>פשיטה על בית בושת בתל אביב: 5 נעצרו</title>
+      <link>https://www.ynet.co.il/news/article/r111111</link>
+      <description>המשטרה פשטה הלילה על דירה בדרום תל אביב שפעלה כבית בושת. במהלך הפשיטה נעצרו 5 חשודים בסרסור וניהול זירת זנות.</description>
+      <pubDate>Sun, 15 Feb 2026 10:00:00 +0200</pubDate>
+    </item>
+    <item>
+      <title>חדשות כלליות שלא קשורות</title>
+      <link>https://www.ynet.co.il/news/article/r222222</link>
+      <description>כתבה כללית על נושא אחר לגמרי שלא קשור לאכיפה.</description>
+      <pubDate>Sun, 15 Feb 2026 09:00:00 +0200</pubDate>
+    </item>
+    <item>
+      <title>צו סגירה למכון עיסוי חשוד בחיפה</title>
+      <link>https://www.ynet.co.il/news/article/r333333</link>
+      <description>בית המשפט הוציא צו סגירה למכון עיסוי בחיפה שנחשד בשימוש כזירת זנות.</description>
+      <pubDate>Sat, 14 Feb 2026 14:00:00 +0200</pubDate>
+    </item>
+  </channel>
+</rss>

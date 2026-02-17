@@ -1,0 +1,49 @@
+# Default configuration for enforcement news monitoring
+name: enforcement-news
+days: 14  # How many days back to search
+
+sources:
+  # RSS sources - filter by keywords after fetching
+  - name: ynet
+    type: rss
+    url: https://www.ynet.co.il/Integration/StoryRss2.xml
+    enabled: true
+
+  - name: walla
+    type: rss
+    url: https://rss.walla.co.il/feed/1
+    enabled: true
+
+  # Scraped sources - search with keywords
+  - name: mako
+    type: scraper
+    enabled: true
+
+  - name: maariv
+    type: scraper
+    enabled: true
+
+keywords:
+  - זנות
+  - בית בושת
+  - סרסור
+  - סחר בבני אדם
+  - צו סגירה
+  - ליווי
+  - נערות ליווי
+  - תעשיית המין
+  - עיסוי חשוד
+  - זירת זנות
+
+classifier:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+
+dedup:
+  similarity_threshold: 0.7
+
+output:
+  format: cli
+
+store:
+  path: data/seen.json
