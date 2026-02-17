@@ -1,0 +1,57 @@
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+credentials.json
+secrets.json
+**/secrets/
+**/credentials/
+*.secret
+
+# API keys and tokens
+.netrc
+.npmrc
+.pypirc
+
+# SSH keys
+.ssh/
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+
+# Cloud provider configs
+.aws/
+.azure/
+.gcp/
+.config/gcloud/
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+
+# IDE and editor configs with potential secrets
+.idea/
+.vscode/settings.json
+
+# Logs that may contain sensitive data
+*.log
+logs/
+
+# Build artifacts and caches
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+dist/
+build/
+*.egg-info/
+node_modules/
+.git/
