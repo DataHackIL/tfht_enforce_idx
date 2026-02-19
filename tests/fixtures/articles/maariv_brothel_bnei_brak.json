@@ -1,0 +1,13 @@
+{
+  "url": "https://www.maariv.co.il/news/law/article-1270778",
+  "title": "המאדאם של תל אביב שוב הסתבכה: חשד לבית בושת בבני ברק",
+  "snippet": "המשטרה עצרה את עינת הראל, לשעבר דמות מוכרת בסצנת הזנות בתל אביב, בחשד שהפעילה בית בושת בבני ברק. בחיפוש בדירה נתפסו טלפונים, כסף ואביזרי מין",
+  "date": "2026-01-08",
+  "source_name": "maariv",
+  "expected_classification": {
+    "relevant": true,
+    "category": "brothel",
+    "sub_category": "closure",
+    "confidence": "high"
+  }
+}

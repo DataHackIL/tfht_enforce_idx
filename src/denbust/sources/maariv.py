@@ -61,16 +61,10 @@ class MaarivScraper(Source):
         ) as client:
             self._client = client
 
-            # Scrape the law section
+            # Scrape the law section (search endpoint is broken, returns 404)
             await asyncio.sleep(1.5)  # Rate limiting
             section_articles = await self._scrape_section(MAARIV_LAW_URL, cutoff, keywords)
             articles.extend(section_articles)
-
-            # Search for keywords
-            for keyword in keywords:
-                await asyncio.sleep(1.5)  # Rate limiting
-                found = await self._search_keyword(keyword, cutoff)
-                articles.extend(found)
 
             self._client = None
 
@@ -172,8 +166,8 @@ class MaarivScraper(Source):
         soup = BeautifulSoup(html, "lxml")
         articles: list[RawArticle] = []
 
-        # Look for article containers
-        for item in soup.select("article, .article, .item, .news-item, li"):
+        # Look for article containers - Maariv uses article.category-article
+        for item in soup.select("article.category-article, article, .article"):
             article = self._parse_article_item(item, cutoff)
             if article and self._matches_keywords(article, keywords):
                 articles.append(article)
@@ -190,8 +184,10 @@ class MaarivScraper(Source):
         Returns:
             RawArticle or None.
         """
-        # Find the link
-        link = item.select_one("a[href*='article']")
+        # Find the link - Maariv uses .category-article-link
+        link = item.select_one("a.category-article-link")
+        if not link:
+            link = item.select_one("a[href*='article']")
         if not link:
             link = item.select_one("a[href*='/news/']")
         if not link:
