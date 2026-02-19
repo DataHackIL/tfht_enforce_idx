@@ -75,7 +75,8 @@ class Config(BaseModel):
     """Root configuration for denbust."""
 
     name: str = "enforcement-news"
-    days: int = Field(default=14, ge=1)
+    days: int = Field(default=3, ge=1)
+    max_articles: int = Field(default=30, ge=1)
     keywords: list[str] = Field(default_factory=lambda: DEFAULT_KEYWORDS.copy())
     sources: list[SourceConfig] = Field(default_factory=list)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)

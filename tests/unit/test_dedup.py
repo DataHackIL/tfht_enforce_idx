@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pydantic import HttpUrl
 
 from denbust.dedup.similarity import ArticleGroup, Deduplicator, create_deduplicator
-from denbust.models import (
+from denbust.data_models import (
     Category,
     ClassificationResult,
     ClassifiedArticle,

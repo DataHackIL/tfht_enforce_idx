@@ -9,7 +9,7 @@ import respx
 from httpx import Response
 
 from denbust.config import Config, SourceConfig, SourceType
-from denbust.models import Category, RawArticle
+from denbust.data_models import Category, RawArticle
 from denbust.pipeline import (
     create_sources,
     deduplicate_articles,
@@ -148,7 +148,7 @@ class TestDeduplicateArticles:
     def test_deduplicate_similar_articles(self) -> None:
         """Test deduplicating similar articles."""
         from denbust.dedup.similarity import Deduplicator
-        from denbust.models import ClassificationResult, ClassifiedArticle
+        from denbust.data_models import ClassificationResult, ClassifiedArticle
 
         articles = [
             ClassifiedArticle(

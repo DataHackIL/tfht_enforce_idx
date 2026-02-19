@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from pydantic import HttpUrl
 
-from denbust.models import Category, SourceReference, SubCategory, UnifiedItem
+from denbust.data_models import Category, SourceReference, SubCategory, UnifiedItem
 from denbust.output.formatter import (
     format_category,
     format_items,

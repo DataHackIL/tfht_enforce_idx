@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 
 from pydantic import HttpUrl
 
-from denbust.models import (
+import pytest
+from pydantic import ValidationError
+
+from denbust.data_models import (
     Category,
     ClassificationResult,
     ClassifiedArticle,
@@ -43,12 +46,9 @@ class TestRawArticle:
             source_name="test",
         )
 
-        # Should raise an error when trying to modify
-        try:
+        # Should raise ValidationError when trying to modify frozen model
+        with pytest.raises(ValidationError):
             article.title = "New Title"  # type: ignore[misc]
-            raise AssertionError("Should have raised an error")
-        except Exception:
-            pass
 
 
 class TestClassificationResult:

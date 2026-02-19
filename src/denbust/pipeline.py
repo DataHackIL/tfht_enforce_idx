@@ -8,7 +8,7 @@ from pathlib import Path
 from denbust.classifier.relevance import Classifier, create_classifier
 from denbust.config import Config, SourceType, load_config
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
-from denbust.models import ClassifiedArticle, RawArticle, UnifiedItem
+from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
 from denbust.output.formatter import print_items
 from denbust.sources.base import Source
 from denbust.sources.maariv import create_maariv_source
@@ -210,16 +210,24 @@ async def run_pipeline_async(config: Config, days: int) -> list[UnifiedItem]:
         logger.info("All articles were already seen")
         return []
 
-    # 3. Classify articles
+    # 3. Check article count against max_articles threshold
+    if len(unseen_articles) > config.max_articles:
+        logger.warning(
+            f"Article count ({len(unseen_articles)}) exceeds max_articles threshold "
+            f"({config.max_articles}). Consider adding a pre-filter stage or reducing "
+            f"the number of days/sources. Proceeding with classification anyway."
+        )
+
+    # 4. Classify articles
     relevant_articles = await classify_articles(unseen_articles, classifier)
     if not relevant_articles:
         logger.info("No relevant articles found")
         return []
 
-    # 4. Deduplicate
+    # 5. Deduplicate
     unified_items = deduplicate_articles(relevant_articles, deduplicator)
 
-    # 5. Mark as seen
+    # 6. Mark as seen
     mark_seen(unified_items, seen_store)
 
     return unified_items

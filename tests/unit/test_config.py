@@ -23,7 +23,8 @@ class TestConfig:
         config = Config()
 
         assert config.name == "enforcement-news"
-        assert config.days == 14
+        assert config.days == 3
+        assert config.max_articles == 30
         assert len(config.keywords) > 0
         assert config.dedup.similarity_threshold == 0.7
         assert config.output.format == OutputFormat.CLI
@@ -133,4 +134,4 @@ sources:
         config = load_config(config_path)
 
         assert config.name == "enforcement-news"
-        assert config.days == 14
+        assert config.days == 3

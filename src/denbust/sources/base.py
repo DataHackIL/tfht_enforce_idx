@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-from denbust.models import RawArticle
+from denbust.data_models import RawArticle
 
 
 class Source(ABC):

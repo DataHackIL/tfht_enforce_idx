@@ -1,6 +1,6 @@
 """Output formatting for unified items."""
 
-from denbust.models import Category, SubCategory, UnifiedItem
+from denbust.data_models import Category, SubCategory, UnifiedItem
 
 # Category icons
 CATEGORY_ICONS: dict[tuple[Category, SubCategory | None], str] = {

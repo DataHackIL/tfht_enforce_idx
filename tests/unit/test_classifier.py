@@ -1,7 +1,7 @@
 """Unit tests for classifier module."""
 
 from denbust.classifier.relevance import Classifier
-from denbust.models import Category, SubCategory
+from denbust.data_models import Category, SubCategory
 
 
 class TestClassifierParsing:

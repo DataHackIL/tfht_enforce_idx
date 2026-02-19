@@ -8,7 +8,7 @@ from email.utils import parsedate_to_datetime
 import feedparser
 import httpx
 
-from denbust.models import RawArticle
+from denbust.data_models import RawArticle
 from denbust.sources.base import Source
 
 logger = logging.getLogger(__name__)

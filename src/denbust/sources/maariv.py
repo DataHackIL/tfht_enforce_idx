@@ -10,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 from pydantic import HttpUrl
 
-from denbust.models import RawArticle
+from denbust.data_models import RawArticle
 from denbust.sources.base import Source
 
 logger = logging.getLogger(__name__)

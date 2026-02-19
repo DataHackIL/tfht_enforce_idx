@@ -7,7 +7,7 @@ import logging
 import anthropic
 from anthropic.types import TextBlock
 
-from denbust.models import (
+from denbust.data_models import (
     Category,
     ClassificationResult,
     ClassifiedArticle,
