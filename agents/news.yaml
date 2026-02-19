@@ -1,6 +1,6 @@
 # Default configuration for enforcement news monitoring
 name: enforcement-news
-days: 3  # How many days back to search
+days: 21  # How many days back to search
 max_articles: 30  # Warn if more articles than this (consider pre-filter)
 
 sources:

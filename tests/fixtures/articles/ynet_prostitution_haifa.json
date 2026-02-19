@@ -1,0 +1,13 @@
+{
+  "url": "https://www.ynet.co.il/news/article/rkpeb8zbwg",
+  "title": "מעצר אזרחית דרום אמריקה החשודה ברצח גבר בחיפה הוארך בחמישה ימים",
+  "snippet": "הגבר אותר על הקרקע כשהוא דקור, והחשודה, ככל הנראה קורבן זנות, נפצעה בעצמה קל-בינוני ופונתה לבית החולים רמב\"ם",
+  "date": "2026-02-05",
+  "source_name": "ynet",
+  "expected_classification": {
+    "relevant": true,
+    "category": "prostitution",
+    "sub_category": "arrest",
+    "confidence": "medium"
+  }
+}

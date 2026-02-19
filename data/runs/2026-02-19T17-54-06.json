@@ -1,0 +1,88 @@
+{
+  "run_id": "2026-02-19T17-54-06",
+  "timestamp": "2026-02-19T17:54:06+00:00",
+  "config": {
+    "days": 21,
+    "keywords": ["זנות", "בית בושת", "סרסור", "סחר בבני אדם", "צו סגירה", "ליווי", "נערות ליווי", "תעשיית המין", "עיסוי חשוד", "זירת זנות"],
+    "sources": ["ynet", "walla", "mako", "maariv"]
+  },
+  "results": {
+    "sources": {
+      "ynet": {
+        "status": "success",
+        "type": "rss",
+        "limitation": "RSS only contains ~30 recent articles (hours old), not days worth",
+        "fetched": 30,
+        "keyword_matched": 0
+      },
+      "walla": {
+        "status": "success",
+        "type": "rss",
+        "limitation": "RSS only contains recent articles",
+        "fetched": "unknown",
+        "keyword_matched": 1
+      },
+      "mako": {
+        "status": "blocked",
+        "type": "scraper",
+        "error": "Radware bot protection - all requests redirect to validate.perfdrive.com",
+        "fetched": 0,
+        "keyword_matched": 0
+      },
+      "maariv": {
+        "status": "success",
+        "type": "scraper",
+        "note": "Section scraper works, but no articles on /news/law matched keywords today",
+        "fetched": 17,
+        "keyword_matched": 0
+      }
+    },
+    "totals": {
+      "total_keyword_matched": 1,
+      "after_seen_filter": 1,
+      "classified_relevant": 0,
+      "classified_not_relevant": 1
+    }
+  },
+  "articles": {
+    "keyword_matched": [
+      {
+        "url": "https://news.walla.co.il/item/3818021",
+        "title": "חשוד בירי בבית שאן הסליק את האקדח - הכלבה המשטרתית איתרה אותו | תיעוד",
+        "source": "walla",
+        "keyword_matched": "ליווי",
+        "snippet": "הפרקליטות צפויה להגיש כתב אישום נגד תושב העיר, בן 39, בחשד שירה בלב שכונת מגורים בחודש בפברואר. כעבור שלושה ימים מהאירוע הגיעו לשכונה שוטרים בליווי הכ..."
+      }
+    ],
+    "classified_relevant": [],
+    "classified_not_relevant": [
+      {
+        "url": "https://news.walla.co.il/item/3818021",
+        "title": "חשוד בירי בבית שאן הסליק את האקדח - הכלבה המשטרתית איתרה אותו | תיעוד",
+        "source": "walla",
+        "keyword_matched": "ליווי",
+        "rejection_reason": "False positive - 'ליווי' means 'accompanied by' (police with dog), not escort services"
+      }
+    ]
+  },
+  "issues": [
+    {
+      "severity": "high",
+      "source": "mako",
+      "issue": "Blocked by Radware bot protection",
+      "suggested_fix": "Need browser-like headers, cookies, or headless browser"
+    },
+    {
+      "severity": "medium",
+      "source": "ynet",
+      "issue": "RSS feed only has recent articles, cannot find historical content",
+      "suggested_fix": "Add Ynet scraper for search/archive access"
+    },
+    {
+      "severity": "low",
+      "source": "maariv",
+      "issue": "No keyword matches in today's law section",
+      "suggested_fix": "Normal - not every day has relevant articles"
+    }
+  ]
+}

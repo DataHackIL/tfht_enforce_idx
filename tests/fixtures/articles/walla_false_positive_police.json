@@ -1,0 +1,14 @@
+{
+  "url": "https://news.walla.co.il/item/3818021",
+  "title": "חשוד בירי בבית שאן הסליק את האקדח - הכלבה המשטרתית איתרה אותו | תיעוד",
+  "snippet": "הפרקליטות צפויה להגיש כתב אישום נגד תושב העיר, בן 39, בחשד שירה בלב שכונת מגורים בחודש בפברואר. כעבור שלושה ימים מהאירוע הגיעו לשכונה שוטרים בליווי הכ...",
+  "date": "2026-02-19",
+  "source_name": "walla",
+  "keyword_matched": "ליווי",
+  "note": "False positive - 'ליווי' here means 'accompanied by' (police with dog), not escort services",
+  "expected_classification": {
+    "relevant": false,
+    "category": null,
+    "sub_category": null
+  }
+}
