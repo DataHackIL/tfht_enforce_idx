@@ -231,7 +231,7 @@ class MaarivScraper(Source):
         return RawArticle(
             url=HttpUrl(url),
             title=title,
-            snippet=snippet[:500],
+            snippet=snippet[:300],
             date=date,
             source_name=self._name,
         )

@@ -139,7 +139,7 @@ class RSSSource(Source):
         return RawArticle(
             url=url,
             title=title,
-            snippet=snippet[:500] if snippet else "",
+            snippet=snippet[:300] if snippet else "",
             date=date,
             source_name=self._name,
         )
