@@ -195,3 +195,11 @@ pytest -q -k dedup
 | Lint | `ruff check .` |
 | Format | `ruff format .` |
 | Type check | `mypy src/` |
+
+---
+
+## Local Agent Overrides (Optional, Untracked)
+
+- If `LOCAL_AGENTS.md` exists at repo root, treat it as additive local instructions.
+- `LOCAL_AGENTS.md` must remain untracked.
+- On conflicts, repository policy and security constraints take precedence.
