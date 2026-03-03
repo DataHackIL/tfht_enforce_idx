@@ -147,8 +147,8 @@ class TestDeduplicateArticles:
 
     def test_deduplicate_similar_articles(self) -> None:
         """Test deduplicating similar articles."""
-        from denbust.dedup.similarity import Deduplicator
         from denbust.data_models import ClassificationResult, ClassifiedArticle
+        from denbust.dedup.similarity import Deduplicator
 
         articles = [
             ClassifiedArticle(

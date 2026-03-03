@@ -5,6 +5,7 @@ repos:
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: trailing-whitespace
+        exclude: ^tests/fixtures/html/
       - id: check-yaml
 
   - repo: https://github.com/astral-sh/ruff-pre-commit

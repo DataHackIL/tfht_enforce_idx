@@ -2,10 +2,8 @@
 
 from datetime import UTC, datetime
 
-from pydantic import HttpUrl
-
 import pytest
-from pydantic import ValidationError
+from pydantic import HttpUrl, ValidationError
 
 from denbust.data_models import (
     Category,

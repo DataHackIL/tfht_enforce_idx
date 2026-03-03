@@ -7,8 +7,8 @@ from pathlib import Path
 
 from denbust.classifier.relevance import Classifier, create_classifier
 from denbust.config import Config, SourceType, load_config
-from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
+from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.output.formatter import print_items
 from denbust.sources.base import Source
 from denbust.sources.maariv import create_maariv_source
