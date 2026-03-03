@@ -4,6 +4,7 @@ repos:
     hooks:
       - id: check-merge-conflict
       - id: end-of-file-fixer
+        exclude: ^tests/fixtures/html/
       - id: trailing-whitespace
         exclude: ^tests/fixtures/html/
       - id: check-yaml
