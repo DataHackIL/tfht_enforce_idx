@@ -1,87 +1,205 @@
-# AGENTS.md - tfht_enforce_idx (denbust)
+# CLAUDE.md
 
-This file defines contributor and coding-agent rules for this repository.
+> **SYNC NOTE:** This file mirrors AGENTS.md. When updating either file, update both to keep them in sync.
 
-## Scope and intent
+---
 
-- Keep changes focused, minimal, and test-backed.
-- Preserve current behavior unless the issue explicitly allows changes.
-- Prefer deterministic, explicit behavior over hidden heuristics.
+## Project Overview
 
-## Project basics
+**denbust** (מדד האכיפה) is a Python tool for monitoring enforcement of anti-brothel laws in Israel.
 
-- Package: `denbust`
-- Purpose: monitor Israeli enforcement reporting for anti-brothel and trafficking laws.
-- Current scope: Phase 1 news monitoring pipeline.
-- Runtime: CLI (`denbust scan`) and scheduled runs.
-- Primary source path: `src/denbust/`.
+### Project Phases
 
-## Repository layout
+**Phase 1 (Current)**: News monitoring
+- 4 sources: 2 via RSS (Ynet, Walla) + 2 via scraping (Mako, Maariv)
+- Scan last X days (configurable)
+- Find reports about brothel raids, prostitution arrests, pimping cases, trafficking
+- Deduplicate same story across multiple sources
+- Output unified items via CLI or Telegram
+
+**Phase 2 (Future)**: Court records
+- Scrape Israeli Courts website for relevant proceedings
+- Correlate news stories with court cases
+- Track closure orders and reopenings
+
+**Phase 3 (Future)**: Analytics
+- Historical enforcement database
+- Regional enforcement gap analysis
+- Web dashboard with statistics
+
+---
+
+## What We Monitor (Phase 1)
+
+### Primary Topics
+- Brothel raids and closures
+- Prostitution-related arrests
+- Pimp (סרסור) arrests and sentencing
+- Human trafficking cases
+- Administrative closure orders
+
+### Secondary Topics
+- Massage parlor / spa busts (fronts)
+- Online platform takedowns
+- Police operations targeting prostitution
+- Court sentences in related cases
+- Trafficking victim rescues
+
+---
+
+## Technical Architecture (Phase 1)
 
 ```
-tfht_enforce_idx/
+┌─────────────────┐     ┌─────────────────┐
+│   RSS Sources   │     │    Scrapers     │
+│  (Ynet, Walla)  │     │ (Mako, Maariv)  │
+└────────┬────────┘     └────────┬────────┘
+         │ feedparser            │ beautifulsoup
+         │ + keyword filter      │ + date filter
+         └──────────┬────────────┘
+                    ▼
+         LLM Classifier (relevance + category)
+                    │
+                    ▼
+         Deduplicator (cross-source grouping)
+                    │
+                    ▼
+         Output (CLI / Telegram)
+```
+
+- **Primary Language:** Python 3.11+
+- **Runtime**: CLI (`denbust scan`), cron for scheduling
+- **No secrets in repo:** all credentials via env vars
+
+---
+
+## Repository Structure
+
+```
+denbust/
 ├── src/denbust/
-│   ├── cli.py
-│   ├── config.py
-│   ├── pipeline.py
-│   ├── data_models.py
-│   ├── sources/            # RSS + scraper sources
-│   ├── classifier/         # Relevance/category classification
-│   ├── dedup/              # Cross-source deduplication
-│   ├── output/             # CLI/Telegram formatting and output
-│   └── store/              # Seen-URL persistence
+│   ├── __init__.py
+│   ├── cli.py              # CLI entry point
+│   ├── config.py           # Configuration + validation
+│   ├── models.py           # RawArticle, UnifiedItem
+│   ├── pipeline.py         # Orchestration
+│   ├── sources/
+│   │   ├── base.py         # Source protocol
+│   │   ├── rss.py          # RSS fetcher (Ynet, Walla)
+│   │   ├── mako.py         # Mako scraper
+│   │   └── maariv.py       # Maariv scraper
+│   ├── classifier/
+│   │   └── relevance.py    # LLM classification
+│   ├── dedup/
+│   │   └── similarity.py   # Cross-source deduplication
+│   ├── output/
+│   │   ├── formatter.py    # Unified output format
+│   │   └── telegram.py     # Telegram notifier
+│   └── store/
+│       └── seen.py         # Track seen URLs
 ├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/
-├── agents/                 # Scan config files
-├── docs/
+│   └── fixtures/           # Sample RSS XML + HTML
+├── data/                   # seen.json persistence
+├── agents/                 # Config files
 └── pyproject.toml
 ```
 
-## Core quality requirements
+---
 
-- Use Python 3.11+ and full type annotations for new/edited code.
-- Run formatting/lint/type checks before commit:
-  - `ruff format .`
-  - `ruff check .`
-  - `mypy src/`
-- Run relevant tests for touched code (at minimum):
-  - `pytest -q`
-  - `pytest -q -k dedup` when dedup logic changes
+## Development Guidelines
 
-## Domain and legal constraints
+### 1) Code Style & Quality
+- Python 3.11+ preferred
+- Full type annotations
+- Lint/format: ruff
+- Type check: mypy
+- Tests: pytest
 
-- Use only public, freely accessible sources.
-- Prefer RSS over scraping where possible.
-- Respect robots.txt and use polite request pacing.
-- Never fabricate article details in summaries/classification.
-- Never store secrets or non-public PII.
+```bash
+ruff format .
+ruff check .
+mypy src/
+pytest
+```
 
-## Pipeline expectations
+### 2) Legal & Ethical Constraints
+- Only use public, freely accessible sources
+- Prefer RSS feeds over HTML scraping
+- Respect robots.txt
+- Never store PII beyond what's in public news articles
+- Comply with Israeli privacy law
 
-- Filter articles by configured date window and relevant topics.
-- Classifier output must include relevance, category, and confidence.
-- Dedup should unify cross-source duplicates while preserving all source links.
-- CLI output is default; Telegram is optional and must never leak bot tokens.
+### 3) Data Fetching
+- **RSS sources**: Fetch feed, filter by keywords + date
+- **Scrapers**: Search/browse relevant sections, parse HTML
+- Filter results by date (last X days configurable)
+- Add 1-2 second delays between requests
+- Clear User-Agent identification
+- Handle timeouts and errors gracefully
+- Save fixture files for tests (RSS XML, HTML)
 
-## PR expectations
+### 4) Classification
+- LLM classifies: relevance, category, sub_category, confidence
+- Categories: brothel, prostitution, pimping, trafficking, enforcement
+- Sub-categories: closure/opening, arrest/sentence, rescue, etc.
+- Keep prompts short, Hebrew-aware
+- Log decisions for review
+- Never fabricate article details
 
-- Keep one logical change per PR.
-- Add/update regression tests when fixing bugs.
-- Summarize behavior changes and include test evidence.
-- Keep CI green before merge.
+### 5) Deduplication
+- Same story from multiple sources = single unified item
+- Group by title similarity
+- Keep all source links in output
+- Pick best snippet for summary
 
-## Local overrides (optional, untracked)
+### 6) Notifications
+- CLI: default output, print to stdout
+- Telegram: optional, for alerts
+- Never log secrets (bot tokens)
+
+---
+
+## Secrets & Configuration
+
+Never commit secrets. Use env vars:
+
+```
+ANTHROPIC_API_KEY
+DENBUST_TELEGRAM_BOT_TOKEN   # Optional
+DENBUST_TELEGRAM_CHAT_ID     # Optional
+```
+
+---
+
+## Testing
+
+- Unit tests: keyword matching, dedup logic, LLM response parsing
+- Integration tests: pipeline with mocked HTTP
+- No live network calls in tests
+
+```bash
+pytest -q
+pytest -q -k dedup
+```
+
+---
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Install (dev) | `pip install -e ".[dev]"` |
+| Run scan | `denbust scan` |
+| Run with config | `denbust scan --config agents/news.yaml` |
+| Tests | `pytest` |
+| Lint | `ruff check .` |
+| Format | `ruff format .` |
+| Type check | `mypy src/` |
+
+---
+
+## Local Agent Overrides (Optional, Untracked)
 
 - If `LOCAL_AGENTS.md` exists at repo root, treat it as additive local instructions.
 - `LOCAL_AGENTS.md` must remain untracked.
-- On conflicts, repository and security policy take precedence.
-
-## Security and secrets
-
-- Never commit credentials or machine-local secrets.
-- Use environment variables for runtime secrets:
-  - `ANTHROPIC_API_KEY`
-  - `DENBUST_TELEGRAM_BOT_TOKEN`
-  - `DENBUST_TELEGRAM_CHAT_ID`
+- On conflicts, repository policy and security constraints take precedence.
