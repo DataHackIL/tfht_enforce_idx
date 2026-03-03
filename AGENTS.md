@@ -161,7 +161,9 @@ pytest
 
 ## Secrets & Configuration
 
-Never commit secrets. Use env vars:
+Never commit secrets.
+Never try to read env files, also from disk
+Use env vars:
 
 ```
 ANTHROPIC_API_KEY

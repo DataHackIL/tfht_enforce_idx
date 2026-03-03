@@ -24,6 +24,11 @@ sources:
     type: scraper
     enabled: true
 
+  # Ynet scraper - searches archive for better historical coverage
+  - name: ynet-scraper
+    type: scraper
+    enabled: true
+
 keywords:
   - זנות
   - בית בושת

@@ -7,13 +7,15 @@ from pathlib import Path
 
 from denbust.classifier.relevance import Classifier, create_classifier
 from denbust.config import Config, SourceType, load_config
-from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
+from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.output.formatter import print_items
 from denbust.sources.base import Source
 from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
 from denbust.sources.rss import RSSSource
+from denbust.sources.ynet import create_ynet_source
+from denbust.store.run_logger import RunLogger, create_run_logger
 from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,8 @@ def create_sources(config: Config) -> list[Source]:
                 sources.append(create_mako_source())
             elif source_cfg.name == "maariv":
                 sources.append(create_maariv_source())
+            elif source_cfg.name == "ynet-scraper":
+                sources.append(create_ynet_source())
             else:
                 logger.warning(f"Unknown scraper source: {source_cfg.name}")
 
@@ -110,22 +114,55 @@ def filter_seen(articles: list[RawArticle], seen_store: SeenStore) -> list[RawAr
 
 
 async def classify_articles(
-    articles: list[RawArticle], classifier: Classifier
+    articles: list[RawArticle],
+    classifier: Classifier,
+    seen_store: SeenStore,
+    run_logger: RunLogger | None = None,
 ) -> list[ClassifiedArticle]:
-    """Classify all articles for relevance.
+    """Classify all articles for relevance, using cache where available.
 
     Args:
         articles: List of raw articles.
         classifier: Classifier instance.
+        seen_store: Seen store with classification cache.
+        run_logger: Optional run logger for tracking.
 
     Returns:
         List of classified articles (only relevant ones).
     """
-    classified = await classifier.classify_batch(articles)
+    classified: list[ClassifiedArticle] = []
+    cached_count = 0
+    llm_count = 0
+
+    for article in articles:
+        url = str(article.url)
+
+        # Check cache first
+        cached_result = seen_store.get_classification(url)
+        if cached_result is not None:
+            cached_count += 1
+            classification = cached_result
+        else:
+            # Call LLM for classification
+            llm_count += 1
+            classification = await classifier.classify(article)
+            # Cache the result
+            seen_store.set_classification(url, classification)
+
+        classified_article = ClassifiedArticle(article=article, classification=classification)
+        classified.append(classified_article)
+
+        # Log classification
+        if run_logger:
+            run_logger.log_classification(classified_article)
+
+    logger.info(
+        f"Classified {len(articles)} articles ({cached_count} cached, {llm_count} LLM calls)"
+    )
 
     # Filter to only relevant articles
     relevant = [c for c in classified if c.classification.relevant]
-    logger.info(f"Classified {len(articles)} articles, {len(relevant)} are relevant")
+    logger.info(f"{len(relevant)} articles are relevant")
 
     return relevant
 
@@ -193,6 +230,14 @@ async def run_pipeline_async(config: Config, days: int) -> list[UnifiedItem]:
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
     seen_store = create_seen_store(config.store.path)
 
+    # Create run logger
+    run_logger = create_run_logger()
+    run_logger.set_config(
+        days=days,
+        keywords=config.keywords,
+        sources=[s.name for s in sources],
+    )
+
     # 1. Fetch from all sources
     all_articles = await fetch_all_sources(
         sources=sources,
@@ -200,14 +245,20 @@ async def run_pipeline_async(config: Config, days: int) -> list[UnifiedItem]:
         keywords=config.keywords,
     )
 
+    # Log source results and keyword matches
+    for article in all_articles:
+        run_logger.log_keyword_matched(article)
+
     if not all_articles:
         logger.info("No articles found from any source")
+        run_logger.save()
         return []
 
     # 2. Filter out seen URLs
     unseen_articles = filter_seen(all_articles, seen_store)
     if not unseen_articles:
         logger.info("All articles were already seen")
+        run_logger.save()
         return []
 
     # 3. Check article count against max_articles threshold
@@ -218,17 +269,25 @@ async def run_pipeline_async(config: Config, days: int) -> list[UnifiedItem]:
             f"the number of days/sources. Proceeding with classification anyway."
         )
 
-    # 4. Classify articles
-    relevant_articles = await classify_articles(unseen_articles, classifier)
+    # 4. Classify articles (uses cache where available)
+    relevant_articles = await classify_articles(unseen_articles, classifier, seen_store, run_logger)
+
     if not relevant_articles:
         logger.info("No relevant articles found")
+        # Save seen store with new classifications
+        seen_store.save()
+        run_logger.save()
         return []
 
     # 5. Deduplicate
     unified_items = deduplicate_articles(relevant_articles, deduplicator)
 
-    # 6. Mark as seen
+    # 6. Mark as seen and save
     mark_seen(unified_items, seen_store)
+
+    # Save run log
+    log_path = run_logger.save()
+    logger.info(f"Run log saved to {log_path}")
 
     return unified_items
 
