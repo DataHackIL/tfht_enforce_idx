@@ -84,6 +84,9 @@ class TestConfig:
         config = OutputConfig(format=OutputFormat.TELEGRAM)
         assert config.format == OutputFormat.TELEGRAM
 
+        config = OutputConfig(format=OutputFormat.EMAIL)
+        assert config.format == OutputFormat.EMAIL
+
     def test_env_properties(self) -> None:
         """Test environment variable properties."""
         config = Config()
