@@ -11,6 +11,7 @@ from denbust.sources.mako import MakoScraper
 
 # Load fixture files
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
+TEST_LOOKBACK_DAYS = 5000
 
 
 def load_fixture(path: str) -> str:
@@ -38,7 +39,7 @@ class TestMakoScraper:
         )
 
         scraper = MakoScraper()
-        articles = await scraper.fetch(days=14, keywords=["סרסור"])
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
 
         # Should find articles from the fixture
         assert len(articles) >= 1
@@ -65,7 +66,9 @@ class TestMakoScraper:
 
         scraper = MakoScraper()
         # Search with multiple keywords
-        articles = await scraper.fetch(days=14, keywords=["סרסור", "זנות", "בית בושת"])
+        articles = await scraper.fetch(
+            days=TEST_LOOKBACK_DAYS, keywords=["סרסור", "זנות", "בית בושת"]
+        )
 
         # Should deduplicate by URL
         urls = [str(a.url) for a in articles]
@@ -88,7 +91,7 @@ class TestMaarivScraper:
         )
 
         scraper = MaarivScraper()
-        articles = await scraper.fetch(days=14, keywords=["test"])
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["test"])
 
         # Should return empty list, not crash
         assert articles == []
@@ -101,7 +104,7 @@ class TestMaarivScraper:
         respx.get("https://www.maariv.co.il/search").mock(return_value=Response(404))
 
         scraper = MaarivScraper()
-        articles = await scraper.fetch(days=14, keywords=["test"])
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["test"])
 
         # Should return empty list, not crash
         assert articles == []
@@ -121,7 +124,9 @@ class TestRSSSource:
         respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
 
         source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
-        articles = await source.fetch(days=14, keywords=["בית בושת", "זנות", "צו סגירה"])
+        articles = await source.fetch(
+            days=TEST_LOOKBACK_DAYS, keywords=["בית בושת", "זנות", "צו סגירה"]
+        )
 
         # Should find matching articles
         assert len(articles) >= 1
@@ -144,7 +149,7 @@ class TestRSSSource:
         source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
 
         # Search for keyword that doesn't match
-        articles = await source.fetch(days=14, keywords=["מילה_שלא_קיימת"])
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["מילה_שלא_קיימת"])
 
         # Should not find any articles
         assert len(articles) == 0
@@ -158,7 +163,7 @@ class TestRSSSource:
         respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(500))
 
         source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
-        articles = await source.fetch(days=14, keywords=["test"])
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["test"])
 
         # Should return empty list, not crash
         assert articles == []

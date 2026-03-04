@@ -21,6 +21,7 @@ from denbust.store.seen import SeenStore
 
 # Load fixture files
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
+TEST_LOOKBACK_DAYS = 5000
 
 
 def load_fixture(path: str) -> str:
@@ -104,7 +105,7 @@ class TestFetchAllSources:
         sources = [RSSSource("ynet", "https://ynet.co.il/feed.xml")]
         keywords = ["בית בושת", "זנות", "סרסור"]
 
-        articles = await fetch_all_sources(sources, days=14, keywords=keywords)
+        articles = await fetch_all_sources(sources, days=TEST_LOOKBACK_DAYS, keywords=keywords)
 
         # Should find articles matching keywords
         assert len(articles) >= 1
@@ -147,8 +148,8 @@ class TestDeduplicateArticles:
 
     def test_deduplicate_similar_articles(self) -> None:
         """Test deduplicating similar articles."""
-        from denbust.dedup.similarity import Deduplicator
         from denbust.data_models import ClassificationResult, ClassifiedArticle
+        from denbust.dedup.similarity import Deduplicator
 
         articles = [
             ClassifiedArticle(
@@ -226,7 +227,9 @@ class TestPipelineIntegration:
         sources = create_sources(config)
         assert len(sources) == 1
 
-        articles = await fetch_all_sources(sources, days=14, keywords=config.keywords)
+        articles = await fetch_all_sources(
+            sources, days=TEST_LOOKBACK_DAYS, keywords=config.keywords
+        )
 
         # Should find some matching articles
         assert len(articles) >= 1

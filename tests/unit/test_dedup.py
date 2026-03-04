@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 
 from pydantic import HttpUrl
 
-from denbust.dedup.similarity import ArticleGroup, Deduplicator, create_deduplicator
 from denbust.data_models import (
     Category,
     ClassificationResult,
@@ -12,6 +11,7 @@ from denbust.data_models import (
     RawArticle,
     SubCategory,
 )
+from denbust.dedup.similarity import ArticleGroup, Deduplicator, create_deduplicator
 
 
 def make_article(title: str, source: str, url: str = "https://example.com/1") -> ClassifiedArticle:
