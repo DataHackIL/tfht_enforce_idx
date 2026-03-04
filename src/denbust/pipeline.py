@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 
 from denbust.classifier.relevance import Classifier, create_classifier
-from denbust.config import Config, SourceType, load_config
+from denbust.config import Config, OutputFormat, SourceType, load_config
 from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
+from denbust.output.email import send_email_report
 from denbust.output.formatter import print_items
 from denbust.sources.base import Source
 from denbust.sources.maariv import create_maariv_source
@@ -261,4 +262,55 @@ def run_pipeline(config_path: Path, days_override: int | None = None) -> None:
     items = asyncio.run(run_pipeline_async(config, days))
 
     # Output results
+    output_items(items, config)
+
+
+def output_items(items: list[UnifiedItem], config: Config) -> None:
+    """Output unified items to the configured output channel."""
+    if config.output.format == OutputFormat.CLI:
+        print_items(items)
+        return
+
+    if config.output.format == OutputFormat.EMAIL:
+        try:
+            send_output_email(items, config)
+            recipients = ", ".join(config.email_to)
+            print(f"Email report sent to: {recipients}")
+        except Exception as exc:
+            logger.error(f"Failed to send email report: {exc}")
+            print(f"Error sending email report: {exc}")
+            print_items(items)
+        return
+
+    if config.output.format == OutputFormat.TELEGRAM:
+        logger.warning("Telegram output is not implemented yet, falling back to CLI output")
+        print_items(items)
+        return
+
     print_items(items)
+
+
+def send_output_email(items: list[UnifiedItem], config: Config) -> None:
+    """Send unified items as an email report."""
+    smtp_host = config.email_smtp_host
+    sender = config.email_from
+    recipients = config.email_to
+
+    if not smtp_host:
+        raise ValueError("DENBUST_EMAIL_SMTP_HOST is required for email output")
+    if not sender:
+        raise ValueError("DENBUST_EMAIL_FROM is required for email output")
+    if not recipients:
+        raise ValueError("DENBUST_EMAIL_TO is required for email output")
+
+    send_email_report(
+        items=items,
+        smtp_host=smtp_host,
+        smtp_port=config.email_smtp_port,
+        sender=sender,
+        recipients=recipients,
+        subject=config.email_subject,
+        username=config.email_smtp_username,
+        password=config.email_smtp_password,
+        use_tls=config.email_use_tls,
+    )

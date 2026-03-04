@@ -42,6 +42,7 @@ class OutputFormat(StrEnum):
 
     CLI = "cli"
     TELEGRAM = "telegram"
+    EMAIL = "email"
 
 
 class OutputConfig(BaseModel):
@@ -98,6 +99,52 @@ class Config(BaseModel):
     def telegram_chat_id(self) -> str | None:
         """Get Telegram chat ID from environment."""
         return os.environ.get("DENBUST_TELEGRAM_CHAT_ID")
+
+    @property
+    def email_smtp_host(self) -> str | None:
+        """Get SMTP host from environment."""
+        return os.environ.get("DENBUST_EMAIL_SMTP_HOST")
+
+    @property
+    def email_smtp_port(self) -> int:
+        """Get SMTP port from environment."""
+        raw_port = os.environ.get("DENBUST_EMAIL_SMTP_PORT", "587")
+        try:
+            return int(raw_port)
+        except ValueError as exc:
+            raise ValueError("DENBUST_EMAIL_SMTP_PORT must be an integer") from exc
+
+    @property
+    def email_smtp_username(self) -> str | None:
+        """Get SMTP username from environment."""
+        return os.environ.get("DENBUST_EMAIL_SMTP_USERNAME")
+
+    @property
+    def email_smtp_password(self) -> str | None:
+        """Get SMTP password from environment."""
+        return os.environ.get("DENBUST_EMAIL_SMTP_PASSWORD")
+
+    @property
+    def email_from(self) -> str | None:
+        """Get sender email address from environment."""
+        return os.environ.get("DENBUST_EMAIL_FROM")
+
+    @property
+    def email_to(self) -> list[str]:
+        """Get recipient email addresses from environment."""
+        raw_recipients = os.environ.get("DENBUST_EMAIL_TO", "")
+        return [email.strip() for email in raw_recipients.split(",") if email.strip()]
+
+    @property
+    def email_use_tls(self) -> bool:
+        """Get SMTP STARTTLS flag from environment."""
+        raw_value = os.environ.get("DENBUST_EMAIL_USE_TLS", "true").strip().lower()
+        return raw_value not in {"0", "false", "no", "off"}
+
+    @property
+    def email_subject(self) -> str | None:
+        """Get optional email subject from environment."""
+        return os.environ.get("DENBUST_EMAIL_SUBJECT")
 
 
 def load_config(path: Path) -> Config:

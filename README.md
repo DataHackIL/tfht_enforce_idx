@@ -10,6 +10,7 @@ Monitor Israeli news for anti-brothel law enforcement activity: raids, arrests, 
 - Finds reports about brothel raids, prostitution arrests, pimping, trafficking
 - Deduplicates same story across multiple sources
 - Outputs unified items with all source links
+- Supports output via CLI or SMTP email reports
 
 ## Quick Start
 
@@ -17,6 +18,9 @@ Monitor Israeli news for anti-brothel law enforcement activity: raids, arrests, 
 pip install -e ".[dev]"
 denbust scan --config agents/news.yaml
 ```
+
+To send reports by email, set `output.format: email` in your config and provide SMTP env vars
+from `.env.example`.
 
 ## Example Output
 
