@@ -1,7 +1,7 @@
 """SMTP email output for unified items."""
 
 import smtplib
-from datetime import datetime
+from datetime import UTC, datetime
 from email.message import EmailMessage
 
 from denbust.data_models import UnifiedItem
@@ -10,7 +10,7 @@ from denbust.output.formatter import format_items
 
 def default_subject(item_count: int) -> str:
     """Build a default email subject."""
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = datetime.now(UTC).strftime("%Y-%m-%d")
     return f"denbust report {date_str} ({item_count} items)"
 
 
