@@ -151,13 +151,13 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Download unit coverage data
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: coverage-unit-data
           path: coverage-data/unit
 
       - name: Download integration coverage data
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: coverage-integration-data
           path: coverage-data/integration
