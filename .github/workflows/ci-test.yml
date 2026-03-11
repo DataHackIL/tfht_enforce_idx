@@ -38,7 +38,7 @@ jobs:
       - name: Run smoke tests
         run: pytest -q --maxfail=1 tests/smoke
 
-  pre-commit:
+  pre-commit-ci:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -46,19 +46,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
-          cache: "pip"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
-      - name: Run pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
+      - name: Run pre-commit.ci lite
+        uses: pre-commit-ci/lite-action@v1.1.0
 
   lint:
     runs-on: ubuntu-latest
@@ -153,7 +142,7 @@ jobs:
           path: coverage-integration.dat
 
   coverage:
-    needs: [pre-commit, lint, unit-tests, integration-tests]
+    needs: [pre-commit-ci, lint, unit-tests, integration-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
