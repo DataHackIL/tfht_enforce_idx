@@ -97,6 +97,7 @@ jobs:
         with:
           name: coverage-unit-data
           path: .coverage.unit
+          include-hidden-files: true
 
       - name: Upload raw coverage data for PR agent context
         if: always()
