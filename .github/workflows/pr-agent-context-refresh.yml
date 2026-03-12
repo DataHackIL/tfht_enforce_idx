@@ -1,0 +1,54 @@
+name: pr-agent-context-refresh
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  check_run:
+    types: [completed]
+  # Some external providers still surface late results as commit statuses rather than check runs.
+  status:
+
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event.pull_request.number ||
+      github.event.pull_request_review.pull_request.number ||
+      github.event.pull_request_review_comment.pull_request.number ||
+      github.event.check_run.head_sha ||
+      github.event.sha ||
+      github.sha
+    }}
+  cancel-in-progress: true
+
+jobs:
+  pr-agent-context-refresh:
+    name: PR agent context refresh
+    # check_run/status can fire outside PRs; refresh mode resolves the PR from the event payload/head SHA.
+    if: >-
+      github.event_name == 'pull_request_review' ||
+      github.event_name == 'pull_request_review_comment' ||
+      (github.event_name == 'check_run' &&
+       github.event.action == 'completed' &&
+       toJson(github.event.check_run.pull_requests) != '[]') ||
+      (github.event_name == 'status' && github.event.state != 'pending')
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: shaypal5/pr-agent-context/.github/workflows/pr-agent-context.yml@v4
+    with:
+      tool_ref: v4
+      execution_mode: refresh
+      publish_mode: update_latest_managed
+      wait_for_reviews_to_settle: true
+      target_patch_coverage: "100"
+      include_review_comments: true
+      include_failing_checks: true
+      include_patch_coverage: true
+      coverage_artifact_prefix: pr-agent-context-coverage
+      enable_cross_run_coverage_lookup: true
+      coverage_source_workflows: ci-test
+      prompt_template_file: .github/pr-agent-context-template.md
+      debug_artifacts: true
