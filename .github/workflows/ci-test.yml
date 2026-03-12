@@ -72,7 +72,7 @@ jobs:
     timeout-minutes: 20
 
     env:
-      COVERAGE_FILE: coverage-unit.dat
+      COVERAGE_FILE: .coverage.unit
 
     steps:
       - name: Checkout
@@ -96,7 +96,17 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: coverage-unit-data
-          path: coverage-unit.dat
+          path: .coverage.unit
+          include-hidden-files: true
+
+      - name: Upload raw coverage data for PR agent context
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr-agent-context-coverage-unit-tests
+          path: .coverage.unit
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   integration-tests:
     needs: [smoke-tests]
@@ -104,7 +114,7 @@ jobs:
     timeout-minutes: 25
 
     env:
-      COVERAGE_FILE: coverage-integration.dat
+      COVERAGE_FILE: .coverage.integration
 
     steps:
       - name: Checkout
@@ -128,7 +138,17 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: coverage-integration-data
-          path: coverage-integration.dat
+          path: .coverage.integration
+          include-hidden-files: true
+
+      - name: Upload raw coverage data for PR agent context
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr-agent-context-coverage-integration-tests
+          path: .coverage.integration
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   coverage:
     needs: [lint, unit-tests, integration-tests]
@@ -164,7 +184,7 @@ jobs:
 
       - name: Combine and report coverage
         run: |
-          python -m coverage combine coverage-data/unit/coverage-unit.dat coverage-data/integration/coverage-integration.dat
+          python -m coverage combine coverage-data/unit/.coverage.unit coverage-data/integration/.coverage.integration
           python -m coverage report --show-missing
           python -m coverage xml -o coverage.xml
 
@@ -173,3 +193,28 @@ jobs:
         with:
           name: coverage-xml
           path: coverage.xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true # Optional: enable verbose logging
+
+  pr-agent-context:
+    name: PR agent context
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs: [lint, unit-tests, integration-tests, coverage]
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: shaypal5/pr-agent-context/.github/workflows/pr-agent-context.yml@v4
+    with:
+      tool_ref: v4
+      target_patch_coverage: "100"
+      include_review_comments: true
+      include_failing_checks: true
+      include_patch_coverage: true
+      coverage_artifact_prefix: pr-agent-context-coverage
+      prompt_template_file: .github/pr-agent-context-template.md
+      debug_artifacts: true
