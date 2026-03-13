@@ -2,35 +2,35 @@ codecov:
   notify:
     require_ci_to_pass: yes
 
+# For more configuration details:
+# https://docs.codecov.io/docs/codecov-yaml
+
+# Check if this file is valid by running in bash:
+# curl -X POST --data-binary @.codecov.yml https://codecov.io/validate
+
+# Coverage configuration
+# ----------------------
 coverage:
-  range: 80..100
-  precision: 2
-  round: down
-  ignore:
-    - "tests/**"
-    - "**/_version.py"
-    - "**/__init__.py"
+  status:
+    patch: false
 
-status:
-  project: # overall coverage
-    default:
-      informational: true
-      target: auto # fail on any drop
-      threshold: 0% # or 0.5 % if you want slack
-  patch: # changed lines
-    default:
-      informational: true
-      target: 97%
+  range: 70..98     # First number represents red, and second represents green
+                    # (default is 70..100)
+  round: down       # up, down, or nearest
+  precision: 2      # Number of decimal places, between 0 and 5
 
-comment:
-  layout: header, changes, diff
-  behavior: default
-  require_changes: false
-  branches: null
-  flags: null
-  paths: null
-
+# Ignoring Paths
+# --------------
+# which folders/files to ignore
 ignore:
-  - "tests"
-  - "**/_version.py"
-  - "**/__init__.py"
+  - */tests/.*
+  - */_version.py
+  - setup.py
+  - versioneer.py
+
+# Pull request comments:
+# ----------------------
+# Diff is the Coverage Diff of the pull request.
+# Files are the files impacted by the pull request
+comment:
+  layout: diff, files  # accepted in any order: reach, diff, flags, and/or files
