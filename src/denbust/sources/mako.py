@@ -20,6 +20,8 @@ USER_AGENT = "denbust/0.1.0 (news monitoring bot; +https://github.com/denbust)"
 
 # Base URLs
 MAKO_BASE_URL = "https://www.mako.co.il"
+MAKO_SEARCH_URL = f"{MAKO_BASE_URL}/Search"
+MAKO_SEARCH_CHANNEL_ID = "3d385dd2dd5d4110VgnVCM100000290c10acRCRD"
 # Men section often has crime/enforcement news
 MAKO_MEN_NEWS_URL = "https://www.mako.co.il/men-men_news"
 
@@ -97,12 +99,15 @@ class MakoScraper(Source):
         if not self._client:
             return []
 
-        # Mako uses an AJAX search endpoint
-        search_url = f"{MAKO_BASE_URL}/AjaxPage"
+        # Mako now exposes search results on a regular search page instead of the old AJAX endpoint.
+        search_url = MAKO_SEARCH_URL
         params = {
-            "jspName": "searchResults.jsp",
-            "q": keyword,
-            "pageNumber": "1",
+            "searchstring_input": keyword,
+            "page": "1",
+            "tab": "search_results_tab_general",
+            "channelId": MAKO_SEARCH_CHANNEL_ID,
+            "vgnextoid": MAKO_SEARCH_CHANNEL_ID,
+            "formType": "regular",
         }
 
         try:
@@ -150,8 +155,9 @@ class MakoScraper(Source):
         soup = BeautifulSoup(html, "lxml")
         articles: list[RawArticle] = []
 
-        # Search results are typically in items with specific classes
-        for item in soup.select(".search-result-item, .article-item, li.item"):
+        # The current Mako search page renders articles in li.articleins cards.
+        # Keep older selectors as fallbacks because the site markup changes often.
+        for item in soup.select("li.articleins, .search-result-item, .article-item, li.item"):
             article = self._parse_article_item(item, cutoff)
             if article:
                 articles.append(article)
@@ -209,7 +215,7 @@ class MakoScraper(Source):
             return None
 
         # Get title
-        title_elem = item.select_one("h1, h2, h3, .title, .headline")
+        title_elem = item.select_one("h1, h2, h3, h4, h5, .title, .headline")
         title = title_elem.get_text(strip=True) if title_elem else link.get_text(strip=True)
 
         if not title:
@@ -283,6 +289,15 @@ class MakoScraper(Source):
             try:
                 day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
                 return datetime(year, month, day, tzinfo=UTC)
+            except ValueError:
+                pass
+
+        # Match patterns like "06/03/26" that appear in current Mako search metadata.
+        match = re.search(r"(\d{1,2})[./](\d{1,2})[./](\d{2})(?!\d)", text)
+        if match:
+            try:
+                day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+                return datetime(2000 + year, month, day, tzinfo=UTC)
             except ValueError:
                 pass
 

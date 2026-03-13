@@ -29,7 +29,7 @@ class TestMakoScraper:
         html_content = load_fixture("html/mako_search.html")
 
         # Mock the search endpoint
-        respx.get("https://www.mako.co.il/AjaxPage").mock(
+        respx.get("https://www.mako.co.il/Search").mock(
             return_value=Response(200, text=html_content)
         )
 
@@ -43,6 +43,7 @@ class TestMakoScraper:
 
         # Should find articles from the fixture
         assert len(articles) >= 1
+        assert any(article.date.year == 2026 for article in articles)
 
         # Check article properties
         for article in articles:
@@ -57,7 +58,7 @@ class TestMakoScraper:
         html_content = load_fixture("html/mako_search.html")
 
         # Return same content for multiple searches
-        respx.get("https://www.mako.co.il/AjaxPage").mock(
+        respx.get("https://www.mako.co.il/Search").mock(
             return_value=Response(200, text=html_content)
         )
         respx.get("https://www.mako.co.il/men-men_news").mock(
