@@ -75,6 +75,12 @@ class TestMakoScraper:
         urls = [str(a.url) for a in articles]
         assert len(urls) == len(set(urls))
 
+    def test_parse_hebrew_date_rejects_invalid_two_digit_date(self) -> None:
+        """Test that invalid dd/mm/yy metadata does not parse as a real date."""
+        scraper = MakoScraper()
+
+        assert scraper._parse_hebrew_date("פלילים+ | 32/13/26 | זמן קריאה: 2.3 דק'") is None
+
 
 class TestMaarivScraper:
     """Integration tests for Maariv scraper."""
