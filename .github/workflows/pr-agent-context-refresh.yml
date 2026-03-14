@@ -37,9 +37,9 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
-    uses: shaypal5/pr-agent-context/.github/workflows/pr-agent-context.yml@v4.0.4
+    uses: shaypal5/pr-agent-context/.github/workflows/pr-agent-context.yml@v4
     with:
-      tool_ref: v4.0.4
+      tool_ref: v4
       execution_mode: refresh
       publish_mode: update_latest_managed
       publish_all_clear_comments_in_refresh: false
