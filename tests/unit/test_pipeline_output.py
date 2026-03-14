@@ -81,9 +81,7 @@ class TestOutputItems:
 
     @patch("denbust.pipeline.send_output_email")
     @patch("denbust.pipeline.print_items")
-    def test_cli_and_email_output_path(
-        self, mock_print: MagicMock, mock_send: MagicMock
-    ) -> None:
+    def test_cli_and_email_output_path(self, mock_print: MagicMock, mock_send: MagicMock) -> None:
         """Should emit both CLI and email output when both are configured."""
         config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.EMAIL]))
 
