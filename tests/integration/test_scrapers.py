@@ -249,11 +249,15 @@ class TestMakoScraper:
             async def wait_for_url(self, url: Any, wait_until: str, timeout: int) -> None:
                 del url
                 self.waited_for_url = True
-                self.url = "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA"
+                self.url = (
+                    "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA"
+                )
                 assert wait_until == "domcontentloaded"
                 assert timeout > 0
 
-            async def wait_for_function(self, expression: str, arg: list[str], timeout: int) -> None:
+            async def wait_for_function(
+                self, expression: str, arg: list[str], timeout: int
+            ) -> None:
                 self.wait_for_function_args = (expression, arg, timeout)
 
             async def wait_for_timeout(self, timeout_ms: int) -> None:
@@ -289,7 +293,9 @@ class TestMakoScraper:
             async def goto(self, url: str, wait_until: str, timeout: int) -> None:
                 del url, wait_until, timeout
 
-            async def wait_for_function(self, expression: str, arg: list[str], timeout: int) -> None:
+            async def wait_for_function(
+                self, expression: str, arg: list[str], timeout: int
+            ) -> None:
                 del expression, arg, timeout
                 raise PlaywrightTimeoutError("timed out")
 
@@ -366,7 +372,15 @@ class TestMakoScraper:
         await scraper._close_browser_session(session)
 
         assert session.page is not None
-        assert events == ["enter", "launch", "new_context", "new_page", "context_close", "browser_close", "exit"]
+        assert events == [
+            "enter",
+            "launch",
+            "new_context",
+            "new_page",
+            "context_close",
+            "browser_close",
+            "exit",
+        ]
 
     @pytest.mark.asyncio
     async def test_open_browser_session_handles_launch_failure(

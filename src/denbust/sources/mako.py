@@ -122,7 +122,9 @@ class MakoScraper(Source):
                     session, MAKO_MEN_NEWS_URL, cutoff, keywords
                 )
             except Exception as e:
-                logger.exception("Mako browser section scrape failed for %s: %s", MAKO_MEN_NEWS_URL, e)
+                logger.exception(
+                    "Mako browser section scrape failed for %s: %s", MAKO_MEN_NEWS_URL, e
+                )
             else:
                 articles.extend(section_articles)
         finally:
