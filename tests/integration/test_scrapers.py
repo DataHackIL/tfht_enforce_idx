@@ -1,5 +1,6 @@
 """Integration tests for scrapers with fixture HTML."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,7 @@ class TestMakoScraper:
 
         # Should find articles from the fixture
         assert len(articles) >= 1
-        assert any(article.date.year == 2026 for article in articles)
+        assert any(article.date == datetime(2026, 3, 6, tzinfo=UTC) for article in articles)
 
         # Check article properties
         for article in articles:
@@ -74,6 +75,27 @@ class TestMakoScraper:
         # Should deduplicate by URL
         urls = [str(a.url) for a in articles]
         assert len(urls) == len(set(urls))
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retries_search_without_channel_ids(self) -> None:
+        """Test fallback search without opaque channel ids when initial results are empty."""
+        html_content = load_fixture("html/mako_search.html")
+
+        respx.get("https://www.mako.co.il/Search").mock(
+            side_effect=[
+                Response(200, text="<html><body></body></html>"),
+                Response(200, text=html_content),
+            ]
+        )
+        respx.get("https://www.mako.co.il/men-men_news").mock(
+            return_value=Response(200, text="<html></html>")
+        )
+
+        scraper = MakoScraper()
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
+
+        assert len(articles) >= 1
 
     def test_parse_hebrew_date_rejects_invalid_two_digit_date(self) -> None:
         """Test that invalid dd/mm/yy metadata does not parse as a real date."""

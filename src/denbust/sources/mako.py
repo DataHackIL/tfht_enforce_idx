@@ -21,6 +21,8 @@ USER_AGENT = "denbust/0.1.0 (news monitoring bot; +https://github.com/denbust)"
 # Base URLs
 MAKO_BASE_URL = "https://www.mako.co.il"
 MAKO_SEARCH_URL = f"{MAKO_BASE_URL}/Search"
+# Captured from Mako's live search URL on 2026-03-13. If it stops working,
+# retry the same search without these opaque ids before changing the scraper.
 MAKO_SEARCH_CHANNEL_ID = "3d385dd2dd5d4110VgnVCM100000290c10acRCRD"
 # Men section often has crime/enforcement news
 MAKO_MEN_NEWS_URL = "https://www.mako.co.il/men-men_news"
@@ -113,7 +115,23 @@ class MakoScraper(Source):
         try:
             response = await self._client.get(search_url, params=params)
             response.raise_for_status()
-            return self._parse_search_results(response.text, cutoff)
+            articles = self._parse_search_results(response.text, cutoff)
+            if articles:
+                return articles
+
+            logger.info(
+                "Mako search with channel params returned no articles for '%s'; retrying without ids",
+                keyword,
+            )
+            fallback_params = {
+                "searchstring_input": keyword,
+                "page": "1",
+                "tab": "search_results_tab_general",
+                "formType": "regular",
+            }
+            fallback_response = await self._client.get(search_url, params=fallback_params)
+            fallback_response.raise_for_status()
+            return self._parse_search_results(fallback_response.text, cutoff)
         except httpx.HTTPError as e:
             logger.error(f"Error searching Mako for '{keyword}': {e}")
             return []
