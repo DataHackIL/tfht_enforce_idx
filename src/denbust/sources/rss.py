@@ -1,6 +1,4 @@
 """RSS feed fetcher for news sources."""
-
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -227,16 +225,3 @@ def create_walla_source() -> RSSSource:
         source_name="walla",
         feed_url="https://rss.walla.co.il/feed/1",
     )
-
-
-async def test_rss_source() -> None:
-    """Test RSS source fetching."""
-    source = create_ynet_source()
-    articles = await source.fetch(days=7, keywords=["ישראל", "חדשות"])
-    print(f"Found {len(articles)} articles from {source.name}")
-    for article in articles[:5]:
-        print(f"  - {article.title[:60]}...")
-
-
-if __name__ == "__main__":
-    asyncio.run(test_rss_source())

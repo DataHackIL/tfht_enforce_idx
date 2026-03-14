@@ -6,10 +6,12 @@ from typing import Any
 
 import pytest
 import respx
+from bs4 import BeautifulSoup
 from httpx import Response
 
 from denbust.sources.maariv import MaarivScraper
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper
+from denbust.sources.rss import RSSSource
 
 # Load fixture files
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
@@ -555,6 +557,87 @@ class TestMakoScraper:
 class TestMaarivScraper:
     """Integration tests for Maariv scraper."""
 
+    def test_parse_search_results_extracts_article(self) -> None:
+        """Search result parsing should recover article title, snippet, and URL."""
+        scraper = MaarivScraper()
+        html = """
+        <div class="search-result">
+          <a href="/news/law/article-1270778">לכתבה</a>
+          <h2>חשד לבית בושת בבני ברק</h2>
+          <p>המשטרה עצרה חשודים.</p>
+          <time datetime="2026-03-01T10:00:00+00:00"></time>
+        </div>
+        """
+
+        articles = scraper._parse_search_results(
+            html,
+            cutoff=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+
+        assert len(articles) == 1
+        assert articles[0].title == "חשד לבית בושת בבני ברק"
+        assert "maariv.co.il/news/law/article-1270778" in str(articles[0].url)
+
+    def test_parse_section_page_filters_non_matching_keywords(self) -> None:
+        """Section parsing should apply keyword filtering after article extraction."""
+        scraper = MaarivScraper()
+        html = """
+        <article class="category-article">
+          <a class="category-article-link" href="/news/law/article-1270778"></a>
+          <h2>כתבה כללית</h2>
+          <p>ללא מילות מפתח רלוונטיות.</p>
+          <time datetime="2026-03-01T10:00:00+00:00"></time>
+        </article>
+        """
+
+        articles = scraper._parse_section_page(
+            html,
+            cutoff=datetime(2026, 2, 1, tzinfo=UTC),
+            keywords=["בית בושת"],
+        )
+
+        assert articles == []
+
+    def test_parse_article_item_rejects_non_article_links(self) -> None:
+        """Generic links that are not article URLs should be ignored."""
+        scraper = MaarivScraper()
+        soup = BeautifulSoup(
+            """
+            <article class="category-article">
+              <a class="category-article-link" href="/tags/זנות">תגית</a>
+              <h2>זנות</h2>
+            </article>
+            """,
+            "lxml",
+        )
+
+        article = scraper._parse_article_item(
+            soup.select_one("article"),
+            cutoff=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+
+        assert article is None
+
+    def test_parse_date_prefers_datetime_attribute(self) -> None:
+        """ISO datetime attributes should be parsed directly."""
+        scraper = MaarivScraper()
+        soup = BeautifulSoup(
+            '<article><time datetime="2026-03-01T10:00:00Z">ignored</time></article>',
+            "lxml",
+        )
+
+        parsed = scraper._parse_date(soup.select_one("article"))
+
+        assert parsed == datetime(2026, 3, 1, 10, 0, tzinfo=UTC)
+
+    def test_parse_hebrew_date_supports_dotted_format(self) -> None:
+        """Maariv date parser should accept dd.mm.yyyy strings."""
+        scraper = MaarivScraper()
+
+        parsed = scraper._parse_hebrew_date("פורסם בתאריך 15.02.2026")
+
+        assert parsed == datetime(2026, 2, 15, tzinfo=UTC)
+
     @respx.mock
     @pytest.mark.asyncio
     async def test_handles_empty_results(self) -> None:
@@ -586,6 +669,83 @@ class TestMaarivScraper:
 
 class TestRSSSource:
     """Integration tests for RSS source."""
+
+    def test_parse_entry_requires_link_and_title(self) -> None:
+        """Entries missing a link or title should be discarded."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        cutoff = datetime(2026, 1, 1, tzinfo=UTC)
+
+        assert source._parse_entry({"title": "Title"}, cutoff, ["title"]) is None
+        assert source._parse_entry({"link": "https://example.com/1"}, cutoff, ["title"]) is None
+
+    def test_parse_entry_filters_old_entries(self) -> None:
+        """Entries older than the cutoff should be ignored."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        cutoff = datetime(2026, 2, 15, tzinfo=UTC)
+        entry = {
+            "link": "https://example.com/1",
+            "title": "בית בושת",
+            "summary": "summary",
+            "published": "Fri, 14 Feb 2026 10:00:00 GMT",
+        }
+
+        assert source._parse_entry(entry, cutoff, ["בית בושת"]) is None
+
+    def test_parse_date_uses_struct_time_fallback(self) -> None:
+        """Parsed struct_time fields should be converted when strings are absent."""
+        from time import mktime
+
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        parsed_time = (2026, 2, 15, 10, 0, 0, 0, 46, 0)
+        entry = {"published_parsed": parsed_time}
+
+        parsed = source._parse_date(entry)
+
+        expected = datetime.fromtimestamp(mktime(parsed_time), tz=UTC)
+        assert parsed == expected
+
+    def test_parse_date_invalid_values_return_none(self) -> None:
+        """Invalid date inputs should not raise."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+
+        parsed = source._parse_date({"published": "not a date", "published_parsed": "bad"})
+
+        assert parsed is None
+
+    def test_clean_html_decodes_entities(self) -> None:
+        """HTML cleaning should strip tags, decode entities, and normalize spaces."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+
+        cleaned = source._clean_html("<p>שלום&nbsp;&amp;&nbsp;<b>עולם</b></p>")
+
+        assert cleaned == "שלום & עולם"
+
+    def test_parse_entry_without_date_defaults_to_now(self) -> None:
+        """Entries without dates should be treated as recent."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        cutoff = datetime.now(UTC) - timedelta(days=1)
+        entry = {
+            "link": "https://example.com/1",
+            "title": "בית בושת",
+            "summary": "summary",
+        }
+
+        article = source._parse_entry(entry, cutoff, ["בית בושת"])
+
+        assert article is not None
+        assert article.title == "בית בושת"
+
+    def test_factory_helpers_create_expected_sources(self) -> None:
+        """Factory helpers should return the canonical source names and URLs."""
+        from denbust.sources.rss import create_walla_source, create_ynet_source
+
+        ynet = create_ynet_source()
+        walla = create_walla_source()
+
+        assert ynet.name == "ynet"
+        assert walla.name == "walla"
+        assert "ynet.co.il" in ynet._feed_url
+        assert "walla.co.il" in walla._feed_url
 
     @respx.mock
     @pytest.mark.asyncio

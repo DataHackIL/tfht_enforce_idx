@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
 from pydantic import HttpUrl
 
 from denbust.config import Config, OutputConfig, OutputFormat
@@ -63,6 +64,41 @@ class TestSendOutputEmail:
             password="pass",
             use_tls=False,
         )
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_send_output_email_requires_smtp_host(self) -> None:
+        """SMTP host is required for email output."""
+        config = Config(output=OutputConfig(format=OutputFormat.EMAIL))
+
+        with pytest.raises(ValueError, match="DENBUST_EMAIL_SMTP_HOST is required"):
+            send_output_email([build_item()], config)
+
+    @patch.dict(
+        "os.environ",
+        {"DENBUST_EMAIL_SMTP_HOST": "smtp.example.com"},
+        clear=True,
+    )
+    def test_send_output_email_requires_sender(self) -> None:
+        """Sender is required for email output."""
+        config = Config(output=OutputConfig(format=OutputFormat.EMAIL))
+
+        with pytest.raises(ValueError, match="DENBUST_EMAIL_FROM is required"):
+            send_output_email([build_item()], config)
+
+    @patch.dict(
+        "os.environ",
+        {
+            "DENBUST_EMAIL_SMTP_HOST": "smtp.example.com",
+            "DENBUST_EMAIL_FROM": "alerts@example.com",
+        },
+        clear=True,
+    )
+    def test_send_output_email_requires_recipients(self) -> None:
+        """At least one recipient is required for email output."""
+        config = Config(output=OutputConfig(format=OutputFormat.EMAIL))
+
+        with pytest.raises(ValueError, match="DENBUST_EMAIL_TO is required"):
+            send_output_email([build_item()], config)
 
 
 class TestOutputItems:

@@ -1,5 +1,4 @@
 """Unit tests for config module."""
-
 from pathlib import Path
 
 import pytest
@@ -105,6 +104,25 @@ class TestConfig:
         # These should return None if env vars not set
         # (We don't set them in tests)
         assert config.anthropic_api_key is None or isinstance(config.anthropic_api_key, str)
+
+    def test_env_properties_read_telegram_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Telegram settings should be read from the environment."""
+        monkeypatch.setenv("DENBUST_TELEGRAM_BOT_TOKEN", "bot-token")
+        monkeypatch.setenv("DENBUST_TELEGRAM_CHAT_ID", "chat-id")
+
+        config = Config()
+
+        assert config.telegram_bot_token == "bot-token"
+        assert config.telegram_chat_id == "chat-id"
+
+    def test_email_port_validation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Invalid SMTP ports should raise a clear error."""
+        monkeypatch.setenv("DENBUST_EMAIL_SMTP_PORT", "not-an-int")
+
+        config = Config()
+
+        with pytest.raises(ValueError, match="DENBUST_EMAIL_SMTP_PORT must be an integer"):
+            _ = config.email_smtp_port
 
 
 class TestLoadConfig:
