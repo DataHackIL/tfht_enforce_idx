@@ -1,11 +1,13 @@
 """Mako news scraper."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict
 from urllib.parse import urlencode, urljoin
 
 from bs4 import BeautifulSoup, Tag
@@ -13,6 +15,9 @@ from pydantic import HttpUrl
 
 from denbust.data_models import RawArticle
 from denbust.sources.base import Source
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +44,14 @@ SECTION_READY_SELECTORS = [
     ".article",
     ".item",
 ]
-VIEWPORT = {"width": 1440, "height": 2000}
+class _ViewportSize(TypedDict):
+    """Viewport dimensions for Playwright browser contexts."""
+
+    width: int
+    height: int
+
+
+VIEWPORT: _ViewportSize = {"width": 1440, "height": 2000}
 NAVIGATION_TIMEOUT_MS = 30_000
 READY_TIMEOUT_MS = 15_000
 CHALLENGE_TIMEOUT_MS = 10_000
@@ -53,7 +65,7 @@ class _BrowserSession:
     manager: Any
     browser: Any
     context: Any
-    page: Any
+    page: Page
 
 
 class MakoScraper(Source):
@@ -209,7 +221,7 @@ class MakoScraper(Source):
 
     async def _fetch_rendered_html(
         self,
-        page: Any,
+        page: Page,
         url: str,
         ready_selectors: list[str],
         description: str,
@@ -230,7 +242,7 @@ class MakoScraper(Source):
             await self._wait_for_challenge_resolution(page, description)
             await page.wait_for_function(
                 "selectors => selectors.some(selector => document.querySelector(selector))",
-                ready_selectors,
+                arg=ready_selectors,
                 timeout=READY_TIMEOUT_MS,
             )
             await page.wait_for_timeout(POST_READY_DELAY_MS)
@@ -242,7 +254,7 @@ class MakoScraper(Source):
 
         return await page.content()
 
-    async def _wait_for_challenge_resolution(self, page: Any, description: str) -> None:
+    async def _wait_for_challenge_resolution(self, page: Page, description: str) -> None:
         """Wait for Radware/Perfdrive challenge redirects to return to Mako."""
         if "validate.perfdrive.com" not in page.url:
             return
