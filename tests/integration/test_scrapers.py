@@ -1074,7 +1074,9 @@ class TestIceScraper:
         keyword = "בית בושת"
         page_three_url = scraper._build_search_url(keyword, page_number=3)
 
-        respx.get(scraper._build_search_url(keyword)).mock(return_value=Response(200, text=page_one))
+        respx.get(scraper._build_search_url(keyword)).mock(
+            return_value=Response(200, text=page_one)
+        )
         respx.get(scraper._build_search_url(keyword, page_number=2)).mock(
             return_value=Response(200, text=page_two)
         )
@@ -1095,7 +1097,9 @@ class TestIceScraper:
         keyword = "בית בושת"
         page_one = load_fixture("html/ice_search.html")
 
-        respx.get(scraper._build_search_url(keyword)).mock(return_value=Response(200, text=page_one))
+        respx.get(scraper._build_search_url(keyword)).mock(
+            return_value=Response(200, text=page_one)
+        )
         respx.get(scraper._build_search_url(keyword, page_number=2)).mock(
             return_value=Response(500, text="boom")
         )

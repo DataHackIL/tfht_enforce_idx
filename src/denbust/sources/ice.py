@@ -224,7 +224,7 @@ class IceScraper(Source):
         ):
             return True
 
-        return soup.find("a", href=re.compile(fr"/page-{page_number + 1}$")) is not None
+        return soup.find("a", href=re.compile(rf"/page-{page_number + 1}$")) is not None
 
     def _is_article_url(self, href: str) -> bool:
         """Check whether an ICE href points to an internal article."""
