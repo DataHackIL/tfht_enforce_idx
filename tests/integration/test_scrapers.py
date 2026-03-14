@@ -93,7 +93,9 @@ class TestMakoScraper:
         assert len(urls) == len(set(urls))
 
     @pytest.mark.asyncio
-    async def test_retries_search_without_channel_ids(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_retries_search_without_channel_ids(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test fallback search without opaque channel ids when initial results are empty."""
         html_content = load_fixture("html/mako_search.html")
         scraper = MakoScraper()

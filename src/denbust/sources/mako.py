@@ -93,7 +93,9 @@ class MakoScraper(Source):
                 articles.extend(found)
 
             await asyncio.sleep(1.5)
-            section_articles = await self._scrape_section(session, MAKO_MEN_NEWS_URL, cutoff, keywords)
+            section_articles = await self._scrape_section(
+                session, MAKO_MEN_NEWS_URL, cutoff, keywords
+            )
             articles.extend(section_articles)
         except Exception as e:
             logger.error("Mako browser fetch failed: %s", e)
@@ -245,7 +247,9 @@ class MakoScraper(Source):
         if "validate.perfdrive.com" not in page.url:
             return
 
-        logger.info("Mako browser challenge detected for %s; waiting for redirect back", description)
+        logger.info(
+            "Mako browser challenge detected for %s; waiting for redirect back", description
+        )
 
         await page.wait_for_url(
             re.compile(r"^https://www\.mako\.co\.il/"),
