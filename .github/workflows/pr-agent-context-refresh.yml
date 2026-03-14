@@ -48,7 +48,9 @@ jobs:
       include_review_comments: true
       include_failing_checks: true
       include_patch_coverage: true
-      coverage_artifact_prefix: pr-agent-context-coverage
+      patch_coverage_source_mode: coverage_xml_artifact
+      coverage_report_artifact_name: coverage-xml
+      coverage_report_filename: coverage.xml
       enable_cross_run_coverage_lookup: true
       coverage_source_workflows: ci-test
       prompt_template_file: .github/pr-agent-context-template.md
