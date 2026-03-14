@@ -98,6 +98,9 @@ denbust/
 │   │   └── formatter.py       # Console/report formatting
 │   └── store/
 │       └── seen.py            # Seen URL persistence
+├── data/
+│   ├── runs/                  # Per-run outputs (gitignored)
+│   └── seen.json              # Default seen-URL store (gitignored)
 ├── agents/                    # Checked-in example configs
 ├── tests/
 │   ├── fixtures/              # RSS XML + HTML fixtures
