@@ -603,7 +603,9 @@ class TestMakoScraper:
         assert scraper._parse_hebrew_date("99/13/2026") is None
         assert scraper._parse_hebrew_date("2026-13-99") is None
 
-    def test_parse_article_item_fallbacks_and_filters(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_parse_article_item_fallbacks_and_filters(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Article parsing should cover fallback selectors and filtering branches."""
         scraper = self._create_scraper()
         cutoff = datetime(2026, 3, 10, tzinfo=UTC)
@@ -638,9 +640,7 @@ class TestMakoScraper:
         no_title = parse("<li><a href='/men-men_news/Article-123.htm'></a></li>")
         assert no_title is None
 
-        monkeypatch.setattr(
-            scraper, "_parse_date", lambda _item: datetime(2026, 3, 12, tzinfo=UTC)
-        )
+        monkeypatch.setattr(scraper, "_parse_date", lambda _item: datetime(2026, 3, 12, tzinfo=UTC))
         old_item = BeautifulSoup(
             "<li><a href='/men-men_news/Article-123.htm'>לינק</a><h5>כותרת</h5></li>",
             "lxml",
@@ -736,9 +736,7 @@ class TestMakoScraper:
         session = SimpleNamespace(page=object())
         calls: list[tuple[object, str, list[str], str]] = []
 
-        async def fake_fetch(
-            page: object, url: str, selectors: list[str], description: str
-        ) -> str:
+        async def fake_fetch(page: object, url: str, selectors: list[str], description: str) -> str:
             calls.append((page, url, selectors, description))
             return "<html></html>"
 
@@ -953,7 +951,9 @@ class TestMaarivScraper:
         assert scraper.name == "maariv"
 
     @pytest.mark.asyncio
-    async def test_fetch_deduplicates_section_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fetch_deduplicates_section_results(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Fetch should deduplicate repeated section articles by canonical URL."""
         scraper = MaarivScraper()
         article = RawArticle(
@@ -1199,9 +1199,9 @@ class TestMaarivScraper:
         with_text = BeautifulSoup("<article>פורסם בתאריך 2026-02-15</article>", "lxml").select_one(
             "article"
         )
-        invalid_text = BeautifulSoup("<article>פורסם בתאריך 2026-13-99</article>", "lxml").select_one(
-            "article"
-        )
+        invalid_text = BeautifulSoup(
+            "<article>פורסם בתאריך 2026-13-99</article>", "lxml"
+        ).select_one("article")
 
         assert with_text is not None
         assert invalid_text is not None
