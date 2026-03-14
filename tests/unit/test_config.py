@@ -28,6 +28,7 @@ class TestConfig:
         assert len(config.keywords) > 0
         assert config.dedup.similarity_threshold == 0.7
         assert config.output.format == OutputFormat.CLI
+        assert config.output.formats == [OutputFormat.CLI]
 
     def test_custom_days(self) -> None:
         """Test custom days configuration."""
@@ -80,12 +81,22 @@ class TestConfig:
         """Test output configuration."""
         config = OutputConfig(format=OutputFormat.CLI)
         assert config.format == OutputFormat.CLI
+        assert config.formats == [OutputFormat.CLI]
 
         config = OutputConfig(format=OutputFormat.TELEGRAM)
         assert config.format == OutputFormat.TELEGRAM
+        assert config.formats == [OutputFormat.TELEGRAM]
 
         config = OutputConfig(format=OutputFormat.EMAIL)
         assert config.format == OutputFormat.EMAIL
+        assert config.formats == [OutputFormat.EMAIL]
+
+    def test_output_config_multiple_formats(self) -> None:
+        """Test multiple output formats are supported and de-duplicated."""
+        config = OutputConfig(formats=[OutputFormat.CLI, OutputFormat.EMAIL, OutputFormat.CLI])
+
+        assert config.format == OutputFormat.CLI
+        assert config.formats == [OutputFormat.CLI, OutputFormat.EMAIL]
 
     def test_env_properties(self) -> None:
         """Test environment variable properties."""
@@ -138,3 +149,20 @@ sources:
 
         assert config.name == "enforcement-news"
         assert config.days == 3
+
+    def test_load_config_multiple_output_formats(self, tmp_path: Path) -> None:
+        """Test loading multiple output formats from YAML."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            """
+output:
+  formats:
+    - cli
+    - email
+"""
+        )
+
+        config = load_config(config_path)
+
+        assert config.output.format == OutputFormat.CLI
+        assert config.output.formats == [OutputFormat.CLI, OutputFormat.EMAIL]
