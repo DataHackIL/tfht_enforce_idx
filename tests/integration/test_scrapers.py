@@ -1,6 +1,6 @@
 """Integration tests for scrapers with fixture HTML."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -23,79 +23,124 @@ def load_fixture(path: str) -> str:
 class TestMakoScraper:
     """Integration tests for Mako scraper."""
 
-    @respx.mock
     @pytest.mark.asyncio
     async def test_parse_search_results(self) -> None:
         """Test parsing Mako search results HTML."""
         html_content = load_fixture("html/mako_search.html")
-
-        # Mock the search endpoint
-        respx.get("https://www.mako.co.il/Search").mock(
-            return_value=Response(200, text=html_content)
-        )
-
-        # Mock the section page (returns empty)
-        respx.get("https://www.mako.co.il/men-men_news").mock(
-            return_value=Response(200, text="<html></html>")
-        )
-
         scraper = MakoScraper()
-        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
 
-        # Should find articles from the fixture
+        articles = scraper._parse_search_results(
+            html_content,
+            datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS),
+        )
+
         assert len(articles) >= 1
         assert any(article.date == datetime(2026, 3, 6, tzinfo=UTC) for article in articles)
 
-        # Check article properties
         for article in articles:
             assert article.source_name == "mako"
             assert "mako.co.il" in str(article.url)
             assert article.title
 
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_deduplicates_results(self) -> None:
-        """Test that scraper deduplicates articles."""
+    def test_parse_section_page_filters_keywords(self) -> None:
+        """Test section-page parsing keeps only keyword-matching articles."""
         html_content = load_fixture("html/mako_search.html")
-
-        # Return same content for multiple searches
-        respx.get("https://www.mako.co.il/Search").mock(
-            return_value=Response(200, text=html_content)
-        )
-        respx.get("https://www.mako.co.il/men-men_news").mock(
-            return_value=Response(200, text=html_content)
-        )
-
         scraper = MakoScraper()
-        # Search with multiple keywords
-        articles = await scraper.fetch(
-            days=TEST_LOOKBACK_DAYS, keywords=["סרסור", "זנות", "בית בושת"]
+
+        articles = scraper._parse_section_page(
+            html_content,
+            datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS),
+            ["סרסור"],
         )
 
-        # Should deduplicate by URL
-        urls = [str(a.url) for a in articles]
+        assert len(articles) == 1
+        assert articles[0].title == "נעצרו 3 חשודים בסרסור בדרום הארץ"
+
+    @pytest.mark.asyncio
+    async def test_fetch_aggregates_browser_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that fetch aggregates browser-rendered search and section HTML."""
+        html_content = load_fixture("html/mako_search.html")
+        scraper = MakoScraper()
+
+        async def open_browser_session() -> object:
+            return object()
+
+        async def close_browser_session(session: object) -> None:
+            del session
+
+        async def fetch_search_html(
+            session: object, keyword: str, *, include_channel_ids: bool
+        ) -> str:
+            del session, keyword, include_channel_ids
+            return html_content
+
+        async def fetch_section_html(session: object, url: str) -> str:
+            del session, url
+            return html_content
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser_session)
+        monkeypatch.setattr(scraper, "_close_browser_session", close_browser_session)
+        monkeypatch.setattr(scraper, "_fetch_search_html", fetch_search_html)
+        monkeypatch.setattr(scraper, "_fetch_section_html", fetch_section_html)
+
+        articles = await scraper.fetch(
+            days=TEST_LOOKBACK_DAYS,
+            keywords=["סרסור", "זנות", "בית בושת"],
+        )
+
+        urls = [str(article.url) for article in articles]
+        assert len(articles) == 2
         assert len(urls) == len(set(urls))
 
-    @respx.mock
     @pytest.mark.asyncio
-    async def test_retries_search_without_channel_ids(self) -> None:
+    async def test_retries_search_without_channel_ids(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test fallback search without opaque channel ids when initial results are empty."""
         html_content = load_fixture("html/mako_search.html")
-
-        respx.get("https://www.mako.co.il/Search").mock(
-            side_effect=[
-                Response(200, text="<html><body></body></html>"),
-                Response(200, text=html_content),
-            ]
-        )
-        respx.get("https://www.mako.co.il/men-men_news").mock(
-            return_value=Response(200, text="<html></html>")
-        )
-
         scraper = MakoScraper()
+        calls: list[tuple[str, bool]] = []
+
+        async def open_browser_session() -> object:
+            return object()
+
+        async def close_browser_session(session: object) -> None:
+            del session
+
+        async def fetch_search_html(
+            session: object, keyword: str, *, include_channel_ids: bool
+        ) -> str:
+            del session
+            calls.append((keyword, include_channel_ids))
+            if include_channel_ids:
+                return "<html><body></body></html>"
+            return html_content
+
+        async def fetch_section_html(session: object, url: str) -> str:
+            del session, url
+            return "<html></html>"
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser_session)
+        monkeypatch.setattr(scraper, "_close_browser_session", close_browser_session)
+        monkeypatch.setattr(scraper, "_fetch_search_html", fetch_search_html)
+        monkeypatch.setattr(scraper, "_fetch_section_html", fetch_section_html)
+
         articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
 
         assert len(articles) >= 1
+        assert calls == [("סרסור", True), ("סרסור", False)]
+
+    @pytest.mark.asyncio
+    async def test_handles_browser_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test browser failures are handled gracefully."""
+        scraper = MakoScraper()
+
+        async def open_browser_session() -> object:
+            raise RuntimeError("Chromium could not be launched")
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser_session)
+
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
+
+        assert articles == []
 
     def test_parse_hebrew_date_rejects_invalid_two_digit_date(self) -> None:
         """Test that invalid dd/mm/yy metadata does not parse as a real date."""
@@ -111,7 +156,6 @@ class TestMaarivScraper:
     @pytest.mark.asyncio
     async def test_handles_empty_results(self) -> None:
         """Test handling empty search results."""
-        # Return empty HTML
         respx.get("https://www.maariv.co.il/news/law").mock(
             return_value=Response(200, text="<html><body></body></html>")
         )
@@ -122,7 +166,6 @@ class TestMaarivScraper:
         scraper = MaarivScraper()
         articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["test"])
 
-        # Should return empty list, not crash
         assert articles == []
 
     @respx.mock
@@ -135,7 +178,6 @@ class TestMaarivScraper:
         scraper = MaarivScraper()
         articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["test"])
 
-        # Should return empty list, not crash
         assert articles == []
 
 
@@ -157,10 +199,8 @@ class TestRSSSource:
             days=TEST_LOOKBACK_DAYS, keywords=["בית בושת", "זנות", "צו סגירה"]
         )
 
-        # Should find matching articles
         assert len(articles) >= 1
 
-        # Check article properties
         for article in articles:
             assert article.source_name == "ynet"
             assert "ynet.co.il" in str(article.url)
@@ -176,11 +216,8 @@ class TestRSSSource:
         respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
 
         source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
-
-        # Search for keyword that doesn't match
         articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["מילה_שלא_קיימת"])
 
-        # Should not find any articles
         assert len(articles) == 0
 
     @respx.mock
@@ -194,5 +231,4 @@ class TestRSSSource:
         source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
         articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["test"])
 
-        # Should return empty list, not crash
         assert articles == []

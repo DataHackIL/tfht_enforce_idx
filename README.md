@@ -16,11 +16,15 @@ Monitor Israeli news for anti-brothel law enforcement activity: raids, arrests, 
 
 ```bash
 pip install -e ".[dev]"
+python -m playwright install chromium
 denbust scan --config agents/news.yaml
 ```
 
 To send reports by email, set `output.format: email` in your config and provide SMTP env vars
 from `.env.example`.
+
+Mako scraping uses a headless Chromium browser. After installing dependencies on a new machine, run
+`python -m playwright install chromium` once before your first live scan.
 
 ## Example Output
 
