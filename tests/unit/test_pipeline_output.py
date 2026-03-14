@@ -115,3 +115,29 @@ class TestOutputItems:
 
         mock_send.assert_called_once()
         mock_print.assert_called_once()
+
+    @patch("denbust.pipeline.logger")
+    @patch("denbust.pipeline.print_items")
+    def test_telegram_output_falls_back_to_cli(
+        self, mock_print: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Should fall back to CLI output when Telegram is requested alone."""
+        config = Config(output=OutputConfig(format=OutputFormat.TELEGRAM))
+
+        output_items([build_item()], config)
+
+        mock_logger.warning.assert_called_once()
+        mock_print.assert_called_once()
+
+    @patch("denbust.pipeline.logger")
+    @patch("denbust.pipeline.print_items")
+    def test_cli_and_telegram_output_does_not_double_print(
+        self, mock_print: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Should not print twice when CLI is already configured with Telegram."""
+        config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.TELEGRAM]))
+
+        output_items([build_item()], config)
+
+        mock_logger.warning.assert_called_once()
+        mock_print.assert_called_once()

@@ -292,9 +292,6 @@ def output_items(items: list[UnifiedItem], config: Config) -> None:
                 print_items(items)
             continue
 
-    if not config.output.formats:
-        print_items(items)
-
 
 def send_output_email(items: list[UnifiedItem], config: Config) -> None:
     """Send unified items as an email report."""
