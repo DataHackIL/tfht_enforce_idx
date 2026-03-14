@@ -58,6 +58,7 @@ NAVIGATION_TIMEOUT_MS = 30_000
 READY_TIMEOUT_MS = 15_000
 CHALLENGE_TIMEOUT_MS = 10_000
 POST_READY_DELAY_MS = 750
+DEFAULT_RATE_LIMIT_DELAY_SECONDS = 1.5
 
 
 @dataclass
@@ -73,9 +74,10 @@ class _BrowserSession:
 class MakoScraper(Source):
     """Scraper for Mako news website."""
 
-    def __init__(self) -> None:
+    def __init__(self, rate_limit_delay_seconds: float = DEFAULT_RATE_LIMIT_DELAY_SECONDS) -> None:
         """Initialize Mako scraper."""
         self._name = "mako"
+        self._rate_limit_delay_seconds = rate_limit_delay_seconds
 
     @property
     def name(self) -> str:
@@ -96,27 +98,38 @@ class MakoScraper(Source):
 
         articles: list[RawArticle] = []
         cutoff = datetime.now(UTC) - timedelta(days=days)
-        session: _BrowserSession | None = None
 
         try:
             session = await self._open_browser_session()
+        except Exception as e:
+            logger.exception("Mako browser session could not be opened: %s", e)
+            return []
 
+        try:
             for keyword in keywords:
-                await asyncio.sleep(1.5)  # Rate limiting
-                found = await self._search_keyword(session, keyword, cutoff)
+                await self._rate_limit()
+                try:
+                    found = await self._search_keyword(session, keyword, cutoff)
+                except Exception as e:
+                    logger.exception("Mako browser search failed for keyword '%s': %s", keyword, e)
+                    continue
+
                 articles.extend(found)
 
-            await asyncio.sleep(1.5)
-            section_articles = await self._scrape_section(
-                session, MAKO_MEN_NEWS_URL, cutoff, keywords
-            )
-            articles.extend(section_articles)
-        except Exception as e:
-            logger.error("Mako browser fetch failed: %s", e)
-            return []
+            await self._rate_limit()
+            try:
+                section_articles = await self._scrape_section(
+                    session, MAKO_MEN_NEWS_URL, cutoff, keywords
+                )
+            except Exception as e:
+                logger.exception("Mako browser section scrape failed for %s: %s", MAKO_MEN_NEWS_URL, e)
+            else:
+                articles.extend(section_articles)
         finally:
-            if session is not None:
+            try:
                 await self._close_browser_session(session)
+            except Exception as e:
+                logger.exception("Mako browser session cleanup failed: %s", e)
 
         seen_urls: set[str] = set()
         unique: list[RawArticle] = []
@@ -128,6 +141,13 @@ class MakoScraper(Source):
 
         logger.info("Found %s unique articles from Mako", len(unique))
         return unique
+
+    async def _rate_limit(self) -> None:
+        """Sleep between Mako requests unless disabled for tests."""
+        if self._rate_limit_delay_seconds <= 0:
+            return
+
+        await asyncio.sleep(self._rate_limit_delay_seconds)
 
     async def _open_browser_session(self) -> _BrowserSession:
         """Open a Playwright browser session for Mako scraping."""

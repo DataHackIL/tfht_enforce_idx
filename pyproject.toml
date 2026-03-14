@@ -101,7 +101,6 @@ source = ["src/denbust"]
 source = [
     "src/denbust",
     "/home/runner/work/tfht_enforce_idx/tfht_enforce_idx/src/denbust",
-    "/Users/shaypalachy/clones/tfht_enforce_idx/src/denbust",
 ]
 
 [tool.coverage.report]

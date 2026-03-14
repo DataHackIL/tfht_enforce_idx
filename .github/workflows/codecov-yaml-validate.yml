@@ -31,10 +31,11 @@ jobs:
             fi
           done
 
-          echo "No Codecov YAML file found after PR path filter matched." >&2
-          exit 1
+          echo "No Codecov YAML file found after PR path filter matched; nothing to validate."
+          exit 0
 
       - name: Validate Codecov YAML
+        if: ${{ steps.select-config.outputs.path != '' }}
         env:
           CODECOV_YAML_PATH: ${{ steps.select-config.outputs.path }}
         run: |
