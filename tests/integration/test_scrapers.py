@@ -62,6 +62,19 @@ class TestMakoScraper:
         assert len(articles) == 1
         assert articles[0].title == "נעצרו 3 חשודים בסרסור בדרום הארץ"
 
+    def test_normalize_article_url_strips_search_tracking_params(self) -> None:
+        """Test search tracking params are removed from Mako article URLs."""
+        scraper = self._create_scraper()
+
+        normalized = scraper._normalize_article_url(
+            "https://www.mako.co.il/men-men_news/Article-af751f94b02ec91027.htm?Partner=searchResults"
+        )
+
+        assert (
+            normalized
+            == "https://www.mako.co.il/men-men_news/Article-af751f94b02ec91027.htm"
+        )
+
     @pytest.mark.asyncio
     async def test_fetch_aggregates_browser_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that fetch aggregates browser-rendered search and section HTML."""

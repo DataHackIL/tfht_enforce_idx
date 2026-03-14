@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypedDict
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 from pydantic import HttpUrl
@@ -523,7 +523,7 @@ class MakoScraper(Source):
         href = link.get("href", "")
         if not href:
             return None
-        url = urljoin(MAKO_BASE_URL, str(href))
+        url = self._normalize_article_url(urljoin(MAKO_BASE_URL, str(href)))
 
         if "mako.co.il" not in url or "Article" not in url:
             return None
@@ -549,6 +549,19 @@ class MakoScraper(Source):
             snippet=snippet[:300],
             date=date,
             source_name=self._name,
+        )
+
+    def _normalize_article_url(self, url: str) -> str:
+        """Normalize Mako article URLs so search and section links deduplicate."""
+        split_url = urlsplit(url)
+        return urlunsplit(
+            (
+                split_url.scheme,
+                split_url.netloc,
+                split_url.path,
+                "",
+                "",
+            )
         )
 
     def _parse_date(self, item: Tag) -> datetime | None:
