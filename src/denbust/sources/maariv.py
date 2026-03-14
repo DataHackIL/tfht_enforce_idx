@@ -312,17 +312,3 @@ class MaarivScraper(Source):
 def create_maariv_source() -> MaarivScraper:
     """Create Maariv scraper source."""
     return MaarivScraper()
-
-
-async def test_maariv_scraper() -> None:
-    """Test Maariv scraper."""
-    scraper = create_maariv_source()
-    articles = await scraper.fetch(days=7, keywords=["זנות", "בית בושת"])
-    print(f"Found {len(articles)} articles from Maariv")
-    for article in articles[:5]:
-        print(f"  - {article.title[:60]}...")
-        print(f"    URL: {article.url}")
-
-
-if __name__ == "__main__":
-    asyncio.run(test_maariv_scraper())

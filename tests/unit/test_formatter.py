@@ -1,6 +1,7 @@
 """Unit tests for output formatter module."""
 
 from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 from pydantic import HttpUrl
 
@@ -10,6 +11,7 @@ from denbust.output.formatter import (
     format_items,
     format_unified_item,
     get_icon,
+    print_items,
 )
 
 
@@ -182,3 +184,38 @@ class TestFormatItems:
         assert "Article Two" in output
         # Check separator between items
         assert "─" in output
+
+
+class TestPrintItems:
+    """Tests for print_items."""
+
+    @patch("builtins.print")
+    def test_print_items_includes_total_for_non_empty(self, mock_print: MagicMock) -> None:
+        """Non-empty item lists should print the formatted output and total."""
+        items = [
+            UnifiedItem(
+                headline="Article One",
+                summary="Summary one",
+                sources=[
+                    SourceReference(
+                        source_name="a",
+                        url=HttpUrl("https://a.com/1"),
+                    ),
+                ],
+                date=datetime(2026, 2, 15, tzinfo=UTC),
+                category=Category.BROTHEL,
+                sub_category=SubCategory.CLOSURE,
+            )
+        ]
+
+        print_items(items)
+
+        assert mock_print.call_count == 3
+        assert "סה״כ: 1 כתבות" in mock_print.call_args_list[-1].args[0]
+
+    @patch("builtins.print")
+    def test_print_items_skips_total_for_empty(self, mock_print: MagicMock) -> None:
+        """Empty item lists should only print the empty-state message."""
+        print_items([])
+
+        mock_print.assert_called_once_with("לא נמצאו כתבות רלוונטיות.")

@@ -84,6 +84,14 @@ class TestArticleGroup:
 
         assert group.primary == long
 
+    def test_group_category_and_subcategory_follow_primary(self) -> None:
+        """Category helpers should proxy through the primary article."""
+        article = make_article("Test Article", "ynet")
+        group = ArticleGroup(article)
+
+        assert group.category == Category.BROTHEL
+        assert group.sub_category == SubCategory.CLOSURE
+
 
 class TestDeduplicator:
     """Tests for Deduplicator class."""

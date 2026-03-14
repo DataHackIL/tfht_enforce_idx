@@ -1,7 +1,16 @@
 """Unit tests for classifier module."""
 
-from denbust.classifier.relevance import Classifier
-from denbust.data_models import Category, SubCategory
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
+
+import anthropic
+import httpx
+import pytest
+from anthropic.types import TextBlock
+from pydantic import HttpUrl
+
+from denbust.classifier.relevance import Classifier, create_classifier
+from denbust.data_models import Category, RawArticle, SubCategory
 
 
 class TestClassifierParsing:
@@ -91,3 +100,113 @@ class TestClassifierParsing:
             response = f'{{"relevant": true, "category": "enforcement", "sub_category": "{sub_category.value}", "confidence": "high"}}'
             result = classifier._parse_response(response)
             assert result.sub_category == sub_category
+
+    def test_parse_invalid_confidence_defaults_to_medium(self) -> None:
+        """Unknown confidence strings should be normalized."""
+        classifier = Classifier(api_key="test-key")
+
+        response = '{"relevant": true, "category": "brothel", "confidence": "very_high"}'
+        result = classifier._parse_response(response)
+
+        assert result.confidence == "medium"
+
+
+class TestClassifierRuntime:
+    """Tests for classifier runtime behavior."""
+
+    @pytest.mark.asyncio
+    async def test_classify_uses_text_block_response(self) -> None:
+        """TextBlock responses should be parsed into classifications."""
+        classifier = Classifier(api_key="test-key")
+        messages = MagicMock()
+        messages.create = MagicMock(
+            return_value=MagicMock(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text='{"relevant": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}',
+                    )
+                ]
+            )
+        )
+        classifier._client.messages = messages
+        article = RawArticle(
+            url=HttpUrl("https://example.com/1"),
+            title="Headline",
+            snippet="Snippet",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="test",
+        )
+
+        result = await classifier.classify(article)
+
+        assert result.relevant is True
+        assert result.category == Category.BROTHEL
+
+    @pytest.mark.asyncio
+    async def test_classify_returns_not_relevant_on_api_error(self) -> None:
+        """Anthropic API failures should degrade safely."""
+        classifier = Classifier(api_key="test-key")
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        messages = MagicMock()
+        messages.create = MagicMock(side_effect=anthropic.APIError("boom", request, body=None))
+        classifier._client.messages = messages
+        article = RawArticle(
+            url=HttpUrl("https://example.com/1"),
+            title="Headline",
+            snippet="Snippet",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="test",
+        )
+
+        result = await classifier.classify(article)
+
+        assert result.relevant is False
+        assert result.category == Category.NOT_RELEVANT
+        assert result.confidence == "low"
+
+    @pytest.mark.asyncio
+    async def test_classify_batch_wraps_each_article(self) -> None:
+        """Batch classification should wrap each raw article result."""
+        classifier = Classifier(api_key="test-key")
+        classify_mock = AsyncMock(
+            side_effect=[
+                classifier._parse_response(
+                    '{"relevant": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}'
+                ),
+                classifier._parse_response(
+                    '{"relevant": false, "category": "not_relevant", "confidence": "low"}'
+                ),
+            ]
+        )
+        classifier.classify = classify_mock  # type: ignore[method-assign]
+        articles = [
+            RawArticle(
+                url=HttpUrl("https://example.com/1"),
+                title="One",
+                snippet="Snippet",
+                date=datetime(2026, 3, 1, tzinfo=UTC),
+                source_name="test",
+            ),
+            RawArticle(
+                url=HttpUrl("https://example.com/2"),
+                title="Two",
+                snippet="Snippet",
+                date=datetime(2026, 3, 1, tzinfo=UTC),
+                source_name="test",
+            ),
+        ]
+
+        results = await classifier.classify_batch(articles)
+
+        assert len(results) == 2
+        assert results[0].article.title == "One"
+        assert results[0].classification.relevant is True
+        assert results[1].classification.relevant is False
+
+    def test_create_classifier_uses_requested_model(self) -> None:
+        """Factory should pass through the explicit model name."""
+        classifier = create_classifier(api_key="test-key", model="custom-model")
+
+        assert isinstance(classifier, Classifier)
+        assert classifier._model == "custom-model"

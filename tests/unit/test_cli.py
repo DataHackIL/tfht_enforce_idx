@@ -1,0 +1,69 @@
+"""Unit tests for CLI command wiring."""
+
+import runpy
+from pathlib import Path
+
+import pytest
+import typer
+from typer.testing import CliRunner
+
+from denbust.cli import app
+
+runner = CliRunner()
+
+
+class TestCli:
+    """Tests for the Typer CLI entrypoint."""
+
+    def test_scan_uses_default_config_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Scan should default to the tracked news config when none is provided."""
+        captured: dict[str, Path | int | None] = {}
+
+        def fake_run_pipeline(config_path: Path, days_override: int | None = None) -> None:
+            captured["config_path"] = config_path
+            captured["days_override"] = days_override
+
+        monkeypatch.setattr("denbust.pipeline.run_pipeline", fake_run_pipeline)
+
+        result = runner.invoke(app, ["scan"])
+
+        assert result.exit_code == 0
+        assert captured["config_path"] == Path("agents/news.yaml")
+        assert captured["days_override"] is None
+
+    def test_scan_passes_explicit_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Scan should forward explicit config and day overrides."""
+        captured: dict[str, Path | int | None] = {}
+
+        def fake_run_pipeline(config_path: Path, days_override: int | None = None) -> None:
+            captured["config_path"] = config_path
+            captured["days_override"] = days_override
+
+        monkeypatch.setattr("denbust.pipeline.run_pipeline", fake_run_pipeline)
+
+        result = runner.invoke(app, ["scan", "--config", "agents/custom.yaml", "--days", "5"])
+
+        assert result.exit_code == 0
+        assert captured["config_path"] == Path("agents/custom.yaml")
+        assert captured["days_override"] == 5
+
+    def test_version_prints_package_version(self) -> None:
+        """Version should render the package version string."""
+        result = runner.invoke(app, ["version"])
+
+        assert result.exit_code == 0
+        assert "denbust version 0.1.0" in result.stdout
+
+    def test_module_main_invokes_typer_app(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Running the module as __main__ should invoke the Typer app."""
+        calls: list[bool] = []
+
+        def fake_call(self: typer.Typer, *args: object, **kwargs: object) -> None:
+            del self, args, kwargs
+            calls.append(True)
+
+        monkeypatch.setattr(typer.Typer, "__call__", fake_call)
+
+        runpy.run_module("denbust.cli", run_name="__main__")
+
+        assert calls == [True]

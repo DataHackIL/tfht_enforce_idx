@@ -646,17 +646,3 @@ class MakoScraper(Source):
 def create_mako_source() -> MakoScraper:
     """Create Mako scraper source."""
     return MakoScraper()
-
-
-async def test_mako_scraper() -> None:
-    """Test Mako scraper."""
-    scraper = create_mako_source()
-    articles = await scraper.fetch(days=7, keywords=["זנות", "בית בושת"])
-    print(f"Found {len(articles)} articles from Mako")
-    for article in articles[:5]:
-        print(f"  - {article.title[:60]}...")
-        print(f"    URL: {article.url}")
-
-
-if __name__ == "__main__":
-    asyncio.run(test_mako_scraper())
