@@ -79,6 +79,17 @@ class TestOutputItems:
         mock_send.assert_called_once()
         mock_print.assert_not_called()
 
+    @patch("denbust.pipeline.send_output_email")
+    @patch("denbust.pipeline.print_items")
+    def test_cli_and_email_output_path(self, mock_print: MagicMock, mock_send: MagicMock) -> None:
+        """Should emit both CLI and email output when both are configured."""
+        config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.EMAIL]))
+
+        output_items([build_item()], config)
+
+        mock_send.assert_called_once()
+        mock_print.assert_called_once()
+
     @patch("denbust.pipeline.send_output_email", side_effect=RuntimeError("smtp down"))
     @patch("denbust.pipeline.print_items")
     def test_email_error_falls_back_to_cli(
@@ -90,4 +101,43 @@ class TestOutputItems:
         output_items([build_item()], config)
 
         mock_send.assert_called_once()
+        mock_print.assert_called_once()
+
+    @patch("denbust.pipeline.send_output_email", side_effect=RuntimeError("smtp down"))
+    @patch("denbust.pipeline.print_items")
+    def test_cli_and_email_error_does_not_double_print(
+        self, mock_print: MagicMock, mock_send: MagicMock
+    ) -> None:
+        """Should not print twice when CLI is already configured and email fails."""
+        config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.EMAIL]))
+
+        output_items([build_item()], config)
+
+        mock_send.assert_called_once()
+        mock_print.assert_called_once()
+
+    @patch("denbust.pipeline.logger")
+    @patch("denbust.pipeline.print_items")
+    def test_telegram_output_falls_back_to_cli(
+        self, mock_print: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Should fall back to CLI output when Telegram is requested alone."""
+        config = Config(output=OutputConfig(format=OutputFormat.TELEGRAM))
+
+        output_items([build_item()], config)
+
+        mock_logger.warning.assert_called_once()
+        mock_print.assert_called_once()
+
+    @patch("denbust.pipeline.logger")
+    @patch("denbust.pipeline.print_items")
+    def test_cli_and_telegram_output_does_not_double_print(
+        self, mock_print: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Should not print twice when CLI is already configured with Telegram."""
+        config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.TELEGRAM]))
+
+        output_items([build_item()], config)
+
+        mock_logger.warning.assert_called_once()
         mock_print.assert_called_once()

@@ -5,7 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SourceType(StrEnum):
@@ -49,6 +49,20 @@ class OutputConfig(BaseModel):
     """Configuration for output."""
 
     format: OutputFormat = OutputFormat.CLI
+    formats: list[OutputFormat] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _normalize_formats(self) -> "OutputConfig":
+        """Normalize legacy single-format config into a de-duplicated formats list."""
+        normalized: list[OutputFormat] = [self.format]
+
+        for output_format in self.formats:
+            if output_format not in normalized:
+                normalized.append(output_format)
+
+        self.formats = normalized
+        self.format = normalized[0]
+        return self
 
 
 class StoreConfig(BaseModel):

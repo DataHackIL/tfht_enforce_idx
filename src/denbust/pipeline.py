@@ -266,28 +266,31 @@ def run_pipeline(config_path: Path, days_override: int | None = None) -> None:
 
 
 def output_items(items: list[UnifiedItem], config: Config) -> None:
-    """Output unified items to the configured output channel."""
-    if config.output.format == OutputFormat.CLI:
-        print_items(items)
-        return
+    """Output unified items to the configured output channels."""
+    cli_requested = OutputFormat.CLI in config.output.formats
 
-    if config.output.format == OutputFormat.EMAIL:
-        try:
-            send_output_email(items, config)
-            recipients = ", ".join(config.email_to)
-            print(f"Email report sent to: {recipients}")
-        except Exception as exc:
-            logger.error(f"Failed to send email report: {exc}")
-            print(f"Error sending email report: {exc}")
+    for output_format in config.output.formats:
+        if output_format == OutputFormat.CLI:
             print_items(items)
-        return
+            continue
 
-    if config.output.format == OutputFormat.TELEGRAM:
-        logger.warning("Telegram output is not implemented yet, falling back to CLI output")
-        print_items(items)
-        return
+        if output_format == OutputFormat.EMAIL:
+            try:
+                send_output_email(items, config)
+                recipients = ", ".join(config.email_to)
+                print(f"Email report sent to: {recipients}")
+            except Exception as exc:
+                logger.error(f"Failed to send email report: {exc}")
+                print(f"Error sending email report: {exc}")
+                if not cli_requested:
+                    print_items(items)
+            continue
 
-    print_items(items)
+        if output_format == OutputFormat.TELEGRAM:
+            logger.warning("Telegram output is not implemented yet, falling back to CLI output")
+            if not cli_requested:
+                print_items(items)
+            continue
 
 
 def send_output_email(items: list[UnifiedItem], config: Config) -> None:
