@@ -9,7 +9,7 @@ import respx
 from httpx import Response
 
 from denbust.sources.maariv import MaarivScraper
-from denbust.sources.mako import MakoScraper
+from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper
 
 # Load fixture files
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
@@ -74,10 +74,8 @@ class TestMakoScraper:
         async def close_browser_session(session: object) -> None:
             del session
 
-        async def fetch_search_html(
-            session: object, keyword: str, *, include_channel_ids: bool
-        ) -> str:
-            del session, keyword, include_channel_ids
+        async def fetch_search_html(session: object, keyword: str) -> str:
+            del session, keyword
             return html_content
 
         async def fetch_section_html(session: object, url: str) -> str:
@@ -99,13 +97,13 @@ class TestMakoScraper:
         assert len(urls) == len(set(urls))
 
     @pytest.mark.asyncio
-    async def test_retries_search_without_channel_ids(
+    async def test_fetch_uses_only_canonical_search_url(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test fallback search without opaque channel ids when initial results are empty."""
+        """Test fetch uses one canonical search request per keyword."""
         html_content = load_fixture("html/mako_search.html")
         scraper = self._create_scraper()
-        calls: list[tuple[str, bool]] = []
+        calls: list[str] = []
 
         async def open_browser_session() -> object:
             return object()
@@ -113,13 +111,9 @@ class TestMakoScraper:
         async def close_browser_session(session: object) -> None:
             del session
 
-        async def fetch_search_html(
-            session: object, keyword: str, *, include_channel_ids: bool
-        ) -> str:
+        async def fetch_search_html(session: object, keyword: str) -> str:
             del session
-            calls.append((keyword, include_channel_ids))
-            if include_channel_ids:
-                return "<html><body></body></html>"
+            calls.append(keyword)
             return html_content
 
         async def fetch_section_html(session: object, url: str) -> str:
@@ -134,7 +128,7 @@ class TestMakoScraper:
         articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
 
         assert len(articles) >= 1
-        assert calls == [("סרסור", True), ("סרסור", False)]
+        assert calls == ["סרסור"]
 
     @pytest.mark.asyncio
     async def test_handles_browser_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,10 +156,8 @@ class TestMakoScraper:
         async def close_browser_session(session: object) -> None:
             del session
 
-        async def fetch_search_html(
-            session: object, keyword: str, *, include_channel_ids: bool
-        ) -> str:
-            del session, include_channel_ids
+        async def fetch_search_html(session: object, keyword: str) -> str:
+            del session
             if keyword == "סרסור":
                 raise RuntimeError("temporary browser timeout")
             return html_content
@@ -196,10 +188,8 @@ class TestMakoScraper:
         async def close_browser_session(session: object) -> None:
             del session
 
-        async def fetch_search_html(
-            session: object, keyword: str, *, include_channel_ids: bool
-        ) -> str:
-            del session, keyword, include_channel_ids
+        async def fetch_search_html(session: object, keyword: str) -> str:
+            del session, keyword
             return html_content
 
         async def fetch_section_html(session: object, url: str) -> str:
@@ -217,28 +207,68 @@ class TestMakoScraper:
 
     @pytest.mark.asyncio
     async def test_build_search_url_toggles_channel_ids(self) -> None:
-        """Test search URL generation keeps ids only on the primary query."""
+        """Test search URL generation always keeps opaque ids on the canonical query."""
         scraper = self._create_scraper()
 
-        with_ids = scraper._build_search_url("זנות", include_channel_ids=True)
-        without_ids = scraper._build_search_url("זנות", include_channel_ids=False)
+        url = scraper._build_search_url("זנות")
 
-        assert "channelId=" in with_ids
-        assert "vgnextoid=" in with_ids
-        assert "channelId=" not in without_ids
-        assert "vgnextoid=" not in without_ids
+        assert "channelId=" in url
+        assert "vgnextoid=" in url
 
     @pytest.mark.asyncio
-    async def test_fetch_rendered_html_waits_for_challenge(self) -> None:
-        """Test rendered HTML fetching waits through challenge redirects."""
+    async def test_fetch_search_html_waits_for_real_result_cards(self) -> None:
+        """Test search HTML waits until real result cards appear, not just the shell."""
+        scraper = self._create_scraper()
+        html_states = [
+            "<html><body><input name='searchstring_input' value='זנות'></body></html>",
+            "<html><body><input name='searchstring_input' value='זנות'><li class='articleins'><a href='/men-men_news/Article-123.htm?Partner=searchResults'>כתבה</a></li></body></html>",
+        ]
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.url = "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA"
+                self.goto_calls: list[str] = []
+                self.waited_for_timeout_ms: list[int] = []
+                self.state_index = 0
+
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                self.goto_calls.append(url)
+                assert wait_until == "domcontentloaded"
+                assert timeout > 0
+
+            async def title(self) -> str:
+                return "mako חדשות. בידור. טלוויזיה"
+
+            async def wait_for_timeout(self, timeout_ms: int) -> None:
+                self.waited_for_timeout_ms.append(timeout_ms)
+                if timeout_ms == SEARCH_POLL_INTERVAL_MS:
+                    self.state_index = min(self.state_index + 1, len(html_states) - 1)
+
+            async def content(self) -> str:
+                return html_states[self.state_index]
+
+        page = FakePage()
+        html = await scraper._fetch_search_results_html(
+            page,
+            "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA",
+            "זנות",
+        )
+
+        assert page.goto_calls
+        assert SEARCH_POLL_INTERVAL_MS in page.waited_for_timeout_ms
+        assert page.waited_for_timeout_ms[-1] != SEARCH_POLL_INTERVAL_MS
+        assert "articleins" in html
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_html_waits_for_challenge(self) -> None:
+        """Test search HTML fetching waits through challenge redirects."""
         scraper = self._create_scraper()
 
         class FakePage:
             def __init__(self) -> None:
                 self.url = "https://validate.perfdrive.com/challenge"
                 self.goto_calls: list[str] = []
-                self.wait_for_function_args: tuple[str, list[str], int] | None = None
-                self.waited_for_timeout_ms: int | None = None
+                self.waited_for_timeout_ms: list[int] = []
                 self.waited_for_url = False
 
             async def goto(self, url: str, wait_until: str, timeout: int) -> None:
@@ -255,35 +285,87 @@ class TestMakoScraper:
                 assert wait_until == "domcontentloaded"
                 assert timeout > 0
 
-            async def wait_for_function(
-                self, expression: str, arg: list[str], timeout: int
-            ) -> None:
-                self.wait_for_function_args = (expression, arg, timeout)
+            async def title(self) -> str:
+                return "mako חדשות. בידור. טלוויזיה"
 
             async def wait_for_timeout(self, timeout_ms: int) -> None:
-                self.waited_for_timeout_ms = timeout_ms
+                self.waited_for_timeout_ms.append(timeout_ms)
 
             async def content(self) -> str:
-                return "<html><body><li class='articleins'></li></body></html>"
+                return "<html><body><li class='articleins'><a href='/men-men_news/Article-123.htm?Partner=searchResults'>כתבה</a></li></body></html>"
 
         page = FakePage()
-        html = await scraper._fetch_rendered_html(
+        html = await scraper._fetch_search_results_html(
             page,
             "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA",
-            ["li.articleins"],
-            "search test",
+            "זנות",
         )
 
         assert page.goto_calls
         assert page.waited_for_url is True
-        assert page.wait_for_function_args is not None
-        assert page.waited_for_timeout_ms is not None
+        assert page.waited_for_timeout_ms
         assert "articleins" in html
 
     @pytest.mark.asyncio
-    async def test_fetch_rendered_html_raises_on_timeout(self) -> None:
-        """Test rendered HTML fetching raises a clear runtime error on timeout."""
-        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+    async def test_fetch_search_html_returns_none_for_not_found(self) -> None:
+        """Test search HTML treats Mako not-found as a terminal no-result state."""
+        scraper = self._create_scraper()
+
+        class FakePage:
+            url = "https://www.mako.co.il/not-found"
+
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                del url, wait_until, timeout
+
+            async def title(self) -> str:
+                return "הודעת שגיאה |mako"
+
+            async def wait_for_timeout(self, timeout_ms: int) -> None:
+                del timeout_ms
+
+            async def content(self) -> str:
+                return "<html><body><h1>העמוד שחיפשת לא נמצא</h1></body></html>"
+
+        html = await scraper._fetch_search_results_html(
+            FakePage(),
+            "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA",
+            "זנות",
+        )
+
+        assert html is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_html_returns_empty_results_page(self) -> None:
+        """Test search HTML returns cleanly when Mako renders an explicit empty state."""
+        scraper = self._create_scraper()
+
+        class FakePage:
+            url = "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA"
+
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                del url, wait_until, timeout
+
+            async def title(self) -> str:
+                return "mako חדשות. בידור. טלוויזיה"
+
+            async def wait_for_timeout(self, timeout_ms: int) -> None:
+                del timeout_ms
+
+            async def content(self) -> str:
+                return "<html><body><div>לא נמצאו תוצאות</div></body></html>"
+
+        html = await scraper._fetch_search_results_html(
+            FakePage(),
+            "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA",
+            "זנות",
+        )
+
+        assert html is not None
+        assert "לא נמצאו תוצאות" in html
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_html_raises_actionable_timeout(self) -> None:
+        """Test search HTML timeout includes actionable diagnostics."""
 
         scraper = self._create_scraper()
 
@@ -293,24 +375,20 @@ class TestMakoScraper:
             async def goto(self, url: str, wait_until: str, timeout: int) -> None:
                 del url, wait_until, timeout
 
-            async def wait_for_function(
-                self, expression: str, arg: list[str], timeout: int
-            ) -> None:
-                del expression, arg, timeout
-                raise PlaywrightTimeoutError("timed out")
+            async def title(self) -> str:
+                return "mako חדשות. בידור. טלוויזיה"
 
             async def wait_for_timeout(self, timeout_ms: int) -> None:
                 del timeout_ms
 
             async def content(self) -> str:
-                return ""
+                return "<html><body><input name='searchstring_input' value='זנות'></body></html>"
 
-        with pytest.raises(RuntimeError, match="never became parseable"):
-            await scraper._fetch_rendered_html(
+        with pytest.raises(RuntimeError, match="did not reach a terminal state"):
+            await scraper._fetch_search_results_html(
                 FakePage(),
                 "https://www.mako.co.il/Search",
-                ["li.articleins"],
-                "search timeout test",
+                "זנות",
             )
 
     @pytest.mark.asyncio
@@ -327,10 +405,16 @@ class TestMakoScraper:
         class FakeContext:
             def __init__(self) -> None:
                 self.page = FakePage()
+                self.route_handler: Any = None
 
             async def new_page(self) -> FakePage:
                 events.append("new_page")
                 return self.page
+
+            async def route(self, pattern: str, handler: Any) -> None:
+                assert pattern == "**/*"
+                self.route_handler = handler
+                events.append("route")
 
             async def close(self) -> None:
                 events.append("context_close")
@@ -372,15 +456,7 @@ class TestMakoScraper:
         await scraper._close_browser_session(session)
 
         assert session.page is not None
-        assert events == [
-            "enter",
-            "launch",
-            "new_context",
-            "new_page",
-            "context_close",
-            "browser_close",
-            "exit",
-        ]
+        assert events == ["enter", "launch", "new_context", "route", "new_page", "context_close", "browser_close", "exit"]
 
     @pytest.mark.asyncio
     async def test_open_browser_session_handles_launch_failure(
@@ -421,6 +497,36 @@ class TestMakoScraper:
         scraper = self._create_scraper()
 
         assert scraper._parse_hebrew_date("פלילים+ | 32/13/26 | זמן קריאה: 2.3 דק'") is None
+
+    @pytest.mark.asyncio
+    async def test_browser_route_blocks_nonessential_resources(self) -> None:
+        """Test browser routing blocks noisy third-party resources and media assets."""
+        scraper = self._create_scraper()
+
+        class FakeRequest:
+            def __init__(self, resource_type: str, url: str) -> None:
+                self.resource_type = resource_type
+                self.url = url
+
+        class FakeRoute:
+            def __init__(self, request: FakeRequest) -> None:
+                self.request = request
+                self.action: str | None = None
+
+            async def abort(self) -> None:
+                self.action = "abort"
+
+            async def continue_(self) -> None:
+                self.action = "continue"
+
+        blocked_route = FakeRoute(FakeRequest("image", "https://securepubads.g.doubleclick.net/tag"))
+        allowed_route = FakeRoute(FakeRequest("script", "https://www.mako.co.il/js/app.js"))
+
+        await scraper._handle_browser_route(blocked_route)
+        await scraper._handle_browser_route(allowed_route)
+
+        assert blocked_route.action == "abort"
+        assert allowed_route.action == "continue"
 
 
 class TestMaarivScraper:

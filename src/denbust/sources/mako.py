@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypedDict
@@ -33,11 +34,6 @@ MAKO_SEARCH_CHANNEL_ID = "3d385dd2dd5d4110VgnVCM100000290c10acRCRD"
 # Men section often has crime/enforcement news
 MAKO_MEN_NEWS_URL = "https://www.mako.co.il/men-men_news"
 PLAYWRIGHT_INSTALL_HINT = "python -m playwright install chromium"
-SEARCH_READY_SELECTORS = [
-    "li.articleins",
-    ".search-results-list",
-    "input[name='searchstring_input']",
-]
 SECTION_READY_SELECTORS = [
     "a[href*='Article']",
     "article",
@@ -59,6 +55,29 @@ READY_TIMEOUT_MS = 15_000
 CHALLENGE_TIMEOUT_MS = 10_000
 POST_READY_DELAY_MS = 750
 DEFAULT_RATE_LIMIT_DELAY_SECONDS = 1.5
+SEARCH_POLL_INTERVAL_MS = 250
+SEARCH_EMPTY_TEXT_FRAGMENTS = (
+    "לא נמצאו תוצאות",
+    "לא נמצאו כתבות",
+    "אין תוצאות",
+)
+SEARCH_NOT_FOUND_TITLE_FRAGMENT = "הודעת שגיאה"
+SEARCH_NOT_FOUND_BODY_FRAGMENT = "העמוד שחיפשת לא נמצא"
+SEARCH_RESULT_LINK_SELECTORS = (
+    "li.articleins a[href*='Article']",
+    "li.articleins a[href*='Partner=searchResults']",
+    "a[href*='Partner=searchResults'][href*='Article']",
+)
+BLOCKED_RESOURCE_TYPES = {"font", "image", "media"}
+BLOCKED_RESOURCE_URL_FRAGMENTS = (
+    "doubleclick.net",
+    "google-analytics.com",
+    "googlesyndication.com",
+    "googletagmanager.com",
+    "googlevideo.com",
+    "outbrain.com",
+    "taboola.com",
+)
 
 
 @dataclass
@@ -69,6 +88,17 @@ class _BrowserSession:
     browser: Any
     context: Any
     page: Page
+
+
+@dataclass
+class _SearchPageSnapshot:
+    """Rendered Mako search page state at a point in time."""
+
+    state: str
+    url: str
+    title: str
+    html: str
+    saw_results: bool
 
 
 class MakoScraper(Source):
@@ -171,6 +201,7 @@ class MakoScraper(Source):
                 locale="he-IL",
                 viewport=VIEWPORT,
             )
+            await context.route("**/*", self._handle_browser_route)
             page = await context.new_page()
         except Exception as e:
             await manager.__aexit__(type(e), e, e.__traceback__)
@@ -200,19 +231,11 @@ class MakoScraper(Source):
         self, session: _BrowserSession, keyword: str, cutoff: datetime
     ) -> list[RawArticle]:
         """Search Mako for a specific keyword."""
-        html = await self._fetch_search_html(session, keyword, include_channel_ids=True)
-        articles = self._parse_search_results(html, cutoff)
-        if articles:
-            return articles
+        html = await self._fetch_search_html(session, keyword)
+        if not html:
+            return []
 
-        logger.info(
-            "Mako browser search with channel params returned no articles for '%s'; "
-            "retrying without ids",
-            keyword,
-        )
-
-        fallback_html = await self._fetch_search_html(session, keyword, include_channel_ids=False)
-        return self._parse_search_results(fallback_html, cutoff)
+        return self._parse_search_results(html, cutoff)
 
     async def _scrape_section(
         self, session: _BrowserSession, url: str, cutoff: datetime, keywords: list[str]
@@ -221,18 +244,10 @@ class MakoScraper(Source):
         html = await self._fetch_section_html(session, url)
         return self._parse_section_page(html, cutoff, keywords)
 
-    async def _fetch_search_html(
-        self, session: _BrowserSession, keyword: str, *, include_channel_ids: bool
-    ) -> str:
+    async def _fetch_search_html(self, session: _BrowserSession, keyword: str) -> str | None:
         """Fetch rendered search page HTML via Playwright."""
-        url = self._build_search_url(keyword, include_channel_ids=include_channel_ids)
-        suffix = " with opaque ids" if include_channel_ids else " without opaque ids"
-        return await self._fetch_rendered_html(
-            session.page,
-            url,
-            SEARCH_READY_SELECTORS,
-            f"search for '{keyword}'{suffix}",
-        )
+        url = self._build_search_url(keyword)
+        return await self._fetch_search_results_html(session.page, url, keyword)
 
     async def _fetch_section_html(self, session: _BrowserSession, url: str) -> str:
         """Fetch rendered section page HTML via Playwright."""
@@ -278,10 +293,134 @@ class MakoScraper(Source):
 
         return await page.content()
 
-    async def _wait_for_challenge_resolution(self, page: Page, description: str) -> None:
+    async def _fetch_search_results_html(
+        self,
+        page: Page,
+        url: str,
+        keyword: str,
+    ) -> str | None:
+        """Navigate to a Mako search page and wait for a terminal search state."""
+        try:
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+        except ImportError as e:
+            raise RuntimeError(
+                "Playwright is not installed. Install it and Chromium with "
+                f"`python -m pip install playwright` and `{PLAYWRIGHT_INSTALL_HINT}`."
+            ) from e
+
+        description = f"search for '{keyword}' with opaque ids"
+        logger.info("Mako browser navigation started for %s", description)
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+            saw_challenge = await self._wait_for_challenge_resolution(page, description)
+        except PlaywrightTimeoutError as e:
+            raise RuntimeError(
+                f"Mako search navigation timed out for '{keyword}' before the page loaded."
+            ) from e
+
+        deadline = time.monotonic() + (READY_TIMEOUT_MS / 1000)
+        last_snapshot = _SearchPageSnapshot(
+            state="pending",
+            url=page.url,
+            title="",
+            html="",
+            saw_results=False,
+        )
+        saw_results = False
+
+        while time.monotonic() < deadline:
+            snapshot = await self._snapshot_search_page(page)
+            saw_results = saw_results or snapshot.saw_results
+            last_snapshot = _SearchPageSnapshot(
+                state=snapshot.state,
+                url=snapshot.url,
+                title=snapshot.title,
+                html=snapshot.html,
+                saw_results=saw_results,
+            )
+
+            if snapshot.state == "results":
+                await page.wait_for_timeout(POST_READY_DELAY_MS)
+                return await page.content()
+
+            if snapshot.state == "empty":
+                logger.info("Mako browser search returned no results for '%s'", keyword)
+                return snapshot.html
+
+            if snapshot.state == "not_found":
+                logger.info(
+                    "Mako browser search landed on Mako not-found page for '%s'; treating as no results",
+                    keyword,
+                )
+                return None
+
+            await page.wait_for_timeout(SEARCH_POLL_INTERVAL_MS)
+
+        raise RuntimeError(
+            self._format_search_timeout(keyword, last_snapshot, saw_challenge=saw_challenge)
+        )
+
+    async def _snapshot_search_page(self, page: Page) -> _SearchPageSnapshot:
+        """Capture the current rendered Mako search page state."""
+        url = page.url
+        title = await page.title()
+        html = await page.content()
+        state, saw_results = self._classify_search_page(url, title, html)
+        return _SearchPageSnapshot(
+            state=state,
+            url=url,
+            title=title,
+            html=html,
+            saw_results=saw_results,
+        )
+
+    def _classify_search_page(self, url: str, title: str, html: str) -> tuple[str, bool]:
+        """Classify the current Mako search page state."""
+        if self._looks_like_not_found(url, title, html):
+            return "not_found", False
+
+        saw_results = self._search_results_are_present(html)
+        if saw_results:
+            return "results", True
+
+        if any(fragment in html for fragment in SEARCH_EMPTY_TEXT_FRAGMENTS):
+            return "empty", False
+
+        return "pending", False
+
+    def _search_results_are_present(self, html: str) -> bool:
+        """Check whether rendered HTML contains populated search result cards."""
+        soup = BeautifulSoup(html, "lxml")
+        return any(soup.select_one(selector) for selector in SEARCH_RESULT_LINK_SELECTORS)
+
+    def _looks_like_not_found(self, url: str, title: str, html: str) -> bool:
+        """Check whether the current page is Mako's not-found page."""
+        return (
+            url.endswith("/not-found")
+            or SEARCH_NOT_FOUND_TITLE_FRAGMENT in title
+            or SEARCH_NOT_FOUND_BODY_FRAGMENT in html
+        )
+
+    def _format_search_timeout(
+        self,
+        keyword: str,
+        snapshot: _SearchPageSnapshot,
+        *,
+        saw_challenge: bool,
+    ) -> str:
+        """Format a diagnostic timeout error for a stuck search page."""
+        return (
+            f"Mako search did not reach a terminal state for '{keyword}'. "
+            f"url={snapshot.url!r} title={snapshot.title!r} "
+            f"saw_challenge={saw_challenge} saw_results={snapshot.saw_results} "
+            f"looked_like_not_found={self._looks_like_not_found(snapshot.url, snapshot.title, snapshot.html)}"
+        )
+
+    async def _wait_for_challenge_resolution(self, page: Page, description: str) -> bool:
         """Wait for Radware/Perfdrive challenge redirects to return to Mako."""
         if "validate.perfdrive.com" not in page.url:
-            return
+            return False
 
         logger.info(
             "Mako browser challenge detected for %s; waiting for redirect back", description
@@ -294,18 +433,29 @@ class MakoScraper(Source):
         )
 
         logger.info("Mako browser challenge resolved for %s", description)
+        return True
 
-    def _build_search_url(self, keyword: str, *, include_channel_ids: bool) -> str:
+    async def _handle_browser_route(self, route: Any) -> None:
+        """Block non-essential third-party resources in the Mako browser session."""
+        request = route.request
+        if request.resource_type in BLOCKED_RESOURCE_TYPES or any(
+            fragment in request.url for fragment in BLOCKED_RESOURCE_URL_FRAGMENTS
+        ):
+            await route.abort()
+            return
+
+        await route.continue_()
+
+    def _build_search_url(self, keyword: str) -> str:
         """Build the current Mako search URL."""
         params = {
             "searchstring_input": keyword,
             "page": "1",
             "tab": "search_results_tab_general",
             "formType": "regular",
+            "channelId": MAKO_SEARCH_CHANNEL_ID,
+            "vgnextoid": MAKO_SEARCH_CHANNEL_ID,
         }
-        if include_channel_ids:
-            params["channelId"] = MAKO_SEARCH_CHANNEL_ID
-            params["vgnextoid"] = MAKO_SEARCH_CHANNEL_ID
 
         return f"{MAKO_SEARCH_URL}?{urlencode(params)}"
 
