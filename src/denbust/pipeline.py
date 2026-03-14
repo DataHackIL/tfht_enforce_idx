@@ -12,6 +12,7 @@ from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.output.email import send_email_report
 from denbust.output.formatter import print_items
 from denbust.sources.base import Source
+from denbust.sources.ice import create_ice_source
 from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
 from denbust.sources.rss import RSSSource
@@ -60,6 +61,8 @@ def create_sources(config: Config) -> list[Source]:
                 sources.append(create_mako_source())
             elif source_cfg.name == "maariv":
                 sources.append(create_maariv_source())
+            elif source_cfg.name == "ice":
+                sources.append(create_ice_source())
             else:
                 logger.warning(f"Unknown scraper source: {source_cfg.name}")
 

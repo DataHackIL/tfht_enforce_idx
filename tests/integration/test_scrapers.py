@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from httpx import Response
 
 from denbust.data_models import RawArticle
+from denbust.sources.ice import IceScraper, create_ice_source
 from denbust.sources.maariv import MaarivScraper, create_maariv_source
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source
 from denbust.sources.rss import RSSSource
@@ -939,6 +940,169 @@ class TestMakoScraper:
         await scraper._handle_browser_route(blocked_route)
 
         assert blocked_route.action == "abort"
+
+
+class TestIceScraper:
+    """Integration tests for ICE scraper."""
+
+    @staticmethod
+    def _create_scraper() -> IceScraper:
+        """Create a scraper with rate limiting disabled for tests."""
+        return IceScraper(rate_limit_delay_seconds=0)
+
+    def test_factory_helper_returns_named_source(self) -> None:
+        """Factory helper should return the canonical ICE source."""
+        scraper = create_ice_source()
+
+        assert scraper.name == "ice"
+
+    def test_build_search_url_uses_expected_path_shape(self) -> None:
+        """ICE search URLs should use the path-based search pattern."""
+        scraper = self._create_scraper()
+
+        assert scraper._build_search_url("בית בושת") == (
+            "https://www.ice.co.il/list/searchresult/%D7%91%D7%99%D7%AA%20%D7%91%D7%95%D7%A9%D7%AA"
+        )
+        assert scraper._build_search_url("בית בושת", page_number=2) == (
+            "https://www.ice.co.il/list/searchresult/%D7%91%D7%99%D7%AA%20%D7%91%D7%95%D7%A9%D7%AA/page-2"
+        )
+
+    def test_parse_search_results(self) -> None:
+        """Fixture HTML should parse into ICE search result articles."""
+        html_content = load_fixture("html/ice_search.html")
+        scraper = self._create_scraper()
+
+        articles = scraper._parse_search_results(
+            html_content,
+            datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS),
+        )
+
+        assert len(articles) == 2
+        assert articles[0].title == "חריג: הפכה את המקלט הציבורי לבית בושת"
+        assert articles[0].date == datetime(2026, 3, 12, 7, 46, tzinfo=UTC)
+        assert str(articles[0].url) == "https://www.ice.co.il/local-news/news/article/1099242"
+        assert all(article.source_name == "ice" for article in articles)
+
+    def test_parse_article_item_skips_missing_or_invalid_dates(self) -> None:
+        """ICE items without a parseable date should be ignored safely."""
+        scraper = self._create_scraper()
+        cutoff = datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS)
+        item = BeautifulSoup(
+            """
+            <li>
+              <a href="/law/news/article/1086606">בית בושת אותר בתוך מקלט ציבורי</a>
+              <a href="/law/news/article/1086606">עיריית בת ים פתחה בחקירה</a>
+              <span>תאריך לא תקין</span>
+            </li>
+            """,
+            "lxml",
+        ).li
+
+        assert item is not None
+        assert scraper._parse_article_item(item, cutoff) is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_fetch_paginates_and_deduplicates(self) -> None:
+        """Fetch should follow pagination and collapse duplicate article URLs."""
+        page_one = load_fixture("html/ice_search.html")
+        page_two = """
+        <html>
+          <body>
+            <main>
+              <h1>נמצאו 64 תוצאות חיפוש של בית בושת</h1>
+              <article>
+                <ul>
+                  <li>
+                    <a href="/local-news/news/article/1099242?utm_source=search">חריג: הפכה את המקלט הציבורי לבית בושת</a>
+                    <a href="/local-news/news/article/1099242?utm_source=search">תושבת בת ים נעצרה אחרי בדיקת פקחים</a>
+                    <span>12/3/2026 7:46</span>
+                  </li>
+                  <li>
+                    <a href="/law/news/article/1077000">מקלט נוסף הוסב לבית בושת</a>
+                    <a href="/law/news/article/1077000">המשטרה סגרה את המקום</a>
+                    <span>11/3/2026 11:10</span>
+                  </li>
+                </ul>
+              </article>
+            </main>
+          </body>
+        </html>
+        """
+        scraper = self._create_scraper()
+        keyword = "בית בושת"
+        page_one_url = scraper._build_search_url(keyword)
+        page_two_url = scraper._build_search_url(keyword, page_number=2)
+
+        respx.get(page_one_url).mock(return_value=Response(200, text=page_one))
+        respx.get(page_two_url).mock(return_value=Response(200, text=page_two))
+
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=[keyword])
+
+        urls = [str(article.url) for article in articles]
+        assert len(articles) == 3
+        assert len(urls) == len(set(urls))
+        assert "https://www.ice.co.il/law/news/article/1077000" in urls
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_fetch_stops_when_next_page_has_only_old_results(self) -> None:
+        """Fetch should stop paginating when the next page contains no recent articles."""
+        page_one = load_fixture("html/ice_search.html")
+        page_two = """
+        <html>
+          <body>
+            <main>
+              <h1>נמצאו 64 תוצאות חיפוש של בית בושת</h1>
+              <article>
+                <ul>
+                  <li>
+                    <a href="/law/news/article/1000000">כתבה ישנה</a>
+                    <a href="/law/news/article/1000000">סיפור ישן</a>
+                    <span>1/1/2020 8:00</span>
+                  </li>
+                </ul>
+              </article>
+              <nav class="pagination">
+                <a href="/list/searchresult/%D7%91%D7%99%D7%AA%20%D7%91%D7%95%D7%A9%D7%AA/page-3">הבא</a>
+              </nav>
+            </main>
+          </body>
+        </html>
+        """
+        scraper = self._create_scraper()
+        keyword = "בית בושת"
+        page_three_url = scraper._build_search_url(keyword, page_number=3)
+
+        respx.get(scraper._build_search_url(keyword)).mock(return_value=Response(200, text=page_one))
+        respx.get(scraper._build_search_url(keyword, page_number=2)).mock(
+            return_value=Response(200, text=page_two)
+        )
+        page_three_route = respx.get(page_three_url).mock(
+            return_value=Response(200, text="<html></html>")
+        )
+
+        articles = await scraper.fetch(days=30, keywords=[keyword])
+
+        assert len(articles) == 2
+        assert page_three_route.called is False
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_fetch_returns_partial_results_on_http_error(self) -> None:
+        """Later-page HTTP failures should not discard already collected results."""
+        scraper = self._create_scraper()
+        keyword = "בית בושת"
+        page_one = load_fixture("html/ice_search.html")
+
+        respx.get(scraper._build_search_url(keyword)).mock(return_value=Response(200, text=page_one))
+        respx.get(scraper._build_search_url(keyword, page_number=2)).mock(
+            return_value=Response(500, text="boom")
+        )
+
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=[keyword])
+
+        assert len(articles) == 2
 
 
 class TestMaarivScraper:

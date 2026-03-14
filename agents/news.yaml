@@ -24,6 +24,10 @@ sources:
     type: scraper
     enabled: true
 
+  - name: ice
+    type: scraper
+    enabled: true
+
 keywords:
   - זנות
   - בית בושת
