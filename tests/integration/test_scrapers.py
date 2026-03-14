@@ -70,10 +70,7 @@ class TestMakoScraper:
             "https://www.mako.co.il/men-men_news/Article-af751f94b02ec91027.htm?Partner=searchResults"
         )
 
-        assert (
-            normalized
-            == "https://www.mako.co.il/men-men_news/Article-af751f94b02ec91027.htm"
-        )
+        assert normalized == "https://www.mako.co.il/men-men_news/Article-af751f94b02ec91027.htm"
 
     @pytest.mark.asyncio
     async def test_fetch_aggregates_browser_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
