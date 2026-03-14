@@ -1,17 +1,24 @@
 """Mako news scraper."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
+import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urljoin
+from typing import TYPE_CHECKING, Any, TypedDict
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
-import httpx
 from bs4 import BeautifulSoup, Tag
 from pydantic import HttpUrl
 
 from denbust.data_models import RawArticle
 from denbust.sources.base import Source
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
 
@@ -20,17 +27,87 @@ USER_AGENT = "denbust/0.1.0 (news monitoring bot; +https://github.com/denbust)"
 
 # Base URLs
 MAKO_BASE_URL = "https://www.mako.co.il"
+MAKO_SEARCH_URL = f"{MAKO_BASE_URL}/Search"
+# Captured from Mako's live search URL on 2026-03-13. If it stops working,
+# retry the same search without these opaque ids before changing the scraper.
+MAKO_SEARCH_CHANNEL_ID = "3d385dd2dd5d4110VgnVCM100000290c10acRCRD"
 # Men section often has crime/enforcement news
 MAKO_MEN_NEWS_URL = "https://www.mako.co.il/men-men_news"
+PLAYWRIGHT_INSTALL_HINT = "python -m playwright install chromium"
+SECTION_READY_SELECTORS = [
+    "a[href*='Article']",
+    "article",
+    ".article",
+    ".item",
+]
+
+
+class _ViewportSize(TypedDict):
+    """Viewport dimensions for Playwright browser contexts."""
+
+    width: int
+    height: int
+
+
+VIEWPORT: _ViewportSize = {"width": 1440, "height": 2000}
+NAVIGATION_TIMEOUT_MS = 30_000
+READY_TIMEOUT_MS = 15_000
+CHALLENGE_TIMEOUT_MS = 10_000
+POST_READY_DELAY_MS = 750
+DEFAULT_RATE_LIMIT_DELAY_SECONDS = 1.5
+SEARCH_POLL_INTERVAL_MS = 250
+SEARCH_EMPTY_TEXT_FRAGMENTS = (
+    "לא נמצאו תוצאות",
+    "לא נמצאו כתבות",
+    "אין תוצאות",
+)
+SEARCH_NOT_FOUND_TITLE_FRAGMENT = "הודעת שגיאה"
+SEARCH_NOT_FOUND_BODY_FRAGMENT = "העמוד שחיפשת לא נמצא"
+SEARCH_RESULT_LINK_SELECTORS = (
+    "li.articleins a[href*='Article']",
+    "li.articleins a[href*='Partner=searchResults']",
+    "a[href*='Partner=searchResults'][href*='Article']",
+)
+BLOCKED_RESOURCE_TYPES = {"font", "image", "media"}
+BLOCKED_RESOURCE_URL_FRAGMENTS = (
+    "doubleclick.net",
+    "google-analytics.com",
+    "googlesyndication.com",
+    "googletagmanager.com",
+    "googlevideo.com",
+    "outbrain.com",
+    "taboola.com",
+)
+
+
+@dataclass
+class _BrowserSession:
+    """Open Playwright browser resources for a single fetch cycle."""
+
+    manager: Any
+    browser: Any
+    context: Any
+    page: Page
+
+
+@dataclass
+class _SearchPageSnapshot:
+    """Rendered Mako search page state at a point in time."""
+
+    state: str
+    url: str
+    title: str
+    html: str
+    saw_results: bool
 
 
 class MakoScraper(Source):
     """Scraper for Mako news website."""
 
-    def __init__(self) -> None:
+    def __init__(self, rate_limit_delay_seconds: float = DEFAULT_RATE_LIMIT_DELAY_SECONDS) -> None:
         """Initialize Mako scraper."""
         self._name = "mako"
-        self._client: httpx.AsyncClient | None = None
+        self._rate_limit_delay_seconds = rate_limit_delay_seconds
 
     @property
     def name(self) -> str:
@@ -47,32 +124,45 @@ class MakoScraper(Source):
         Returns:
             List of raw articles matching the criteria.
         """
-        logger.info(f"Scraping Mako for articles in last {days} days")
+        logger.info("Scraping Mako for articles in last %s days", days)
 
         articles: list[RawArticle] = []
         cutoff = datetime.now(UTC) - timedelta(days=days)
 
-        async with httpx.AsyncClient(
-            timeout=30.0,
-            headers={"User-Agent": USER_AGENT},
-            follow_redirects=True,
-        ) as client:
-            self._client = client
+        try:
+            session = await self._open_browser_session()
+        except Exception as e:
+            logger.exception("Mako browser session could not be opened: %s", e)
+            return []
 
-            # Search for each keyword
+        try:
             for keyword in keywords:
-                await asyncio.sleep(1.5)  # Rate limiting
-                found = await self._search_keyword(keyword, cutoff)
+                await self._rate_limit()
+                try:
+                    found = await self._search_keyword(session, keyword, cutoff)
+                except Exception as e:
+                    logger.exception("Mako browser search failed for keyword '%s': %s", keyword, e)
+                    continue
+
                 articles.extend(found)
 
-            # Also scrape the men-news section directly
-            await asyncio.sleep(1.5)
-            section_articles = await self._scrape_section(MAKO_MEN_NEWS_URL, cutoff, keywords)
-            articles.extend(section_articles)
+            await self._rate_limit()
+            try:
+                section_articles = await self._scrape_section(
+                    session, MAKO_MEN_NEWS_URL, cutoff, keywords
+                )
+            except Exception as e:
+                logger.exception(
+                    "Mako browser section scrape failed for %s: %s", MAKO_MEN_NEWS_URL, e
+                )
+            else:
+                articles.extend(section_articles)
+        finally:
+            try:
+                await self._close_browser_session(session)
+            except Exception as e:
+                logger.exception("Mako browser session cleanup failed: %s", e)
 
-            self._client = None
-
-        # Deduplicate by URL
         seen_urls: set[str] = set()
         unique: list[RawArticle] = []
         for article in articles:
@@ -81,61 +171,293 @@ class MakoScraper(Source):
                 seen_urls.add(url_str)
                 unique.append(article)
 
-        logger.info(f"Found {len(unique)} unique articles from Mako")
+        logger.info("Found %s unique articles from Mako", len(unique))
         return unique
 
-    async def _search_keyword(self, keyword: str, cutoff: datetime) -> list[RawArticle]:
-        """Search Mako for a specific keyword.
+    async def _rate_limit(self) -> None:
+        """Sleep between Mako requests unless disabled for tests."""
+        if self._rate_limit_delay_seconds <= 0:
+            return
 
-        Args:
-            keyword: Keyword to search for.
-            cutoff: Cutoff datetime for filtering.
+        await asyncio.sleep(self._rate_limit_delay_seconds)
 
-        Returns:
-            List of matching articles.
-        """
-        if not self._client:
-            return []
+    async def _open_browser_session(self) -> _BrowserSession:
+        """Open a Playwright browser session for Mako scraping."""
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as e:
+            raise RuntimeError(
+                "Playwright is not installed. Install it and Chromium with "
+                f"`python -m pip install playwright` and `{PLAYWRIGHT_INSTALL_HINT}`."
+            ) from e
 
-        # Mako uses an AJAX search endpoint
-        search_url = f"{MAKO_BASE_URL}/AjaxPage"
-        params = {
-            "jspName": "searchResults.jsp",
-            "q": keyword,
-            "pageNumber": "1",
-        }
+        manager = async_playwright()
+        playwright = await manager.__aenter__()
 
         try:
-            response = await self._client.get(search_url, params=params)
-            response.raise_for_status()
-            return self._parse_search_results(response.text, cutoff)
-        except httpx.HTTPError as e:
-            logger.error(f"Error searching Mako for '{keyword}': {e}")
+            browser = await playwright.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent=USER_AGENT,
+                locale="he-IL",
+                viewport=VIEWPORT,
+            )
+            await context.route("**/*", self._handle_browser_route)
+            page = await context.new_page()
+        except Exception as e:
+            await manager.__aexit__(type(e), e, e.__traceback__)
+            raise RuntimeError(
+                "Chromium could not be launched for Mako scraping. "
+                f"Install it with `{PLAYWRIGHT_INSTALL_HINT}`."
+            ) from e
+
+        return _BrowserSession(
+            manager=manager,
+            browser=browser,
+            context=context,
+            page=page,
+        )
+
+    async def _close_browser_session(self, session: _BrowserSession) -> None:
+        """Close all Playwright resources for Mako scraping."""
+        try:
+            await session.context.close()
+        finally:
+            try:
+                await session.browser.close()
+            finally:
+                await session.manager.__aexit__(None, None, None)
+
+    async def _search_keyword(
+        self, session: _BrowserSession, keyword: str, cutoff: datetime
+    ) -> list[RawArticle]:
+        """Search Mako for a specific keyword."""
+        html = await self._fetch_search_html(session, keyword)
+        if not html:
             return []
+
+        return self._parse_search_results(html, cutoff)
 
     async def _scrape_section(
-        self, url: str, cutoff: datetime, keywords: list[str]
+        self, session: _BrowserSession, url: str, cutoff: datetime, keywords: list[str]
     ) -> list[RawArticle]:
-        """Scrape a Mako section page.
+        """Scrape a Mako section page."""
+        html = await self._fetch_section_html(session, url)
+        return self._parse_section_page(html, cutoff, keywords)
 
-        Args:
-            url: Section URL to scrape.
-            cutoff: Cutoff datetime for filtering.
-            keywords: Keywords to filter by.
+    async def _fetch_search_html(self, session: _BrowserSession, keyword: str) -> str | None:
+        """Fetch rendered search page HTML via Playwright."""
+        url = self._build_search_url(keyword)
+        return await self._fetch_search_results_html(session.page, url, keyword)
 
-        Returns:
-            List of matching articles.
-        """
-        if not self._client:
-            return []
+    async def _fetch_section_html(self, session: _BrowserSession, url: str) -> str:
+        """Fetch rendered section page HTML via Playwright."""
+        return await self._fetch_rendered_html(
+            session.page,
+            url,
+            SECTION_READY_SELECTORS,
+            "men-news section",
+        )
+
+    async def _fetch_rendered_html(
+        self,
+        page: Page,
+        url: str,
+        ready_selectors: list[str],
+        description: str,
+    ) -> str:
+        """Navigate to a page in Chromium and return the rendered HTML."""
+        try:
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+        except ImportError as e:
+            raise RuntimeError(
+                "Playwright is not installed. Install it and Chromium with "
+                f"`python -m pip install playwright` and `{PLAYWRIGHT_INSTALL_HINT}`."
+            ) from e
+
+        logger.info("Mako browser navigation started for %s", description)
 
         try:
-            response = await self._client.get(url)
-            response.raise_for_status()
-            return self._parse_section_page(response.text, cutoff, keywords)
-        except httpx.HTTPError as e:
-            logger.error(f"Error scraping Mako section {url}: {e}")
-            return []
+            await page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+            await self._wait_for_challenge_resolution(page, description)
+            await page.wait_for_function(
+                "selectors => selectors.some(selector => document.querySelector(selector))",
+                arg=ready_selectors,
+                timeout=READY_TIMEOUT_MS,
+            )
+            await page.wait_for_timeout(POST_READY_DELAY_MS)
+        except PlaywrightTimeoutError as e:
+            raise RuntimeError(
+                f"Mako page never became parseable for {description}. "
+                f"If Chromium is missing, install it with `{PLAYWRIGHT_INSTALL_HINT}`."
+            ) from e
+
+        return await page.content()
+
+    async def _fetch_search_results_html(
+        self,
+        page: Page,
+        url: str,
+        keyword: str,
+    ) -> str | None:
+        """Navigate to a Mako search page and wait for a terminal search state."""
+        try:
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+        except ImportError as e:
+            raise RuntimeError(
+                "Playwright is not installed. Install it and Chromium with "
+                f"`python -m pip install playwright` and `{PLAYWRIGHT_INSTALL_HINT}`."
+            ) from e
+
+        description = f"search for '{keyword}' with opaque ids"
+        logger.info("Mako browser navigation started for %s", description)
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+            saw_challenge = await self._wait_for_challenge_resolution(page, description)
+        except PlaywrightTimeoutError as e:
+            raise RuntimeError(
+                f"Mako search navigation timed out for '{keyword}' before the page loaded."
+            ) from e
+
+        deadline = time.monotonic() + (READY_TIMEOUT_MS / 1000)
+        last_snapshot = _SearchPageSnapshot(
+            state="pending",
+            url=page.url,
+            title="",
+            html="",
+            saw_results=False,
+        )
+        saw_results = False
+
+        while time.monotonic() < deadline:
+            snapshot = await self._snapshot_search_page(page)
+            saw_results = saw_results or snapshot.saw_results
+            last_snapshot = _SearchPageSnapshot(
+                state=snapshot.state,
+                url=snapshot.url,
+                title=snapshot.title,
+                html=snapshot.html,
+                saw_results=saw_results,
+            )
+
+            if snapshot.state == "results":
+                await page.wait_for_timeout(POST_READY_DELAY_MS)
+                return await page.content()
+
+            if snapshot.state == "empty":
+                logger.info("Mako browser search returned no results for '%s'", keyword)
+                return snapshot.html
+
+            if snapshot.state == "not_found":
+                logger.info(
+                    "Mako browser search landed on Mako not-found page for '%s'; treating as no results",
+                    keyword,
+                )
+                return None
+
+            await page.wait_for_timeout(SEARCH_POLL_INTERVAL_MS)
+
+        raise RuntimeError(
+            self._format_search_timeout(keyword, last_snapshot, saw_challenge=saw_challenge)
+        )
+
+    async def _snapshot_search_page(self, page: Page) -> _SearchPageSnapshot:
+        """Capture the current rendered Mako search page state."""
+        url = page.url
+        title = await page.title()
+        html = await page.content()
+        state, saw_results = self._classify_search_page(url, title, html)
+        return _SearchPageSnapshot(
+            state=state,
+            url=url,
+            title=title,
+            html=html,
+            saw_results=saw_results,
+        )
+
+    def _classify_search_page(self, url: str, title: str, html: str) -> tuple[str, bool]:
+        """Classify the current Mako search page state."""
+        if self._looks_like_not_found(url, title, html):
+            return "not_found", False
+
+        saw_results = self._search_results_are_present(html)
+        if saw_results:
+            return "results", True
+
+        if any(fragment in html for fragment in SEARCH_EMPTY_TEXT_FRAGMENTS):
+            return "empty", False
+
+        return "pending", False
+
+    def _search_results_are_present(self, html: str) -> bool:
+        """Check whether rendered HTML contains populated search result cards."""
+        soup = BeautifulSoup(html, "lxml")
+        return any(soup.select_one(selector) for selector in SEARCH_RESULT_LINK_SELECTORS)
+
+    def _looks_like_not_found(self, url: str, title: str, html: str) -> bool:
+        """Check whether the current page is Mako's not-found page."""
+        return (
+            url.endswith("/not-found")
+            or SEARCH_NOT_FOUND_TITLE_FRAGMENT in title
+            or SEARCH_NOT_FOUND_BODY_FRAGMENT in html
+        )
+
+    def _format_search_timeout(
+        self,
+        keyword: str,
+        snapshot: _SearchPageSnapshot,
+        *,
+        saw_challenge: bool,
+    ) -> str:
+        """Format a diagnostic timeout error for a stuck search page."""
+        return (
+            f"Mako search did not reach a terminal state for '{keyword}'. "
+            f"url={snapshot.url!r} title={snapshot.title!r} "
+            f"saw_challenge={saw_challenge} saw_results={snapshot.saw_results} "
+            f"looked_like_not_found={self._looks_like_not_found(snapshot.url, snapshot.title, snapshot.html)}"
+        )
+
+    async def _wait_for_challenge_resolution(self, page: Page, description: str) -> bool:
+        """Wait for Radware/Perfdrive challenge redirects to return to Mako."""
+        if "validate.perfdrive.com" not in page.url:
+            return False
+
+        logger.info(
+            "Mako browser challenge detected for %s; waiting for redirect back", description
+        )
+
+        await page.wait_for_url(
+            re.compile(r"^https://www\.mako\.co\.il/"),
+            wait_until="domcontentloaded",
+            timeout=CHALLENGE_TIMEOUT_MS,
+        )
+
+        logger.info("Mako browser challenge resolved for %s", description)
+        return True
+
+    async def _handle_browser_route(self, route: Any) -> None:
+        """Block non-essential third-party resources in the Mako browser session."""
+        request = route.request
+        if request.resource_type in BLOCKED_RESOURCE_TYPES or any(
+            fragment in request.url for fragment in BLOCKED_RESOURCE_URL_FRAGMENTS
+        ):
+            await route.abort()
+            return
+
+        await route.continue_()
+
+    def _build_search_url(self, keyword: str) -> str:
+        """Build the current Mako search URL."""
+        params = {
+            "searchstring_input": keyword,
+            "page": "1",
+            "tab": "search_results_tab_general",
+            "formType": "regular",
+            "channelId": MAKO_SEARCH_CHANNEL_ID,
+            "vgnextoid": MAKO_SEARCH_CHANNEL_ID,
+        }
+
+        return f"{MAKO_SEARCH_URL}?{urlencode(params)}"
 
     def _parse_search_results(self, html: str, cutoff: datetime) -> list[RawArticle]:
         """Parse Mako search results HTML.
@@ -150,8 +472,9 @@ class MakoScraper(Source):
         soup = BeautifulSoup(html, "lxml")
         articles: list[RawArticle] = []
 
-        # Search results are typically in items with specific classes
-        for item in soup.select(".search-result-item, .article-item, li.item"):
+        # The current Mako search page renders articles in li.articleins cards.
+        # Keep older selectors as fallbacks because the site markup changes often.
+        for item in soup.select("li.articleins, .search-result-item, .article-item, li.item"):
             article = self._parse_article_item(item, cutoff)
             if article:
                 articles.append(article)
@@ -169,12 +492,11 @@ class MakoScraper(Source):
             keywords: Keywords to filter by.
 
         Returns:
-            List of articles.
+            List of matching articles.
         """
         soup = BeautifulSoup(html, "lxml")
         articles: list[RawArticle] = []
 
-        # Look for article links in various containers
         for item in soup.select("article, .article, .item, li"):
             article = self._parse_article_item(item, cutoff)
             if article and self._matches_keywords(article, keywords):
@@ -192,7 +514,6 @@ class MakoScraper(Source):
         Returns:
             RawArticle or None.
         """
-        # Find the link
         link = item.select_one("a[href*='Article']")
         if not link:
             link = item.select_one("a")
@@ -202,24 +523,20 @@ class MakoScraper(Source):
         href = link.get("href", "")
         if not href:
             return None
-        url = urljoin(MAKO_BASE_URL, str(href))
+        url = self._normalize_article_url(urljoin(MAKO_BASE_URL, str(href)))
 
-        # Only include Mako article URLs
         if "mako.co.il" not in url or "Article" not in url:
             return None
 
-        # Get title
-        title_elem = item.select_one("h1, h2, h3, .title, .headline")
+        title_elem = item.select_one("h1, h2, h3, h4, h5, .title, .headline")
         title = title_elem.get_text(strip=True) if title_elem else link.get_text(strip=True)
 
         if not title:
             return None
 
-        # Get snippet
         snippet_elem = item.select_one(".summary, .description, .snippet, p")
         snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
 
-        # Parse date
         date = self._parse_date(item)
         if date and date < cutoff:
             return None
@@ -234,6 +551,19 @@ class MakoScraper(Source):
             source_name=self._name,
         )
 
+    def _normalize_article_url(self, url: str) -> str:
+        """Normalize Mako article URLs so search and section links deduplicate."""
+        split_url = urlsplit(url)
+        return urlunsplit(
+            (
+                split_url.scheme,
+                split_url.netloc,
+                split_url.path,
+                "",
+                "",
+            )
+        )
+
     def _parse_date(self, item: Tag) -> datetime | None:
         """Parse date from article item.
 
@@ -243,10 +573,8 @@ class MakoScraper(Source):
         Returns:
             Parsed datetime or None.
         """
-        # Look for date element
         date_elem = item.select_one("time, .date, .timestamp, [datetime]")
         if date_elem:
-            # Try datetime attribute
             dt_attr = date_elem.get("datetime")
             if dt_attr:
                 try:
@@ -254,13 +582,11 @@ class MakoScraper(Source):
                 except ValueError:
                     pass
 
-            # Try text content
             date_text = date_elem.get_text(strip=True)
             date = self._parse_hebrew_date(date_text)
             if date:
                 return date
 
-        # Look for date in text
         text = item.get_text()
         date = self._parse_hebrew_date(text)
         if date:
@@ -277,7 +603,6 @@ class MakoScraper(Source):
         Returns:
             Parsed datetime or None.
         """
-        # Match patterns like "15/02/2026" or "15.02.2026"
         match = re.search(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", text)
         if match:
             try:
@@ -286,7 +611,14 @@ class MakoScraper(Source):
             except ValueError:
                 pass
 
-        # Match patterns like "2026-02-15"
+        match = re.search(r"(\d{1,2})[./](\d{1,2})[./](\d{2})(?!\d)", text)
+        if match:
+            try:
+                day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+                return datetime(2000 + year, month, day, tzinfo=UTC)
+            except ValueError:
+                pass
+
         match = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
         if match:
             try:

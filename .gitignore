@@ -210,3 +210,11 @@ __marimo__/
 LOCAL_AGENTS.md
 
 .DS_Store
+
+data/local/
+agents/local/
+.env.local
+
+.python-version
+
+uv.lock
