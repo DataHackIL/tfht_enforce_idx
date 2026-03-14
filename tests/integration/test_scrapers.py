@@ -226,7 +226,9 @@ class TestMakoScraper:
 
         class FakePage:
             def __init__(self) -> None:
-                self.url = "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA"
+                self.url = (
+                    "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA"
+                )
                 self.goto_calls: list[str] = []
                 self.waited_for_timeout_ms: list[int] = []
                 self.state_index = 0
@@ -456,7 +458,16 @@ class TestMakoScraper:
         await scraper._close_browser_session(session)
 
         assert session.page is not None
-        assert events == ["enter", "launch", "new_context", "route", "new_page", "context_close", "browser_close", "exit"]
+        assert events == [
+            "enter",
+            "launch",
+            "new_context",
+            "route",
+            "new_page",
+            "context_close",
+            "browser_close",
+            "exit",
+        ]
 
     @pytest.mark.asyncio
     async def test_open_browser_session_handles_launch_failure(
@@ -519,7 +530,9 @@ class TestMakoScraper:
             async def continue_(self) -> None:
                 self.action = "continue"
 
-        blocked_route = FakeRoute(FakeRequest("image", "https://securepubads.g.doubleclick.net/tag"))
+        blocked_route = FakeRoute(
+            FakeRequest("image", "https://securepubads.g.doubleclick.net/tag")
+        )
         allowed_route = FakeRoute(FakeRequest("script", "https://www.mako.co.il/js/app.js"))
 
         await scraper._handle_browser_route(blocked_route)
