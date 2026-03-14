@@ -149,9 +149,7 @@ class TestClassifierRuntime:
         classifier = Classifier(api_key="test-key")
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         messages = MagicMock()
-        messages.create = MagicMock(
-            side_effect=anthropic.APIError("boom", request, body=None)
-        )
+        messages.create = MagicMock(side_effect=anthropic.APIError("boom", request, body=None))
         classifier._client.messages = messages
         article = RawArticle(
             url=HttpUrl("https://example.com/1"),

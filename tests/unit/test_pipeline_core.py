@@ -118,9 +118,7 @@ class TestSetupLogging:
 class TestCreateSourcesWarnings:
     """Tests for create_sources warning branches."""
 
-    def test_create_sources_warns_on_missing_rss_url(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_create_sources_warns_on_missing_rss_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """RSS sources without URLs should be skipped with a warning."""
         config = Config(sources=[SourceConfig(name="ynet", type=SourceType.RSS)])
         mock_logger = MagicMock()
@@ -131,9 +129,7 @@ class TestCreateSourcesWarnings:
         assert sources == []
         mock_logger.warning.assert_called_once()
 
-    def test_create_sources_warns_on_unknown_scraper(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_create_sources_warns_on_unknown_scraper(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Unknown scraper names should be skipped with a warning."""
         config = Config(sources=[SourceConfig(name="unknown", type=SourceType.SCRAPER)])
         mock_logger = MagicMock()
@@ -209,7 +205,9 @@ class TestRunPipelineAsync:
     """Tests for async pipeline control flow."""
 
     @pytest.mark.asyncio
-    async def test_run_pipeline_async_requires_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_run_pipeline_async_requires_api_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Missing API key should short-circuit before any work starts."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
@@ -234,6 +232,7 @@ class TestRunPipelineAsync:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """No fetched articles should return early."""
+
         def fake_create_deduplicator(*, threshold: float) -> MagicMock:
             del threshold
             return MagicMock()
@@ -254,6 +253,7 @@ class TestRunPipelineAsync:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Already-seen articles should stop before classification."""
+
         def fake_create_deduplicator(*, threshold: float) -> MagicMock:
             del threshold
             return MagicMock()
@@ -276,6 +276,7 @@ class TestRunPipelineAsync:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Large unseen batches should warn, then return early if nothing is relevant."""
+
         def fake_create_deduplicator(*, threshold: float) -> MagicMock:
             del threshold
             return MagicMock()
@@ -300,6 +301,7 @@ class TestRunPipelineAsync:
     @pytest.mark.asyncio
     async def test_run_pipeline_async_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Successful runs should return unified items after marking them seen."""
+
         def fake_create_classifier(*, api_key: str, model: str) -> MagicMock:
             del api_key, model
             return classifier

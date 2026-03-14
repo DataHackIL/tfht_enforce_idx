@@ -1,4 +1,5 @@
 """RSS feed fetcher for news sources."""
+
 import logging
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
