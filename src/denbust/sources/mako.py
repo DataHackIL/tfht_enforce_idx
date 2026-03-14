@@ -44,6 +44,8 @@ SECTION_READY_SELECTORS = [
     ".article",
     ".item",
 ]
+
+
 class _ViewportSize(TypedDict):
     """Viewport dimensions for Playwright browser contexts."""
 
