@@ -1,8 +1,10 @@
 """Unit tests for CLI command wiring."""
 
+import runpy
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from denbust.cli import app
@@ -51,3 +53,17 @@ class TestCli:
 
         assert result.exit_code == 0
         assert "denbust version 0.1.0" in result.stdout
+
+    def test_module_main_invokes_typer_app(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Running the module as __main__ should invoke the Typer app."""
+        calls: list[bool] = []
+
+        def fake_call(self: typer.Typer, *args: object, **kwargs: object) -> None:
+            del self, args, kwargs
+            calls.append(True)
+
+        monkeypatch.setattr(typer.Typer, "__call__", fake_call)
+
+        runpy.run_module("denbust.cli", run_name="__main__")
+
+        assert calls == [True]

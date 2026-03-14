@@ -1,16 +1,20 @@
 """Integration tests for scrapers with fixture HTML."""
 
+import builtins
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 import respx
 from bs4 import BeautifulSoup
 from httpx import Response
 
-from denbust.sources.maariv import MaarivScraper
-from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper
+from denbust.data_models import RawArticle
+from denbust.sources.maariv import MaarivScraper, create_maariv_source
+from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source
 from denbust.sources.rss import RSSSource
 
 # Load fixture files
@@ -30,6 +34,12 @@ class TestMakoScraper:
     def _create_scraper() -> MakoScraper:
         """Create a scraper with rate limiting disabled for tests."""
         return MakoScraper(rate_limit_delay_seconds=0)
+
+    def test_factory_helper_returns_named_source(self) -> None:
+        """Factory helper should return the canonical Mako source."""
+        scraper = create_mako_source()
+
+        assert scraper.name == "mako"
 
     @pytest.mark.asyncio
     async def test_parse_search_results(self) -> None:
@@ -155,6 +165,53 @@ class TestMakoScraper:
         articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
 
         assert articles == []
+
+    @pytest.mark.asyncio
+    async def test_fetch_logs_cleanup_failure_and_keeps_articles(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Session cleanup failures should be logged after successful scraping."""
+        html_content = load_fixture("html/mako_search.html")
+        scraper = self._create_scraper()
+
+        async def open_browser_session() -> object:
+            return object()
+
+        async def close_browser_session(session: object) -> None:
+            del session
+            raise RuntimeError("close failed")
+
+        async def fetch_search_html(session: object, keyword: str) -> str:
+            del session, keyword
+            return html_content
+
+        async def fetch_section_html(session: object, url: str) -> str:
+            del session, url
+            return "<html></html>"
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser_session)
+        monkeypatch.setattr(scraper, "_close_browser_session", close_browser_session)
+        monkeypatch.setattr(scraper, "_fetch_search_html", fetch_search_html)
+        monkeypatch.setattr(scraper, "_fetch_section_html", fetch_section_html)
+
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
+
+        assert len(articles) == 2
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_sleeps_when_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Rate limiting should sleep when configured with a positive delay."""
+        scraper = MakoScraper(rate_limit_delay_seconds=0.25)
+        calls: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            calls.append(seconds)
+
+        monkeypatch.setattr("denbust.sources.mako.asyncio.sleep", fake_sleep)
+
+        await scraper._rate_limit()
+
+        assert calls == [0.25]
 
     @pytest.mark.asyncio
     async def test_continues_after_keyword_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -515,11 +572,314 @@ class TestMakoScraper:
 
         assert events == ["enter", "exit"]
 
+    @pytest.mark.asyncio
+    async def test_open_browser_session_reports_missing_playwright(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing Playwright should raise a clear runtime error."""
+        scraper = self._create_scraper()
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "playwright.async_api":
+                raise ImportError("missing playwright")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(RuntimeError, match="Playwright is not installed"):
+            await scraper._open_browser_session()
+
     def test_parse_hebrew_date_rejects_invalid_two_digit_date(self) -> None:
         """Test that invalid dd/mm/yy metadata does not parse as a real date."""
         scraper = self._create_scraper()
 
         assert scraper._parse_hebrew_date("פלילים+ | 32/13/26 | זמן קריאה: 2.3 דק'") is None
+
+    def test_parse_hebrew_date_rejects_invalid_full_year_and_iso_date(self) -> None:
+        """Invalid Mako dates should fail cleanly for all supported formats."""
+        scraper = self._create_scraper()
+
+        assert scraper._parse_hebrew_date("99/13/2026") is None
+        assert scraper._parse_hebrew_date("2026-13-99") is None
+
+    def test_parse_article_item_fallbacks_and_filters(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Article parsing should cover fallback selectors and filtering branches."""
+        scraper = self._create_scraper()
+        cutoff = datetime(2026, 3, 10, tzinfo=UTC)
+        old_cutoff = datetime(2026, 3, 13, tzinfo=UTC)
+
+        def parse(markup: str, *, parse_date: datetime | None = None) -> RawArticle | None:
+            soup = BeautifulSoup(markup, "lxml")
+            item = soup.select_one("li, article, div")
+            monkeypatch.setattr(scraper, "_parse_date", lambda _item: parse_date)
+            assert item is not None
+            return scraper._parse_article_item(item, cutoff)
+
+        article = parse(
+            """
+            <li>
+              <a href="/men-men_news/Article-123.htm?Partner=searchResults">לינק</a>
+              <h5>כותרת</h5>
+              <p>תקציר</p>
+            </li>
+            """,
+            parse_date=datetime(2026, 3, 12, tzinfo=UTC),
+        )
+        assert article is not None
+        assert str(article.url).endswith("/men-men_news/Article-123.htm")
+
+        empty_href = parse("<li><a href=''>לינק</a><h5>כותרת</h5></li>")
+        assert empty_href is None
+
+        non_article = parse("<li><a href='/tag/test'>לינק</a><h5>כותרת</h5></li>")
+        assert non_article is None
+
+        no_title = parse("<li><a href='/men-men_news/Article-123.htm'></a></li>")
+        assert no_title is None
+
+        monkeypatch.setattr(
+            scraper, "_parse_date", lambda _item: datetime(2026, 3, 12, tzinfo=UTC)
+        )
+        old_item = BeautifulSoup(
+            "<li><a href='/men-men_news/Article-123.htm'>לינק</a><h5>כותרת</h5></li>",
+            "lxml",
+        ).select_one("li")
+        assert old_item is not None
+        assert scraper._parse_article_item(old_item, old_cutoff) is None
+
+        monkeypatch.setattr(scraper, "_parse_date", lambda _item: None)
+        no_date_item = BeautifulSoup(
+            "<li><a href='/men-men_news/Article-456.htm'>לינק</a><h5>כותרת</h5></li>",
+            "lxml",
+        ).select_one("li")
+        assert no_date_item is not None
+        no_date_article = scraper._parse_article_item(no_date_item, cutoff)
+        assert no_date_article is not None
+
+        no_href_attr = BeautifulSoup(
+            "<li><a>לינק</a><h5>כותרת</h5></li>",
+            "lxml",
+        ).select_one("li")
+        assert no_href_attr is not None
+        assert scraper._parse_article_item(no_href_attr, cutoff) is None
+
+    def test_parse_date_falls_back_from_bad_datetime_and_text(self) -> None:
+        """Date parsing should fall back from invalid datetime attrs to text parsing."""
+        scraper = self._create_scraper()
+        item = BeautifulSoup(
+            """
+            <li>
+              <time datetime="not-a-date">פורסם: 06/03/26</time>
+            </li>
+            """,
+            "lxml",
+        ).select_one("li")
+
+        assert item is not None
+        assert scraper._parse_date(item) == datetime(2026, 3, 6, tzinfo=UTC)
+
+    def test_parse_date_returns_none_without_any_recognized_date(self) -> None:
+        """Date parsing should return None when no supported formats are present."""
+        scraper = self._create_scraper()
+        item = BeautifulSoup("<li><span>ללא תאריך</span></li>", "lxml").select_one("li")
+
+        assert item is not None
+        assert scraper._parse_date(item) is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_html_delegates_to_search_results_helper(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Search HTML helper should build the canonical URL and delegate once."""
+        scraper = self._create_scraper()
+        session = SimpleNamespace(page=object())
+        calls: list[tuple[str, str]] = []
+
+        async def fake_fetch(page: object, url: str, keyword: str) -> str:
+            assert page is session.page
+            calls.append((url, keyword))
+            return "<html></html>"
+
+        monkeypatch.setattr(scraper, "_fetch_search_results_html", fake_fetch)
+
+        html = await scraper._fetch_search_html(session, "זנות")
+
+        assert html == "<html></html>"
+        assert calls == [(scraper._build_search_url("זנות"), "זנות")]
+
+    @pytest.mark.asyncio
+    async def test_search_keyword_returns_empty_on_missing_html(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Search helper should return no articles when no rendered HTML is available."""
+        scraper = self._create_scraper()
+        session = SimpleNamespace(page=object())
+
+        async def fake_fetch_search_html(_session: object, _keyword: str) -> None:
+            return None
+
+        monkeypatch.setattr(scraper, "_fetch_search_html", fake_fetch_search_html)
+
+        articles = await scraper._search_keyword(
+            session, "זנות", datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS)
+        )
+
+        assert articles == []
+
+    @pytest.mark.asyncio
+    async def test_fetch_section_html_delegates_to_rendered_html(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Section HTML helper should call the generic rendered-page helper."""
+        scraper = self._create_scraper()
+        session = SimpleNamespace(page=object())
+        calls: list[tuple[object, str, list[str], str]] = []
+
+        async def fake_fetch(
+            page: object, url: str, selectors: list[str], description: str
+        ) -> str:
+            calls.append((page, url, selectors, description))
+            return "<html></html>"
+
+        monkeypatch.setattr(scraper, "_fetch_rendered_html", fake_fetch)
+
+        html = await scraper._fetch_section_html(session, "https://www.mako.co.il/men-men_news")
+
+        assert html == "<html></html>"
+        assert calls[0][0] is session.page
+        assert calls[0][1] == "https://www.mako.co.il/men-men_news"
+        assert calls[0][3] == "men-news section"
+
+    @pytest.mark.asyncio
+    async def test_fetch_rendered_html_raises_actionable_timeout(self) -> None:
+        """Generic rendered-page fetch should surface parseability timeouts."""
+        import playwright.async_api as playwright_async_api
+
+        scraper = self._create_scraper()
+
+        class FakePage:
+            url = "https://www.mako.co.il/men-men_news"
+
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                del url, wait_until, timeout
+
+            async def wait_for_function(self, *args: Any, **kwargs: Any) -> None:
+                del args, kwargs
+                raise playwright_async_api.TimeoutError("timed out")
+
+        with pytest.raises(RuntimeError, match="never became parseable"):
+            await scraper._fetch_rendered_html(
+                FakePage(),
+                "https://www.mako.co.il/men-men_news",
+                ["article"],
+                "men-news section",
+            )
+
+    @pytest.mark.asyncio
+    async def test_fetch_rendered_html_returns_page_content(self) -> None:
+        """Generic rendered-page fetch should return page content after readiness."""
+        scraper = self._create_scraper()
+
+        class FakePage:
+            url = "https://www.mako.co.il/men-men_news"
+
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                del url, wait_until, timeout
+
+            async def wait_for_function(self, *args: Any, **kwargs: Any) -> None:
+                del args, kwargs
+
+            async def wait_for_timeout(self, timeout_ms: int) -> None:
+                assert timeout_ms == 750
+
+            async def content(self) -> str:
+                return "<html><body><article>ready</article></body></html>"
+
+        html = await scraper._fetch_rendered_html(
+            FakePage(),
+            "https://www.mako.co.il/men-men_news",
+            ["article"],
+            "men-news section",
+        )
+
+        assert "ready" in html
+
+    @pytest.mark.asyncio
+    async def test_fetch_rendered_html_reports_missing_playwright(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Generic rendered-page fetch should report missing Playwright imports."""
+        scraper = self._create_scraper()
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "playwright.async_api":
+                raise ImportError("missing playwright")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(RuntimeError, match="Playwright is not installed"):
+            await scraper._fetch_rendered_html(
+                object(),
+                "https://www.mako.co.il/men-men_news",
+                ["article"],
+                "men-news section",
+            )
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_html_reports_navigation_timeout(self) -> None:
+        """Search helper should raise a clear error on initial navigation timeout."""
+        import playwright.async_api as playwright_async_api
+
+        scraper = self._create_scraper()
+
+        class FakePage:
+            url = "https://www.mako.co.il/Search"
+
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                del url, wait_until, timeout
+                raise playwright_async_api.TimeoutError("timeout")
+
+        with pytest.raises(RuntimeError, match="navigation timed out"):
+            await scraper._fetch_search_results_html(
+                FakePage(),
+                "https://www.mako.co.il/Search",
+                "זנות",
+            )
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_html_reports_missing_playwright(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Search helper should report missing Playwright imports."""
+        scraper = self._create_scraper()
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "playwright.async_api":
+                raise ImportError("missing playwright")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(RuntimeError, match="Playwright is not installed"):
+            await scraper._fetch_search_results_html(
+                object(),
+                "https://www.mako.co.il/Search",
+                "זנות",
+            )
+
+    @pytest.mark.asyncio
+    async def test_wait_for_challenge_resolution_false_without_challenge(self) -> None:
+        """Challenge wait should return false when already on Mako."""
+        scraper = self._create_scraper()
+
+        class FakePage:
+            url = "https://www.mako.co.il/Search?searchstring_input=%D7%96%D7%A0%D7%95%D7%AA"
+
+        assert await scraper._wait_for_challenge_resolution(FakePage(), "search") is False
 
     @pytest.mark.asyncio
     async def test_browser_route_blocks_nonessential_resources(self) -> None:
@@ -553,9 +913,72 @@ class TestMakoScraper:
         assert blocked_route.action == "abort"
         assert allowed_route.action == "continue"
 
+    @pytest.mark.asyncio
+    async def test_browser_route_blocks_known_tracker_urls(self) -> None:
+        """Known noisy third-party tracker URLs should be blocked even for scripts."""
+        scraper = self._create_scraper()
+
+        class FakeRequest:
+            def __init__(self, resource_type: str, url: str) -> None:
+                self.resource_type = resource_type
+                self.url = url
+
+        class FakeRoute:
+            def __init__(self, request: FakeRequest) -> None:
+                self.request = request
+                self.action: str | None = None
+
+            async def abort(self) -> None:
+                self.action = "abort"
+
+            async def continue_(self) -> None:
+                self.action = "continue"
+
+        blocked_route = FakeRoute(
+            FakeRequest("script", "https://www.googletagmanager.com/gtm.js?id=123")
+        )
+
+        await scraper._handle_browser_route(blocked_route)
+
+        assert blocked_route.action == "abort"
+
 
 class TestMaarivScraper:
     """Integration tests for Maariv scraper."""
+
+    def test_factory_helper_returns_named_source(self) -> None:
+        """Factory helper should return the canonical Maariv source."""
+        scraper = create_maariv_source()
+
+        assert scraper.name == "maariv"
+
+    @pytest.mark.asyncio
+    async def test_fetch_deduplicates_section_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fetch should deduplicate repeated section articles by canonical URL."""
+        scraper = MaarivScraper()
+        article = RawArticle(
+            url="https://www.maariv.co.il/news/law/article-1270778",
+            title="כתבה",
+            snippet="תקציר",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="maariv",
+        )
+
+        async def fake_sleep(seconds: float) -> None:
+            del seconds
+
+        async def fake_scrape_section(
+            url: str, cutoff: datetime, keywords: list[str]
+        ) -> list[RawArticle]:
+            del url, cutoff, keywords
+            return [article, article]
+
+        monkeypatch.setattr("denbust.sources.maariv.asyncio.sleep", fake_sleep)
+        monkeypatch.setattr(scraper, "_scrape_section", fake_scrape_section)
+
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["בית בושת"])
+
+        assert len(articles) == 1
 
     def test_parse_search_results_extracts_article(self) -> None:
         """Search result parsing should recover article title, snippet, and URL."""
@@ -578,6 +1001,48 @@ class TestMaarivScraper:
         assert articles[0].title == "חשד לבית בושת בבני ברק"
         assert "maariv.co.il/news/law/article-1270778" in str(articles[0].url)
 
+    @pytest.mark.asyncio
+    async def test_search_keyword_handles_client_states(self) -> None:
+        """Search helper should cover no-client, success, and HTTP error branches."""
+        scraper = MaarivScraper()
+        cutoff = datetime(2026, 2, 1, tzinfo=UTC)
+        assert await scraper._search_keyword("בית בושת", cutoff) == []
+
+        html = """
+        <div class="search-result">
+          <a href="/news/law/article-1270778">לכתבה</a>
+          <h2>חשד לבית בושת בבני ברק</h2>
+          <p>המשטרה עצרה חשודים.</p>
+          <time datetime="2026-03-01T10:00:00+00:00"></time>
+        </div>
+        """
+
+        class FakeResponse:
+            def __init__(self, status_code: int, text: str) -> None:
+                self.status_code = status_code
+                self.text = text
+
+            def raise_for_status(self) -> None:
+                if self.status_code >= 400:
+                    request = httpx.Request("GET", "https://www.maariv.co.il/search?q=test")
+                    response = httpx.Response(self.status_code, request=request)
+                    raise httpx.HTTPStatusError("bad status", request=request, response=response)
+
+        class FakeClient:
+            def __init__(self, response: FakeResponse) -> None:
+                self.response = response
+
+            async def get(self, url: str) -> FakeResponse:
+                assert "q=%D7%91%D7%99%D7%AA+%D7%91%D7%95%D7%A9%D7%AA" in url
+                return self.response
+
+        scraper._client = FakeClient(FakeResponse(200, html))
+        articles = await scraper._search_keyword("בית בושת", cutoff)
+        assert len(articles) == 1
+
+        scraper._client = FakeClient(FakeResponse(500, ""))
+        assert await scraper._search_keyword("בית בושת", cutoff) == []
+
     def test_parse_section_page_filters_non_matching_keywords(self) -> None:
         """Section parsing should apply keyword filtering after article extraction."""
         scraper = MaarivScraper()
@@ -597,6 +1062,26 @@ class TestMaarivScraper:
         )
 
         assert articles == []
+
+    def test_parse_section_page_keeps_matching_articles(self) -> None:
+        """Section parsing should keep matching articles after extraction."""
+        scraper = MaarivScraper()
+        html = """
+        <article class="category-article">
+          <a class="category-article-link" href="/news/law/article-1270778"></a>
+          <h2>חשד לבית בושת בבני ברק</h2>
+          <p>המשטרה עצרה חשודים.</p>
+          <time datetime="2026-03-01T10:00:00+00:00"></time>
+        </article>
+        """
+
+        articles = scraper._parse_section_page(
+            html,
+            cutoff=datetime(2026, 2, 1, tzinfo=UTC),
+            keywords=["בית בושת"],
+        )
+
+        assert len(articles) == 1
 
     def test_parse_article_item_rejects_non_article_links(self) -> None:
         """Generic links that are not article URLs should be ignored."""
@@ -618,6 +1103,73 @@ class TestMaarivScraper:
 
         assert article is None
 
+    def test_parse_article_item_covers_fallbacks_and_filters(self) -> None:
+        """Article parsing should cover fallback selectors and filter branches."""
+        scraper = MaarivScraper()
+        cutoff = datetime(2026, 2, 1, tzinfo=UTC)
+
+        article_from_news_link = scraper._parse_article_item(
+            BeautifulSoup(
+                """
+                <article>
+                  <a href="/news/law/123">לינק</a>
+                  <h2>כותרת</h2>
+                </article>
+                """,
+                "lxml",
+            ).select_one("article"),
+            cutoff,
+        )
+        assert article_from_news_link is not None
+
+        no_href = scraper._parse_article_item(
+            BeautifulSoup("<article><a>לינק</a></article>", "lxml").select_one("article"),
+            cutoff,
+        )
+        assert no_href is None
+
+        external = scraper._parse_article_item(
+            BeautifulSoup(
+                "<article><a href='https://example.com/article-1'>לינק</a><h2>כותרת</h2></article>",
+                "lxml",
+            ).select_one("article"),
+            cutoff,
+        )
+        assert external is None
+
+        no_title = scraper._parse_article_item(
+            BeautifulSoup(
+                "<article><a href='/news/law/article-1270778'></a></article>",
+                "lxml",
+            ).select_one("article"),
+            cutoff,
+        )
+        assert no_title is None
+
+        old = scraper._parse_article_item(
+            BeautifulSoup(
+                """
+                <article>
+                  <a href="/news/law/article-1270778">לינק</a>
+                  <h2>כותרת</h2>
+                  <time datetime="2026-01-01T10:00:00+00:00"></time>
+                </article>
+                """,
+                "lxml",
+            ).select_one("article"),
+            datetime(2026, 2, 1, tzinfo=UTC),
+        )
+        assert old is None
+
+        no_date = scraper._parse_article_item(
+            BeautifulSoup(
+                "<article><a href='/news/law/article-1270778'>לינק</a><h2>כותרת</h2></article>",
+                "lxml",
+            ).select_one("article"),
+            cutoff,
+        )
+        assert no_date is not None
+
     def test_parse_date_prefers_datetime_attribute(self) -> None:
         """ISO datetime attributes should be parsed directly."""
         scraper = MaarivScraper()
@@ -630,6 +1182,32 @@ class TestMaarivScraper:
 
         assert parsed == datetime(2026, 3, 1, 10, 0, tzinfo=UTC)
 
+    def test_parse_date_handles_invalid_datetime_and_text_fallback(self) -> None:
+        """Date parsing should fall back from invalid datetime attrs to visible text."""
+        scraper = MaarivScraper()
+        item = BeautifulSoup(
+            "<article><time datetime='bad'>15.02.2026</time></article>",
+            "lxml",
+        ).select_one("article")
+
+        assert item is not None
+        assert scraper._parse_date(item) == datetime(2026, 2, 15, tzinfo=UTC)
+
+    def test_parse_date_uses_article_text_and_handles_invalid_text(self) -> None:
+        """Date parsing should inspect article text and reject invalid values cleanly."""
+        scraper = MaarivScraper()
+        with_text = BeautifulSoup("<article>פורסם בתאריך 2026-02-15</article>", "lxml").select_one(
+            "article"
+        )
+        invalid_text = BeautifulSoup("<article>פורסם בתאריך 2026-13-99</article>", "lxml").select_one(
+            "article"
+        )
+
+        assert with_text is not None
+        assert invalid_text is not None
+        assert scraper._parse_date(with_text) == datetime(2026, 2, 15, tzinfo=UTC)
+        assert scraper._parse_date(invalid_text) is None
+
     def test_parse_hebrew_date_supports_dotted_format(self) -> None:
         """Maariv date parser should accept dd.mm.yyyy strings."""
         scraper = MaarivScraper()
@@ -637,6 +1215,60 @@ class TestMaarivScraper:
         parsed = scraper._parse_hebrew_date("פורסם בתאריך 15.02.2026")
 
         assert parsed == datetime(2026, 2, 15, tzinfo=UTC)
+
+    def test_parse_hebrew_date_supports_iso_and_rejects_invalid_dates(self) -> None:
+        """Maariv date parser should support ISO dates and reject impossible values."""
+        scraper = MaarivScraper()
+
+        assert scraper._parse_hebrew_date("2026-02-15") == datetime(2026, 2, 15, tzinfo=UTC)
+        assert scraper._parse_hebrew_date("2026-13-40") is None
+
+    @pytest.mark.asyncio
+    async def test_scrape_section_handles_client_states(self) -> None:
+        """Section helper should cover no-client, success, and HTTP error branches."""
+        scraper = MaarivScraper()
+        cutoff = datetime(2026, 2, 1, tzinfo=UTC)
+        assert await scraper._scrape_section("https://www.maariv.co.il/news/law", cutoff, []) == []
+
+        html = """
+        <article class="category-article">
+          <a class="category-article-link" href="/news/law/article-1270778"></a>
+          <h2>חשד לבית בושת בבני ברק</h2>
+          <p>המשטרה עצרה חשודים.</p>
+          <time datetime="2026-03-01T10:00:00+00:00"></time>
+        </article>
+        """
+
+        class FakeResponse:
+            def __init__(self, status_code: int, text: str) -> None:
+                self.status_code = status_code
+                self.text = text
+
+            def raise_for_status(self) -> None:
+                if self.status_code >= 400:
+                    request = httpx.Request("GET", "https://www.maariv.co.il/news/law")
+                    response = httpx.Response(self.status_code, request=request)
+                    raise httpx.HTTPStatusError("bad status", request=request, response=response)
+
+        class FakeClient:
+            def __init__(self, response: FakeResponse) -> None:
+                self.response = response
+
+            async def get(self, url: str) -> FakeResponse:
+                assert url == "https://www.maariv.co.il/news/law"
+                return self.response
+
+        scraper._client = FakeClient(FakeResponse(200, html))
+        articles = await scraper._scrape_section(
+            "https://www.maariv.co.il/news/law", cutoff, ["בית בושת"]
+        )
+        assert len(articles) == 1
+
+        scraper._client = FakeClient(FakeResponse(500, ""))
+        assert (
+            await scraper._scrape_section("https://www.maariv.co.il/news/law", cutoff, ["בית בושת"])
+            == []
+        )
 
     @respx.mock
     @pytest.mark.asyncio
@@ -734,6 +1366,34 @@ class TestRSSSource:
 
         assert article is not None
         assert article.title == "בית בושת"
+
+    @pytest.mark.asyncio
+    async def test_fetch_logs_bozo_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Bozo feeds should still parse while logging the parser warning."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        cutoff_entry = {
+            "link": "https://example.com/1",
+            "title": "בית בושת",
+            "summary": "summary",
+            "published": "Fri, 14 Mar 2026 10:00:00 GMT",
+        }
+
+        async def fake_fetch_feed() -> str:
+            return "<xml />"
+
+        monkeypatch.setattr(source, "_fetch_feed", fake_fetch_feed)
+        monkeypatch.setattr(
+            "denbust.sources.rss.feedparser.parse",
+            lambda _content: SimpleNamespace(
+                bozo=True,
+                bozo_exception=ValueError("bad feed"),
+                entries=[cutoff_entry],
+            ),
+        )
+
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["בית בושת"])
+
+        assert len(articles) == 1
 
     def test_factory_helpers_create_expected_sources(self) -> None:
         """Factory helpers should return the canonical source names and URLs."""

@@ -23,7 +23,9 @@ from denbust.data_models import (
 from denbust.pipeline import (
     classify_articles,
     create_sources,
+    deduplicate_articles,
     fetch_all_sources,
+    filter_seen,
     mark_seen,
     run_pipeline,
     run_pipeline_async,
@@ -140,6 +142,28 @@ class TestCreateSourcesWarnings:
         assert sources == []
         mock_logger.warning.assert_called_once()
 
+    def test_create_sources_skips_disabled_and_builds_known_sources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Enabled RSS and scraper sources should be instantiated; disabled ones skipped."""
+        config = Config(
+            sources=[
+                SourceConfig(name="disabled", type=SourceType.RSS, enabled=False),
+                SourceConfig(name="ynet", type=SourceType.RSS, url="https://example.com/feed.xml"),
+                SourceConfig(name="mako", type=SourceType.SCRAPER),
+                SourceConfig(name="maariv", type=SourceType.SCRAPER),
+            ]
+        )
+
+        monkeypatch.setattr("denbust.pipeline.create_mako_source", lambda: FakeSource("mako", []))
+        monkeypatch.setattr(
+            "denbust.pipeline.create_maariv_source", lambda: FakeSource("maariv", [])
+        )
+
+        sources = create_sources(config)
+
+        assert [source.name for source in sources] == ["ynet", "mako", "maariv"]
+
 
 class TestFetchAndClassifyHelpers:
     """Tests for fetch and classification helpers."""
@@ -199,6 +223,29 @@ class TestFetchAndClassifyHelpers:
 
         assert store.is_seen("https://a.com/1")
         assert store.is_seen("https://b.com/1")
+
+    def test_filter_seen_filters_logged_urls(self, tmp_path: Path) -> None:
+        """filter_seen should drop URLs already present in the seen store."""
+        from denbust.store.seen import SeenStore
+
+        store = SeenStore(tmp_path / "seen.json")
+        seen = build_raw_article("https://example.com/seen")
+        unseen = build_raw_article("https://example.com/unseen")
+        store.mark_seen([str(seen.url)])
+
+        filtered = filter_seen([seen, unseen], store)
+
+        assert filtered == [unseen]
+
+    def test_deduplicate_articles_logs_result_count(self) -> None:
+        """deduplicate_articles should return the deduplicator result unchanged."""
+        deduplicator = MagicMock()
+        expected = [build_unified_item()]
+        deduplicator.deduplicate.return_value = expected
+
+        items = deduplicate_articles([build_classified_article()], deduplicator)
+
+        assert items == expected
 
 
 class TestRunPipelineAsync:
