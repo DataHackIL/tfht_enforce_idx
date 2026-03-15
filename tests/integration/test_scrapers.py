@@ -1001,6 +1001,194 @@ class TestIceScraper:
         assert item is not None
         assert scraper._parse_article_item(item, cutoff) is None
 
+    @pytest.mark.asyncio
+    async def test_rate_limit_sleeps_when_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Positive ICE rate limits should sleep between requests."""
+        scraper = IceScraper(rate_limit_delay_seconds=0.25)
+        calls: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            calls.append(seconds)
+
+        monkeypatch.setattr("denbust.sources.ice.asyncio.sleep", fake_sleep)
+
+        await scraper._rate_limit()
+
+        assert calls == [0.25]
+
+    @pytest.mark.asyncio
+    async def test_search_keyword_returns_empty_without_client(self) -> None:
+        """Keyword search should return no articles before a client is configured."""
+        scraper = self._create_scraper()
+
+        articles = await scraper._search_keyword(
+            "בית בושת",
+            datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS),
+        )
+
+        assert articles == []
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_page_returns_none_without_client(self) -> None:
+        """Page fetches should no-op when no HTTP client exists."""
+        scraper = self._create_scraper()
+
+        html = await scraper._fetch_search_page("בית בושת", 1)
+
+        assert html is None
+
+    def test_parse_search_results_returns_empty_without_results_container(self) -> None:
+        """Search parsing should return an empty list when the result container is absent."""
+        scraper = self._create_scraper()
+
+        articles = scraper._parse_search_results(
+            "<html><body><h1>דף אחר</h1></body></html>",
+            datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS),
+        )
+
+        assert articles == []
+
+    def test_find_results_article_handles_missing_heading_and_empty_article(self) -> None:
+        """Results lookup should fail cleanly when ICE search chrome is incomplete."""
+        scraper = self._create_scraper()
+        no_heading = BeautifulSoup("<html><body><article><ul><li>test</li></ul></article></body></html>", "lxml")
+        no_items = BeautifulSoup(
+            """
+            <html>
+              <body>
+                <h1>נמצאו 2 תוצאות חיפוש</h1>
+                <article><div>ללא רשימה</div></article>
+              </body>
+            </html>
+            """,
+            "lxml",
+        )
+
+        assert scraper._find_results_article(no_heading) is None
+        assert scraper._find_results_article(no_items) is None
+
+    def test_parse_article_item_returns_none_without_text_links(self) -> None:
+        """Article parsing should skip matches whose candidate links have no visible text."""
+        scraper = self._create_scraper()
+        cutoff = datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS)
+
+        class FakeLink:
+            def get(self, key: str, default: str = "") -> str:
+                return "/law/news/article/1086606" if key == "href" else default
+
+            def get_text(self, separator: str = " ", strip: bool = False) -> str:
+                del separator, strip
+                return ""
+
+        class FakeItem:
+            def select(self, selector: str) -> list[FakeLink]:
+                assert selector == "a[href]"
+                return [FakeLink()]
+
+            def select_one(self, selector: str) -> None:
+                del selector
+                return None
+
+            def get_text(self, separator: str = " ", strip: bool = False) -> str:
+                del separator, strip
+                return "12/3/2026 6:15"
+
+        assert scraper._parse_article_item(FakeItem(), cutoff) is None
+
+    def test_parse_article_item_returns_none_when_title_becomes_empty(self) -> None:
+        """A blank title after candidate filtering should be discarded."""
+        scraper = self._create_scraper()
+        cutoff = datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS)
+
+        class FlakyLink:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get(self, key: str, default: str = "") -> str:
+                return "/law/news/article/1086606" if key == "href" else default
+
+            def get_text(self, separator: str = " ", strip: bool = False) -> str:
+                del separator, strip
+                self.calls += 1
+                return "כותרת" if self.calls == 1 else ""
+
+        class FakeItem:
+            def __init__(self) -> None:
+                self.link = FlakyLink()
+
+            def select(self, selector: str) -> list[FlakyLink]:
+                assert selector == "a[href]"
+                return [self.link]
+
+            def select_one(self, selector: str) -> None:
+                del selector
+                return None
+
+            def get_text(self, separator: str = " ", strip: bool = False) -> str:
+                del separator, strip
+                return "12/3/2026 6:15"
+
+        assert scraper._parse_article_item(FakeItem(), cutoff) is None
+
+    def test_parse_article_item_uses_paragraph_snippet_fallback(self) -> None:
+        """Paragraph text should be used when no secondary snippet link exists."""
+        scraper = self._create_scraper()
+        cutoff = datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS)
+        item = BeautifulSoup(
+            """
+            <li>
+              <a href="/law/news/article/1086606">בית בושת אותר בתוך מקלט ציבורי</a>
+              <p>עיריית בת ים פתחה בחקירה</p>
+              <span>12/3/2026 6:15</span>
+            </li>
+            """,
+            "lxml",
+        ).li
+
+        assert item is not None
+        article = scraper._parse_article_item(item, cutoff)
+
+        assert article is not None
+        assert article.snippet == "עיריית בת ים פתחה בחקירה"
+
+    def test_parse_date_invalid_calendar_values_return_none(self) -> None:
+        """Invalid calendar dates should be handled without raising."""
+        scraper = self._create_scraper()
+
+        assert scraper._parse_date("32/13/2026 25:61") is None
+
+    def test_has_next_page_detects_numbered_link_without_next_label(self) -> None:
+        """Pagination should also work when only a numbered page link is present."""
+        scraper = self._create_scraper()
+        html = """
+        <html>
+          <body>
+            <nav>
+              <a href="/list/searchresult/%D7%91%D7%99%D7%AA%20%D7%91%D7%95%D7%A9%D7%AA/page-2">2</a>
+            </nav>
+          </body>
+        </html>
+        """
+
+        assert scraper._has_next_page(html, 1) is True
+
+    def test_is_article_url_rejects_empty_and_external_urls(self) -> None:
+        """Only internal ICE article paths should be accepted."""
+        scraper = self._create_scraper()
+
+        assert scraper._is_article_url("") is False
+        assert scraper._is_article_url("https://example.com/law/news/article/1086606") is False
+
+    def test_normalize_article_url_strips_query_and_fragment(self) -> None:
+        """ICE article URLs should be canonicalized before deduplication."""
+        scraper = self._create_scraper()
+
+        normalized = scraper._normalize_article_url(
+            "https://www.ice.co.il/law/news/article/1086606?utm_source=search#headline"
+        )
+
+        assert normalized == "https://www.ice.co.il/law/news/article/1086606"
+
     @respx.mock
     @pytest.mark.asyncio
     async def test_fetch_paginates_and_deduplicates(self) -> None:
