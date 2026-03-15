@@ -145,6 +145,19 @@ class TestConfig:
         assert config.store.seen_path == Path("/tmp/state/seen.json")
         assert config.store.runs_dir == Path("/tmp/state/runs")
 
+    def test_store_config_defaults_when_validating_none(self) -> None:
+        """Validating a missing store config should use defaults."""
+        store = StoreConfig.model_validate(None)
+
+        assert store.seen_path == Path("data/seen.json")
+        assert store.runs_dir == Path("data/runs")
+
+    def test_store_normalizer_passthrough_for_non_mapping(self) -> None:
+        """The pre-validator should pass through non-mapping values unchanged."""
+        sentinel = object()
+
+        assert StoreConfig._normalize_paths(sentinel) is sentinel
+
 
 class TestLoadConfig:
     """Tests for load_config function."""
