@@ -1051,7 +1051,9 @@ class TestIceScraper:
     def test_find_results_article_handles_missing_heading_and_empty_article(self) -> None:
         """Results lookup should fail cleanly when ICE search chrome is incomplete."""
         scraper = self._create_scraper()
-        no_heading = BeautifulSoup("<html><body><article><ul><li>test</li></ul></article></body></html>", "lxml")
+        no_heading = BeautifulSoup(
+            "<html><body><article><ul><li>test</li></ul></article></body></html>", "lxml"
+        )
         no_items = BeautifulSoup(
             """
             <html>
