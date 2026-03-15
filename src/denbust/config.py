@@ -68,7 +68,33 @@ class OutputConfig(BaseModel):
 class StoreConfig(BaseModel):
     """Configuration for persistence."""
 
-    path: Path = Path("data/seen.json")
+    seen_path: Path = Path("data/seen.json")
+    runs_dir: Path = Path("data/runs")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_paths(cls, data: object) -> object:
+        """Support legacy config keys and env-based path overrides."""
+        if data is None:
+            normalized: dict[str, object] = {}
+        elif isinstance(data, dict):
+            normalized = dict(data)
+        else:
+            return data
+
+        legacy_path = normalized.pop("path", None)
+        if "seen_path" not in normalized and legacy_path is not None:
+            normalized["seen_path"] = legacy_path
+
+        env_seen_path = os.environ.get("DENBUST_STORE_PATH")
+        if env_seen_path:
+            normalized["seen_path"] = env_seen_path
+
+        env_runs_dir = os.environ.get("DENBUST_RUNS_DIR")
+        if env_runs_dir:
+            normalized["runs_dir"] = env_runs_dir
+
+        return normalized
 
 
 # Default keywords for searching news articles (Hebrew)

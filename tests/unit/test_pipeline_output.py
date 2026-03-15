@@ -110,10 +110,11 @@ class TestOutputItems:
         """Should send email and not print CLI output when successful."""
         config = Config(output=OutputConfig(format=OutputFormat.EMAIL))
 
-        output_items([build_item()], config)
+        errors = output_items([build_item()], config)
 
         mock_send.assert_called_once()
         mock_print.assert_not_called()
+        assert errors == []
 
     @patch("denbust.pipeline.send_output_email")
     @patch("denbust.pipeline.print_items")
@@ -121,10 +122,11 @@ class TestOutputItems:
         """Should emit both CLI and email output when both are configured."""
         config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.EMAIL]))
 
-        output_items([build_item()], config)
+        errors = output_items([build_item()], config)
 
         mock_send.assert_called_once()
         mock_print.assert_called_once()
+        assert errors == []
 
     @patch("denbust.pipeline.send_output_email", side_effect=RuntimeError("smtp down"))
     @patch("denbust.pipeline.print_items")
@@ -134,10 +136,11 @@ class TestOutputItems:
         """Should fall back to CLI output if sending email fails."""
         config = Config(output=OutputConfig(format=OutputFormat.EMAIL))
 
-        output_items([build_item()], config)
+        errors = output_items([build_item()], config)
 
         mock_send.assert_called_once()
         mock_print.assert_called_once()
+        assert errors == ["email: smtp down"]
 
     @patch("denbust.pipeline.send_output_email", side_effect=RuntimeError("smtp down"))
     @patch("denbust.pipeline.print_items")
@@ -147,10 +150,11 @@ class TestOutputItems:
         """Should not print twice when CLI is already configured and email fails."""
         config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.EMAIL]))
 
-        output_items([build_item()], config)
+        errors = output_items([build_item()], config)
 
         mock_send.assert_called_once()
         mock_print.assert_called_once()
+        assert errors == ["email: smtp down"]
 
     @patch("denbust.pipeline.logger")
     @patch("denbust.pipeline.print_items")
@@ -160,10 +164,11 @@ class TestOutputItems:
         """Should fall back to CLI output when Telegram is requested alone."""
         config = Config(output=OutputConfig(format=OutputFormat.TELEGRAM))
 
-        output_items([build_item()], config)
+        errors = output_items([build_item()], config)
 
         mock_logger.warning.assert_called_once()
         mock_print.assert_called_once()
+        assert errors == ["telegram: not implemented"]
 
     @patch("denbust.pipeline.logger")
     @patch("denbust.pipeline.print_items")
@@ -173,7 +178,8 @@ class TestOutputItems:
         """Should not print twice when CLI is already configured with Telegram."""
         config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.TELEGRAM]))
 
-        output_items([build_item()], config)
+        errors = output_items([build_item()], config)
 
         mock_logger.warning.assert_called_once()
         mock_print.assert_called_once()
+        assert errors == ["telegram: not implemented"]
