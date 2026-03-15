@@ -60,12 +60,13 @@ class TestCreateSources:
             sources=[
                 SourceConfig(name="mako", type=SourceType.SCRAPER),
                 SourceConfig(name="maariv", type=SourceType.SCRAPER),
+                SourceConfig(name="ice", type=SourceType.SCRAPER),
             ]
         )
 
         sources = create_sources(config)
 
-        assert len(sources) == 2
+        assert len(sources) == 3
 
     def test_disabled_source_not_created(self) -> None:
         """Test that disabled sources are not created."""
