@@ -73,7 +73,13 @@ jobs:
 
           git -C state_repo config user.name "github-actions[bot]"
           git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C state_repo add -A .
+
+          if [[ -f state_repo/seen.json ]]; then
+            git -C state_repo add -- seen.json
+          fi
+          if [[ -d state_repo/runs ]]; then
+            git -C state_repo add -- runs
+          fi
 
           if [[ -z "$(git -C state_repo status --short)" ]]; then
             echo "No staged state changes to commit."

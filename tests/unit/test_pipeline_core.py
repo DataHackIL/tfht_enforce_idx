@@ -186,7 +186,7 @@ class TestFetchAndClassifyHelpers:
 
         assert found == articles
         assert errors == ["bad: boom"]
-        mock_logger.error.assert_called_once()
+        mock_logger.exception.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_classify_articles_filters_non_relevant(self) -> None:
@@ -263,6 +263,7 @@ class TestRunPipelineAsync:
         result = await run_pipeline_async(Config(), days=3)
 
         assert result.items == []
+        assert result.fatal is True
         assert result.errors == ["ANTHROPIC_API_KEY not set"]
 
     @pytest.mark.asyncio
@@ -276,6 +277,7 @@ class TestRunPipelineAsync:
         result = await run_pipeline_async(Config(), days=3)
 
         assert result.items == []
+        assert result.fatal is True
         assert result.errors == ["No sources configured"]
 
     @pytest.mark.asyncio
@@ -477,6 +479,33 @@ class TestRunPipeline:
         run_pipeline_async_mock.assert_awaited_once_with(config, 7)
         output_items_mock.assert_called_once_with(snapshot.items, config)
         assert snapshot.errors == ["telegram: not implemented"]
+        write_snapshot_mock.assert_called_once_with(config.store.runs_dir, snapshot)
+
+    def test_run_pipeline_exits_after_writing_fatal_snapshot(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fatal pipeline results should still write a snapshot, then exit 1."""
+        config = Config(days=3, output=OutputConfig(formats=[OutputFormat.CLI]))
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            config_name=config.name,
+            days_searched=3,
+            output_formats=["cli"],
+            fatal=True,
+            errors=["ANTHROPIC_API_KEY not set"],
+        )
+        write_snapshot_mock = MagicMock()
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_pipeline_async", AsyncMock(return_value=snapshot))
+        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+        monkeypatch.setattr("denbust.pipeline.write_run_snapshot", write_snapshot_mock)
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_pipeline(Path("agents/news.yaml"))
+
+        assert exc_info.value.code == 1
         write_snapshot_mock.assert_called_once_with(config.store.runs_dir, snapshot)
 
     def test_run_pipeline_writes_snapshot_for_zero_item_runs(

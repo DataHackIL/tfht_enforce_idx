@@ -84,7 +84,7 @@ tfht_enforce_idx_state/
 
 Bootstrap notes:
 
-- `seen.json` may be absent initially; it will be created automatically
+- `seen.json` may be absent initially; it will be created automatically once a run marks at least one URL as seen
 - `runs/` will be created automatically by the workflow if missing
 - a small `README.md` in the state repo is fine but optional
 

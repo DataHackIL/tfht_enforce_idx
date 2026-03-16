@@ -128,10 +128,11 @@ class TestOutputItems:
         mock_print.assert_called_once()
         assert errors == []
 
+    @patch("denbust.pipeline.logger")
     @patch("denbust.pipeline.send_output_email", side_effect=RuntimeError("smtp down"))
     @patch("denbust.pipeline.print_items")
     def test_email_error_falls_back_to_cli(
-        self, mock_print: MagicMock, mock_send: MagicMock
+        self, mock_print: MagicMock, mock_send: MagicMock, mock_logger: MagicMock
     ) -> None:
         """Should fall back to CLI output if sending email fails."""
         config = Config(output=OutputConfig(format=OutputFormat.EMAIL))
@@ -139,13 +140,15 @@ class TestOutputItems:
         errors = output_items([build_item()], config)
 
         mock_send.assert_called_once()
+        mock_logger.exception.assert_called_once()
         mock_print.assert_called_once()
         assert errors == ["email: smtp down"]
 
+    @patch("denbust.pipeline.logger")
     @patch("denbust.pipeline.send_output_email", side_effect=RuntimeError("smtp down"))
     @patch("denbust.pipeline.print_items")
     def test_cli_and_email_error_does_not_double_print(
-        self, mock_print: MagicMock, mock_send: MagicMock
+        self, mock_print: MagicMock, mock_send: MagicMock, mock_logger: MagicMock
     ) -> None:
         """Should not print twice when CLI is already configured and email fails."""
         config = Config(output=OutputConfig(formats=[OutputFormat.CLI, OutputFormat.EMAIL]))
@@ -153,6 +156,7 @@ class TestOutputItems:
         errors = output_items([build_item()], config)
 
         mock_send.assert_called_once()
+        mock_logger.exception.assert_called_once()
         mock_print.assert_called_once()
         assert errors == ["email: smtp down"]
 

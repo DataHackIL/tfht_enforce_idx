@@ -95,7 +95,7 @@ async def fetch_all_sources(
             all_articles.extend(articles)
             logger.info(f"Found {len(articles)} articles from {source.name}")
         except Exception as e:
-            logger.error(f"Error fetching from {source.name}: {e}")
+            logger.exception(f"Error fetching from {source.name}: {e}")
             errors.append(f"{source.name}: {e}")
 
     logger.info(f"Total raw articles: {len(all_articles)}")
@@ -193,6 +193,7 @@ async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
     if not config.anthropic_api_key:
         logger.error("ANTHROPIC_API_KEY not set")
         print("Error: ANTHROPIC_API_KEY environment variable not set")
+        result.fatal = True
         result.errors.append("ANTHROPIC_API_KEY not set")
         return result
 
@@ -200,6 +201,7 @@ async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
     sources = create_sources(config)
     if not sources:
         logger.warning("No sources configured")
+        result.fatal = True
         result.errors.append("No sources configured")
         return result
 
@@ -292,6 +294,8 @@ def run_pipeline(config_path: Path, days_override: int | None = None) -> None:
     output_errors = output_items(result.items, config)
     result.errors.extend(output_errors)
     write_run_snapshot(config.store.runs_dir, result)
+    if result.fatal:
+        sys.exit(1)
 
 
 def output_items(items: list[UnifiedItem], config: Config) -> list[str]:
@@ -310,7 +314,7 @@ def output_items(items: list[UnifiedItem], config: Config) -> list[str]:
                 recipients = ", ".join(config.email_to)
                 print(f"Email report sent to: {recipients}")
             except Exception as exc:
-                logger.error(f"Failed to send email report: {exc}")
+                logger.exception(f"Failed to send email report: {exc}")
                 print(f"Error sending email report: {exc}")
                 errors.append(f"email: {exc}")
                 if not cli_requested:

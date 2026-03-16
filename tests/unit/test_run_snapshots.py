@@ -26,9 +26,9 @@ class TestRunSnapshots:
 
     def test_snapshot_filename_is_git_safe(self) -> None:
         """Snapshot filenames should avoid colon characters."""
-        filename = snapshot_filename(datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC))
+        filename = snapshot_filename(datetime(2026, 3, 15, 4, 0, 0, 123456, tzinfo=UTC))
 
-        assert filename == "2026-03-15T04-00-00Z.json"
+        assert filename == "2026-03-15T04-00-00-123456Z.json"
 
     def test_write_run_snapshot_creates_directory_and_json(self, tmp_path: Path) -> None:
         """Snapshots should be written under the configured runs directory."""
