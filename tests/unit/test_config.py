@@ -11,6 +11,7 @@ from denbust.config import (
     OutputFormat,
     SourceConfig,
     SourceType,
+    StoreConfig,
     load_config,
 )
 
@@ -29,6 +30,8 @@ class TestConfig:
         assert config.dedup.similarity_threshold == 0.7
         assert config.output.format == OutputFormat.CLI
         assert config.output.formats == [OutputFormat.CLI]
+        assert config.store.seen_path == Path("data/seen.json")
+        assert config.store.runs_dir == Path("data/runs")
 
     def test_custom_days(self) -> None:
         """Test custom days configuration."""
@@ -125,6 +128,36 @@ class TestConfig:
         with pytest.raises(ValueError, match="DENBUST_EMAIL_SMTP_PORT must be an integer"):
             _ = config.email_smtp_port
 
+    def test_store_config_accepts_legacy_path(self) -> None:
+        """Legacy store.path config should map to seen_path."""
+        store = StoreConfig.model_validate({"path": "custom/seen.json"})
+
+        assert store.seen_path == Path("custom/seen.json")
+        assert store.runs_dir == Path("data/runs")
+
+    def test_store_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Store paths should be overrideable through environment variables."""
+        monkeypatch.setenv("DENBUST_STORE_PATH", "/tmp/state/seen.json")
+        monkeypatch.setenv("DENBUST_RUNS_DIR", "/tmp/state/runs")
+
+        config = Config(store=StoreConfig(seen_path=Path("ignored.json"), runs_dir=Path("ignored")))
+
+        assert config.store.seen_path == Path("/tmp/state/seen.json")
+        assert config.store.runs_dir == Path("/tmp/state/runs")
+
+    def test_store_config_defaults_when_validating_none(self) -> None:
+        """Validating a missing store config should use defaults."""
+        store = StoreConfig.model_validate(None)
+
+        assert store.seen_path == Path("data/seen.json")
+        assert store.runs_dir == Path("data/runs")
+
+    def test_store_normalizer_passthrough_for_non_mapping(self) -> None:
+        """The pre-validator should pass through non-mapping values unchanged."""
+        sentinel = object()
+
+        assert StoreConfig._normalize_paths(sentinel) is sentinel
+
 
 class TestLoadConfig:
     """Tests for load_config function."""
@@ -185,3 +218,18 @@ output:
 
         assert config.output.format == OutputFormat.CLI
         assert config.output.formats == [OutputFormat.CLI, OutputFormat.EMAIL]
+
+    def test_load_config_legacy_store_path(self, tmp_path: Path) -> None:
+        """Legacy YAML store.path should still load correctly."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            """
+store:
+  path: state/seen.json
+"""
+        )
+
+        config = load_config(config_path)
+
+        assert config.store.seen_path == Path("state/seen.json")
+        assert config.store.runs_dir == Path("data/runs")

@@ -31,6 +31,7 @@ from denbust.pipeline import (
     run_pipeline_async,
     setup_logging,
 )
+from denbust.store.run_snapshots import RunSnapshot
 
 
 def build_raw_article(url: str = "https://example.com/article") -> RawArticle:
@@ -181,10 +182,11 @@ class TestFetchAndClassifyHelpers:
         mock_logger = MagicMock()
         monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
 
-        found = await fetch_all_sources(sources, days=3, keywords=["זנות"])
+        found, errors = await fetch_all_sources(sources, days=3, keywords=["זנות"])
 
         assert found == articles
-        mock_logger.error.assert_called_once()
+        assert errors == ["bad: boom"]
+        mock_logger.exception.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_classify_articles_filters_non_relevant(self) -> None:
@@ -260,7 +262,9 @@ class TestRunPipelineAsync:
 
         result = await run_pipeline_async(Config(), days=3)
 
-        assert result == []
+        assert result.items == []
+        assert result.fatal is True
+        assert result.errors == ["ANTHROPIC_API_KEY not set"]
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_handles_missing_sources(
@@ -272,7 +276,9 @@ class TestRunPipelineAsync:
 
         result = await run_pipeline_async(Config(), days=3)
 
-        assert result == []
+        assert result.items == []
+        assert result.fatal is True
+        assert result.errors == ["No sources configured"]
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_handles_no_articles(
@@ -288,12 +294,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
         monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
-        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock())
-        monkeypatch.setattr("denbust.pipeline.fetch_all_sources", AsyncMock(return_value=[]))
+        seen_store = MagicMock(count=4)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr("denbust.pipeline.fetch_all_sources", AsyncMock(return_value=([], [])))
 
         result = await run_pipeline_async(Config(), days=3)
 
-        assert result == []
+        assert result.items == []
+        assert result.raw_article_count == 0
+        assert result.seen_count_before == 4
+        assert result.seen_count_after == 4
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_handles_all_seen(
@@ -310,13 +320,20 @@ class TestRunPipelineAsync:
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
         monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
-        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock())
-        monkeypatch.setattr("denbust.pipeline.fetch_all_sources", AsyncMock(return_value=[article]))
+        seen_store = MagicMock(count=9)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([article], [])),
+        )
         monkeypatch.setattr("denbust.pipeline.filter_seen", lambda _articles, _seen_store: [])
 
         result = await run_pipeline_async(Config(), days=3)
 
-        assert result == []
+        assert result.items == []
+        assert result.raw_article_count == 1
+        assert result.unseen_article_count == 0
+        assert result.seen_count_after == 9
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_warns_on_max_articles_and_handles_no_relevant(
@@ -335,14 +352,21 @@ class TestRunPipelineAsync:
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
         monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
-        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock())
-        monkeypatch.setattr("denbust.pipeline.fetch_all_sources", AsyncMock(return_value=articles))
+        seen_store = MagicMock(count=2)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=(articles, [])),
+        )
         monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _seen_store: articles)
         monkeypatch.setattr("denbust.pipeline.classify_articles", AsyncMock(return_value=[]))
 
         result = await run_pipeline_async(Config(max_articles=1), days=3)
 
-        assert result == []
+        assert result.items == []
+        assert result.raw_article_count == 2
+        assert result.unseen_article_count == 2
+        assert result.relevant_article_count == 0
         mock_logger.warning.assert_called_once()
 
     @pytest.mark.asyncio
@@ -369,8 +393,12 @@ class TestRunPipelineAsync:
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
         monkeypatch.setattr("denbust.pipeline.create_classifier", fake_create_classifier)
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
+        seen_store.count = 11
         monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
-        monkeypatch.setattr("denbust.pipeline.fetch_all_sources", AsyncMock(return_value=[article]))
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([article], ["mako: timeout"])),
+        )
         monkeypatch.setattr(
             "denbust.pipeline.filter_seen",
             lambda articles, _current_seen_store: articles,
@@ -384,7 +412,14 @@ class TestRunPipelineAsync:
 
         result = await run_pipeline_async(Config(), days=3)
 
-        assert result == unified
+        assert result.items == unified
+        assert result.raw_article_count == 1
+        assert result.unseen_article_count == 1
+        assert result.relevant_article_count == 1
+        assert result.unified_item_count == 1
+        assert result.errors == ["mako: timeout"]
+        assert result.seen_count_before == 11
+        assert result.seen_count_after == 11
         mark_seen_mock.assert_called_once_with(unified, seen_store)
 
 
@@ -422,15 +457,80 @@ class TestRunPipeline:
     def test_run_pipeline_uses_days_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """run_pipeline should prefer explicit day overrides over config defaults."""
         config = Config(days=3, output=OutputConfig(formats=[OutputFormat.CLI]))
-        run_pipeline_async_mock = AsyncMock(return_value=[build_unified_item()])
-        output_items_mock = MagicMock()
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            config_name=config.name,
+            days_searched=7,
+            output_formats=["cli"],
+            items=[build_unified_item()],
+        )
+        run_pipeline_async_mock = AsyncMock(return_value=snapshot)
+        output_items_mock = MagicMock(return_value=["telegram: not implemented"])
+        write_snapshot_mock = MagicMock()
 
         monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
         monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
         monkeypatch.setattr("denbust.pipeline.run_pipeline_async", run_pipeline_async_mock)
         monkeypatch.setattr("denbust.pipeline.output_items", output_items_mock)
+        monkeypatch.setattr("denbust.pipeline.write_run_snapshot", write_snapshot_mock)
 
         run_pipeline(Path("agents/news.yaml"), days_override=7)
 
         run_pipeline_async_mock.assert_awaited_once_with(config, 7)
-        output_items_mock.assert_called_once()
+        output_items_mock.assert_called_once_with(snapshot.items, config)
+        assert snapshot.errors == ["telegram: not implemented"]
+        write_snapshot_mock.assert_called_once_with(config.store.runs_dir, snapshot)
+
+    def test_run_pipeline_exits_after_writing_fatal_snapshot(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fatal pipeline results should still write a snapshot, then exit 1."""
+        config = Config(days=3, output=OutputConfig(formats=[OutputFormat.CLI]))
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            config_name=config.name,
+            days_searched=3,
+            output_formats=["cli"],
+            fatal=True,
+            errors=["ANTHROPIC_API_KEY not set"],
+        )
+        write_snapshot_mock = MagicMock()
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_pipeline_async", AsyncMock(return_value=snapshot))
+        output_items_mock = MagicMock(return_value=[])
+        monkeypatch.setattr("denbust.pipeline.output_items", output_items_mock)
+        monkeypatch.setattr("denbust.pipeline.write_run_snapshot", write_snapshot_mock)
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_pipeline(Path("agents/news.yaml"))
+
+        assert exc_info.value.code == 1
+        output_items_mock.assert_not_called()
+        write_snapshot_mock.assert_called_once_with(config.store.runs_dir, snapshot)
+
+    def test_run_pipeline_writes_snapshot_for_zero_item_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Even zero-item runs should emit a run snapshot file."""
+        config = Config(
+            output=OutputConfig(formats=[OutputFormat.CLI]),
+            store={"seen_path": tmp_path / "seen.json", "runs_dir": tmp_path / "runs"},
+        )
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            config_name=config.name,
+            days_searched=3,
+            output_formats=["cli"],
+        )
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_pipeline_async", AsyncMock(return_value=snapshot))
+        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+
+        run_pipeline(Path("agents/news.yaml"))
+
+        written = list((tmp_path / "runs").glob("*.json"))
+        assert len(written) == 1

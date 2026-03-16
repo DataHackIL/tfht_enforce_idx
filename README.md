@@ -26,6 +26,68 @@ from `.env.example`.
 Mako scraping uses a headless Chromium browser. After installing dependencies on a new machine, run
 `python -m playwright install chromium` once before your first live scan.
 
+## Persistence Modes
+
+### Local mode
+
+Local runs continue to use the repo-local defaults:
+
+- seen store: `data/seen.json`
+- run snapshots: `data/runs/`
+
+Example:
+
+```bash
+denbust scan --config agents/news.yaml
+```
+
+You can override the persistence locations without changing YAML by setting:
+
+- `DENBUST_STORE_PATH`
+- `DENBUST_RUNS_DIR`
+
+### GitHub Actions + state repo mode
+
+Scheduled GitHub Actions runs use this repo as the code runner and a separate repo,
+`tfht_enforce_idx_state`, as the canonical mutable state store.
+
+The workflow:
+
+- checks out this repo
+- checks out the state repo into `state_repo/`
+- runs `denbust scan --config agents/news-github.yaml`
+- points persistence at the checked-out state repo via:
+  - `DENBUST_STORE_PATH=state_repo/seen.json`
+  - `DENBUST_RUNS_DIR=state_repo/runs`
+- commits and pushes the updated `seen.json` and new run snapshot only if files changed
+
+Required secrets for GitHub-run mode:
+
+- `ANTHROPIC_API_KEY`
+- `STATE_REPO_PAT`
+- `DENBUST_EMAIL_SMTP_HOST`
+- `DENBUST_EMAIL_SMTP_PORT`
+- `DENBUST_EMAIL_SMTP_USERNAME`
+- `DENBUST_EMAIL_SMTP_PASSWORD`
+- `DENBUST_EMAIL_FROM`
+- `DENBUST_EMAIL_TO`
+- `DENBUST_EMAIL_USE_TLS`
+- `DENBUST_EMAIL_SUBJECT`
+
+Expected `tfht_enforce_idx_state` structure:
+
+```text
+tfht_enforce_idx_state/
+├── seen.json
+└── runs/
+```
+
+Bootstrap notes:
+
+- `seen.json` may be absent initially; it will be created automatically once a run marks at least one URL as seen
+- `runs/` will be created automatically by the workflow if missing
+- a small `README.md` in the state repo is fine but optional
+
 ## Example Output
 
 ```

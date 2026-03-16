@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from denbust.classifier.relevance import Classifier, create_classifier
@@ -16,6 +17,7 @@ from denbust.sources.ice import create_ice_source
 from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
 from denbust.sources.rss import RSSSource
+from denbust.store.run_snapshots import RunSnapshot, write_run_snapshot
 from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
@@ -72,7 +74,7 @@ def create_sources(config: Config) -> list[Source]:
 
 async def fetch_all_sources(
     sources: list[Source], days: int, keywords: list[str]
-) -> list[RawArticle]:
+) -> tuple[list[RawArticle], list[str]]:
     """Fetch articles from all sources.
 
     Args:
@@ -81,9 +83,10 @@ async def fetch_all_sources(
         keywords: Keywords to filter by.
 
     Returns:
-        Combined list of raw articles.
+        Combined list of raw articles and summarized source errors.
     """
     all_articles: list[RawArticle] = []
+    errors: list[str] = []
 
     for source in sources:
         try:
@@ -92,10 +95,11 @@ async def fetch_all_sources(
             all_articles.extend(articles)
             logger.info(f"Found {len(articles)} articles from {source.name}")
         except Exception as e:
-            logger.error(f"Error fetching from {source.name}: {e}")
+            logger.exception(f"Error fetching from {source.name}: {e}")
+            errors.append(f"{source.name}: {e}")
 
     logger.info(f"Total raw articles: {len(all_articles)}")
-    return all_articles
+    return all_articles, errors
 
 
 def filter_seen(articles: list[RawArticle], seen_store: SeenStore) -> list[RawArticle]:
@@ -168,7 +172,7 @@ def mark_seen(items: list[UnifiedItem], seen_store: SeenStore) -> None:
     logger.info(f"Marked {len(urls)} URLs as seen")
 
 
-async def run_pipeline_async(config: Config, days: int) -> list[UnifiedItem]:
+async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
     """Run the full pipeline asynchronously.
 
     Args:
@@ -176,43 +180,60 @@ async def run_pipeline_async(config: Config, days: int) -> list[UnifiedItem]:
         days: Number of days back to search.
 
     Returns:
-        List of unified items.
+        Summary of the pipeline run.
     """
+    result = RunSnapshot(
+        run_timestamp=datetime.now(UTC),
+        config_name=config.name,
+        days_searched=days,
+        output_formats=[output_format.value for output_format in config.output.formats],
+    )
+
     # Check for API key
     if not config.anthropic_api_key:
         logger.error("ANTHROPIC_API_KEY not set")
         print("Error: ANTHROPIC_API_KEY environment variable not set")
-        return []
+        result.fatal = True
+        result.errors.append("ANTHROPIC_API_KEY not set")
+        return result
 
     # Create components
     sources = create_sources(config)
     if not sources:
         logger.warning("No sources configured")
-        return []
+        result.fatal = True
+        result.errors.append("No sources configured")
+        return result
 
     classifier = create_classifier(
         api_key=config.anthropic_api_key,
         model=config.classifier.model,
     )
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
-    seen_store = create_seen_store(config.store.path)
+    seen_store = create_seen_store(config.store.seen_path)
+    result.seen_count_before = seen_store.count
 
     # 1. Fetch from all sources
-    all_articles = await fetch_all_sources(
+    all_articles, source_errors = await fetch_all_sources(
         sources=sources,
         days=days,
         keywords=config.keywords,
     )
+    result.raw_article_count = len(all_articles)
+    result.errors.extend(source_errors)
 
     if not all_articles:
         logger.info("No articles found from any source")
-        return []
+        result.seen_count_after = seen_store.count
+        return result
 
     # 2. Filter out seen URLs
     unseen_articles = filter_seen(all_articles, seen_store)
+    result.unseen_article_count = len(unseen_articles)
     if not unseen_articles:
         logger.info("All articles were already seen")
-        return []
+        result.seen_count_after = seen_store.count
+        return result
 
     # 3. Check article count against max_articles threshold
     if len(unseen_articles) > config.max_articles:
@@ -224,17 +245,22 @@ async def run_pipeline_async(config: Config, days: int) -> list[UnifiedItem]:
 
     # 4. Classify articles
     relevant_articles = await classify_articles(unseen_articles, classifier)
+    result.relevant_article_count = len(relevant_articles)
     if not relevant_articles:
         logger.info("No relevant articles found")
-        return []
+        result.seen_count_after = seen_store.count
+        return result
 
     # 5. Deduplicate
     unified_items = deduplicate_articles(relevant_articles, deduplicator)
+    result.unified_item_count = len(unified_items)
+    result.items = unified_items
 
     # 6. Mark as seen
     mark_seen(unified_items, seen_store)
+    result.seen_count_after = seen_store.count
 
-    return unified_items
+    return result
 
 
 def run_pipeline(config_path: Path, days_override: int | None = None) -> None:
@@ -262,15 +288,21 @@ def run_pipeline(config_path: Path, days_override: int | None = None) -> None:
     logger.info(f"Starting pipeline: {config.name}, searching last {days} days")
 
     # Run async pipeline
-    items = asyncio.run(run_pipeline_async(config, days))
+    result = asyncio.run(run_pipeline_async(config, days))
 
-    # Output results
-    output_items(items, config)
+    # Output results only for non-fatal runs.
+    if not result.fatal:
+        output_errors = output_items(result.items, config)
+        result.errors.extend(output_errors)
+    write_run_snapshot(config.store.runs_dir, result)
+    if result.fatal:
+        sys.exit(1)
 
 
-def output_items(items: list[UnifiedItem], config: Config) -> None:
+def output_items(items: list[UnifiedItem], config: Config) -> list[str]:
     """Output unified items to the configured output channels."""
     cli_requested = OutputFormat.CLI in config.output.formats
+    errors: list[str] = []
 
     for output_format in config.output.formats:
         if output_format == OutputFormat.CLI:
@@ -283,17 +315,21 @@ def output_items(items: list[UnifiedItem], config: Config) -> None:
                 recipients = ", ".join(config.email_to)
                 print(f"Email report sent to: {recipients}")
             except Exception as exc:
-                logger.error(f"Failed to send email report: {exc}")
+                logger.exception(f"Failed to send email report: {exc}")
                 print(f"Error sending email report: {exc}")
+                errors.append(f"email: {exc}")
                 if not cli_requested:
                     print_items(items)
             continue
 
         if output_format == OutputFormat.TELEGRAM:
             logger.warning("Telegram output is not implemented yet, falling back to CLI output")
+            errors.append("telegram: not implemented")
             if not cli_requested:
                 print_items(items)
             continue
+
+    return errors
 
 
 def send_output_email(items: list[UnifiedItem], config: Config) -> None:
