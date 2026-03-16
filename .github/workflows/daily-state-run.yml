@@ -65,6 +65,7 @@ jobs:
         run: denbust scan --config agents/news-github.yaml
 
       - name: Commit and push state changes
+        if: ${{ always() }}
         run: |
           if [[ -z "$(git -C state_repo status --short)" ]]; then
             echo "No state changes to commit."

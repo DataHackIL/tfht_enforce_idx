@@ -499,13 +499,15 @@ class TestRunPipeline:
         monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
         monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
         monkeypatch.setattr("denbust.pipeline.run_pipeline_async", AsyncMock(return_value=snapshot))
-        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+        output_items_mock = MagicMock(return_value=[])
+        monkeypatch.setattr("denbust.pipeline.output_items", output_items_mock)
         monkeypatch.setattr("denbust.pipeline.write_run_snapshot", write_snapshot_mock)
 
         with pytest.raises(SystemExit) as exc_info:
             run_pipeline(Path("agents/news.yaml"))
 
         assert exc_info.value.code == 1
+        output_items_mock.assert_not_called()
         write_snapshot_mock.assert_called_once_with(config.store.runs_dir, snapshot)
 
     def test_run_pipeline_writes_snapshot_for_zero_item_runs(

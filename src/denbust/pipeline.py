@@ -290,9 +290,10 @@ def run_pipeline(config_path: Path, days_override: int | None = None) -> None:
     # Run async pipeline
     result = asyncio.run(run_pipeline_async(config, days))
 
-    # Output results
-    output_errors = output_items(result.items, config)
-    result.errors.extend(output_errors)
+    # Output results only for non-fatal runs.
+    if not result.fatal:
+        output_errors = output_items(result.items, config)
+        result.errors.extend(output_errors)
     write_run_snapshot(config.store.runs_dir, result)
     if result.fatal:
         sys.exit(1)
