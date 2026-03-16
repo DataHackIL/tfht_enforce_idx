@@ -1,8 +1,10 @@
-name: daily-state-run
+name: weekly-state-run
 
 on:
   schedule:
-    - cron: "0 4 * * *"
+    # Runs at 04:30 UTC every Sunday, which is 06:30 in Israel Standard Time
+    # (UTC+2) and 07:30 during Israel daylight saving time (UTC+3).
+    - cron: "30 4 * * 0"
   workflow_dispatch:
 
 concurrency:
@@ -17,7 +19,7 @@ env:
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
 
 jobs:
-  run-daily-scan:
+  run-weekly-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -49,7 +51,7 @@ jobs:
       - name: Ensure state repo structure exists
         run: mkdir -p state_repo/runs
 
-      - name: Run daily scan
+      - name: Run weekly scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DENBUST_EMAIL_SMTP_HOST: ${{ secrets.DENBUST_EMAIL_SMTP_HOST }}
@@ -87,5 +89,5 @@ jobs:
             exit 0
           fi
 
-          git -C state_repo commit -m "chore(state): update seen store and run snapshot"
+          git -C state_repo commit -m "chore(state): update weekly seen store and run snapshot"
           git -C state_repo push
