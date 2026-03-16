@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: daily-state-run
+  group: state-run
   cancel-in-progress: false
 
 permissions:

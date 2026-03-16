@@ -2,12 +2,13 @@ name: weekly-state-run
 
 on:
   schedule:
-    # 06:30 Israel Standard Time (UTC+2) every Sunday.
+    # Runs at 04:30 UTC every Sunday, which is 06:30 in Israel Standard Time
+    # (UTC+2) and 07:30 during Israel daylight saving time (UTC+3).
     - cron: "30 4 * * 0"
   workflow_dispatch:
 
 concurrency:
-  group: weekly-state-run
+  group: state-run
   cancel-in-progress: false
 
 permissions:
