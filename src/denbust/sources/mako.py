@@ -22,8 +22,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# User agent for HTTP requests
-USER_AGENT = "denbust/0.1.0 (news monitoring bot; +https://github.com/denbust)"
+# Browser user agent for Playwright requests.
+#
+# Mako's Radware/Perfdrive layer increasingly blocks custom or bot-identifying UAs,
+# including Playwright's default HeadlessChrome UA. Use a stable desktop Chrome UA
+# so the browser session behaves like a normal interactive visit.
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/134.0.0.0 Safari/537.36"
+)
 
 # Base URLs
 MAKO_BASE_URL = "https://www.mako.co.il"

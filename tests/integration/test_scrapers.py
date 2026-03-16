@@ -497,6 +497,8 @@ class TestMakoScraper:
 
             async def new_context(self, **kwargs: Any) -> FakeContext:
                 events.append("new_context")
+                assert kwargs["user_agent"].startswith("Mozilla/5.0")
+                assert "Chrome/134.0.0.0" in kwargs["user_agent"]
                 assert kwargs["locale"] == "he-IL"
                 assert kwargs["viewport"]["width"] == 1440
                 return self.context
