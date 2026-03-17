@@ -1364,6 +1364,27 @@ class TestWallaScraper:
         assert link is not None
         assert scraper._parse_archive_item(link) is None
 
+    def test_parse_archive_item_skips_missing_article_container(self) -> None:
+        """Archive links without an article container should be ignored."""
+        scraper = self._create_scraper()
+        soup = BeautifulSoup(
+            """
+            <li>
+              <a href="https://news.walla.co.il/item/3823239">
+                <div class="content">
+                  <h3>בית בושת אותר בתוך מקלט ציבורי</h3>
+                  <footer><div class="pub-date">עודכן: 13:18 12/03/2026</div></footer>
+                </div>
+              </a>
+            </li>
+            """,
+            "lxml",
+        )
+
+        link = soup.select_one('a[href]')
+        assert link is not None
+        assert scraper._parse_archive_item(link) is None
+
     def test_parse_archive_item_skips_non_article_urls_and_empty_title(self) -> None:
         """Non-article links and blank titles should be discarded."""
         scraper = self._create_scraper()
@@ -1552,6 +1573,32 @@ class TestWallaScraper:
         scraper._client = FakeClient()
         assert await scraper._fetch_archive_page(1, 2026, 3, 1) is None
 
+    @pytest.mark.asyncio
+    async def test_fetch_archive_page_returns_response_text(self) -> None:
+        """Archive page fetch should return response HTML on success."""
+        scraper = self._create_scraper()
+
+        class FakeResponse:
+            text = "<html>ok</html>"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class FakeClient:
+            async def get(self, url: str) -> FakeResponse:
+                assert "archive/1" in url
+                return FakeResponse()
+
+        scraper._client = FakeClient()
+
+        assert await scraper._fetch_archive_page(1, 2026, 3, 1) == "<html>ok</html>"
+
+    def test_parse_date_handles_value_errors(self) -> None:
+        """Calendar-invalid dates should return None instead of raising."""
+        scraper = self._create_scraper()
+
+        assert scraper._parse_date("עודכן: 13:18 31/02/2026") is None
+
     def test_matches_keywords_is_casefolded(self) -> None:
         """Keyword matching should be case-insensitive for Latin/mixed-case terms."""
         scraper = self._create_scraper()
@@ -1638,6 +1685,15 @@ class TestWallaScraper:
         assert calls == [(1, 2026, 3, 1), (10, 2026, 3, 1)]
 
     @pytest.mark.asyncio
+    async def test_fetch_returns_empty_for_invalid_days(self) -> None:
+        """Invalid non-positive lookback windows should not enter month iteration."""
+        scraper = self._create_scraper()
+
+        articles = await scraper.fetch(days=0, keywords=["בית בושת"])
+
+        assert articles == []
+
+    @pytest.mark.asyncio
     async def test_fetch_stops_when_page_has_no_entries(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1660,6 +1716,56 @@ class TestWallaScraper:
 
         assert articles == []
         assert calls == [(1, 1), (10, 1)]
+
+    @pytest.mark.asyncio
+    async def test_fetch_skips_old_entries_and_continues_matching_newer_ones(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Entries older than the cutoff should be skipped without discarding newer matches."""
+        scraper = self._create_scraper()
+        mixed_page = """
+        <html><body>
+          <ul>
+            <li>
+              <a href="https://news.walla.co.il/item/3823239">
+                <article>
+                  <div class="content">
+                    <h3>בית בושת אותר בתוך מקלט ציבורי</h3>
+                    <p>תלונה למוקד העירוני.</p>
+                    <footer><div class="pub-date">עודכן: 13:18 12/03/2026</div></footer>
+                  </div>
+                </article>
+              </a>
+            </li>
+            <li>
+              <a href="https://news.walla.co.il/item/3800000">
+                <article>
+                  <div class="content">
+                    <h3>בית בושת ישן</h3>
+                    <p>כתבה ישנה.</p>
+                    <footer><div class="pub-date">עודכן: 11:00 01/01/2026</div></footer>
+                  </div>
+                </article>
+              </a>
+            </li>
+          </ul>
+        </body></html>
+        """
+
+        async def fake_fetch_archive_page(
+            category_id: int, year: int, month: int, page_number: int
+        ) -> str | None:
+            del category_id, year, month
+            return mixed_page if page_number == 1 else None
+
+        monkeypatch.setattr(scraper, "_iter_months", lambda _cutoff, _now: [(2026, 3)])
+        monkeypatch.setattr(scraper, "_fetch_archive_page", fake_fetch_archive_page)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://news.walla.co.il/item/3823239"
+        ]
 
     @pytest.mark.asyncio
     async def test_fetch_stops_when_page_is_older_than_cutoff(

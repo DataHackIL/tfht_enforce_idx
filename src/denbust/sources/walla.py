@@ -50,6 +50,9 @@ class WallaScraper(Source):
     async def fetch(self, days: int, keywords: list[str]) -> list[RawArticle]:
         """Fetch recent keyword-matching articles from Walla archive pages."""
         logger.info("Scraping Walla for articles in last %s days", days)
+        if days < 1:
+            logger.warning("Skipping Walla archive scrape because days=%s is invalid", days)
+            return []
 
         now = datetime.now(UTC)
         cutoff = now - timedelta(days=days)
