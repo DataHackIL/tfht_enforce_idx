@@ -17,6 +17,7 @@ from denbust.sources.ice import create_ice_source
 from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
 from denbust.sources.rss import RSSSource
+from denbust.sources.walla import create_walla_source
 from denbust.store.run_snapshots import RunSnapshot, write_run_snapshot
 from denbust.store.seen import SeenStore, create_seen_store
 
@@ -65,6 +66,8 @@ def create_sources(config: Config) -> list[Source]:
                 sources.append(create_maariv_source())
             elif source_cfg.name == "ice":
                 sources.append(create_ice_source())
+            elif source_cfg.name == "walla":
+                sources.append(create_walla_source())
             else:
                 logger.warning(f"Unknown scraper source: {source_cfg.name}")
 

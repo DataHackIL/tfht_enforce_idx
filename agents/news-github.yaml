@@ -9,9 +9,9 @@ sources:
     url: https://www.ynet.co.il/Integration/StoryRss2.xml
     enabled: true
 
+  # Scraped sources - archive/search scraping with keyword/date filtering
   - name: walla
-    type: rss
-    url: https://rss.walla.co.il/feed/1
+    type: scraper
     enabled: true
 
   - name: mako

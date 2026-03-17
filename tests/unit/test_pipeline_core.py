@@ -151,11 +151,13 @@ class TestCreateSourcesWarnings:
             sources=[
                 SourceConfig(name="disabled", type=SourceType.RSS, enabled=False),
                 SourceConfig(name="ynet", type=SourceType.RSS, url="https://example.com/feed.xml"),
+                SourceConfig(name="walla", type=SourceType.SCRAPER),
                 SourceConfig(name="mako", type=SourceType.SCRAPER),
                 SourceConfig(name="maariv", type=SourceType.SCRAPER),
             ]
         )
 
+        monkeypatch.setattr("denbust.pipeline.create_walla_source", lambda: FakeSource("walla", []))
         monkeypatch.setattr("denbust.pipeline.create_mako_source", lambda: FakeSource("mako", []))
         monkeypatch.setattr(
             "denbust.pipeline.create_maariv_source", lambda: FakeSource("maariv", [])
@@ -163,7 +165,7 @@ class TestCreateSourcesWarnings:
 
         sources = create_sources(config)
 
-        assert [source.name for source in sources] == ["ynet", "mako", "maariv"]
+        assert [source.name for source in sources] == ["ynet", "walla", "mako", "maariv"]
 
 
 class TestFetchAndClassifyHelpers:
