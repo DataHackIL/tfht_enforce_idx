@@ -1381,7 +1381,7 @@ class TestWallaScraper:
             </li>
             """,
             "lxml",
-        ).select_one('a[href]')
+        ).select_one("a[href]")
         blank_title = BeautifulSoup(
             """
             <li>
@@ -1396,7 +1396,7 @@ class TestWallaScraper:
             </li>
             """,
             "lxml",
-        ).select_one('a[href]')
+        ).select_one("a[href]")
 
         assert external is not None
         assert blank_title is not None
@@ -1520,7 +1520,9 @@ class TestWallaScraper:
         """Month scraping should no-op when no HTTP client is configured."""
         scraper = self._create_scraper()
 
-        articles = await scraper._scrape_archive_month(1, 2026, 3, datetime(2026, 3, 1, tzinfo=UTC), ["בית בושת"])
+        articles = await scraper._scrape_archive_month(
+            1, 2026, 3, datetime(2026, 3, 1, tzinfo=UTC), ["בית בושת"]
+        )
 
         assert articles == []
 
@@ -1536,7 +1538,9 @@ class TestWallaScraper:
             def raise_for_status(self) -> None:
                 raise httpx.HTTPStatusError(
                     "boom",
-                    request=httpx.Request("GET", "https://news.walla.co.il/archive/1?year=2026&month=3"),
+                    request=httpx.Request(
+                        "GET", "https://news.walla.co.il/archive/1?year=2026&month=3"
+                    ),
                     response=httpx.Response(500),
                 )
 
