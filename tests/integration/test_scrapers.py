@@ -1381,7 +1381,7 @@ class TestWallaScraper:
             "lxml",
         )
 
-        link = soup.select_one('a[href]')
+        link = soup.select_one("a[href]")
         assert link is not None
         assert scraper._parse_archive_item(link) is None
 
