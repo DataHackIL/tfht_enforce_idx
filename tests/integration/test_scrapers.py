@@ -17,6 +17,7 @@ from denbust.sources.ice import IceScraper, create_ice_source
 from denbust.sources.maariv import MaarivScraper, create_maariv_source
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source
 from denbust.sources.rss import RSSSource
+from denbust.sources.walla import WallaScraper, create_walla_source
 
 # Load fixture files
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
@@ -1301,6 +1302,237 @@ class TestIceScraper:
         assert len(articles) == 2
 
 
+class TestWallaScraper:
+    """Integration tests for Walla scraper."""
+
+    @staticmethod
+    def _create_scraper() -> WallaScraper:
+        """Create a scraper with rate limiting disabled for tests."""
+        return WallaScraper(rate_limit_delay_seconds=0)
+
+    def test_factory_helper_returns_named_source(self) -> None:
+        """Factory helper should return the canonical Walla source."""
+        scraper = create_walla_source()
+
+        assert scraper.name == "walla"
+
+    def test_build_archive_url_uses_expected_query_shape(self) -> None:
+        """Archive URLs should keep year/month params and optional page."""
+        scraper = self._create_scraper()
+
+        assert scraper._build_archive_url(1, 2026, 3) == (
+            "https://news.walla.co.il/archive/1?year=2026&month=3"
+        )
+        assert scraper._build_archive_url(1, 2026, 3, page_number=2) == (
+            "https://news.walla.co.il/archive/1?year=2026&month=3&page=2"
+        )
+
+    def test_parse_archive_entries(self) -> None:
+        """Fixture HTML should parse into Walla archive entries."""
+        html_content = load_fixture("html/walla_archive_page.html")
+        scraper = self._create_scraper()
+
+        entries = scraper._parse_archive_entries(html_content)
+
+        assert len(entries) == 3
+        assert entries[0].title == 'בית בושת אותר בתוך מקלט ציבורי: "לא נתנו להיכנס בזמן אזעקה"'
+        assert entries[0].date == datetime(2026, 3, 12, 13, 18, tzinfo=UTC)
+        assert entries[1].url == "https://news.walla.co.il/item/3818937"
+        assert entries[2].title == "חשד לרצח: גבר כבן 30 נורה למוות ברכבו בטירה"
+
+    def test_parse_archive_item_skips_missing_or_invalid_dates(self) -> None:
+        """Archive items without parseable dates should be ignored safely."""
+        scraper = self._create_scraper()
+        soup = BeautifulSoup(
+            """
+            <li>
+              <a href="https://news.walla.co.il/item/3823239">
+                <article>
+                  <div class="content">
+                    <h3>בית בושת אותר בתוך מקלט ציבורי</h3>
+                    <p>תלונה למוקד העירוני</p>
+                    <footer><div class="pub-date">תאריך לא תקין</div></footer>
+                  </div>
+                </article>
+              </a>
+            </li>
+            """,
+            "lxml",
+        )
+
+        link = soup.select_one('a[href*="/item/"]')
+        assert link is not None
+        assert scraper._parse_archive_item(link) is None
+
+    def test_has_next_page_detects_archive_pagination(self) -> None:
+        """Archive pagination should detect the next numbered page."""
+        scraper = self._create_scraper()
+        html_content = load_fixture("html/walla_archive_page.html")
+
+        assert scraper._has_next_page(
+            html_content,
+            category_id=1,
+            year=2026,
+            month=3,
+            page_number=1,
+        )
+        assert not scraper._has_next_page(
+            html_content,
+            category_id=1,
+            year=2026,
+            month=3,
+            page_number=2,
+        )
+
+    def test_iter_months_spans_current_and_previous_month(self) -> None:
+        """Month iteration should cover the full lookback window from newest to oldest."""
+        scraper = self._create_scraper()
+
+        months = scraper._iter_months(
+            datetime(2026, 2, 25, tzinfo=UTC),
+            datetime(2026, 3, 17, tzinfo=UTC),
+        )
+
+        assert months == [(2026, 3), (2026, 2)]
+
+    @pytest.mark.asyncio
+    async def test_fetch_collects_keyword_matches_across_pages(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Walla fetch should paginate archive pages until keyword matches are found."""
+        scraper = self._create_scraper()
+        page_one = """
+        <html><body>
+          <ul>
+            <li>
+              <a href="https://news.walla.co.il/item/3823989">
+                <article>
+                  <div class="content">
+                    <h3>חשד לרצח: גבר כבן 30 נורה למוות ברכבו בטירה</h3>
+                    <p>המשטרה פתחה בחקירה.</p>
+                    <footer><div class="pub-date">עודכן: 12:58 16/03/2026</div></footer>
+                  </div>
+                </article>
+              </a>
+            </li>
+          </ul>
+          <nav><a href="https://news.walla.co.il/archive/1?year=2026&month=3&page=2">2</a></nav>
+        </body></html>
+        """
+        page_two = load_fixture("html/walla_archive_page.html")
+
+        async def fake_fetch_archive_page(
+            category_id: int, year: int, month: int, page_number: int
+        ) -> str | None:
+            assert year == 2026
+            assert month == 3
+            if category_id != 1:
+                return None
+            if page_number == 1:
+                return page_one
+            if page_number == 2:
+                return page_two
+            return None
+
+        monkeypatch.setattr(scraper, "_iter_months", lambda _cutoff, _now: [(2026, 3)])
+        monkeypatch.setattr(scraper, "_fetch_archive_page", fake_fetch_archive_page)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת", "זנות"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://news.walla.co.il/item/3823239",
+            "https://news.walla.co.il/item/3818937",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_stops_when_page_is_older_than_cutoff(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pagination should stop once an archive page only contains out-of-window results."""
+        scraper = self._create_scraper()
+        calls: list[tuple[int, int]] = []
+        old_page = """
+        <html><body>
+          <ul>
+            <li>
+              <a href="https://news.walla.co.il/item/3800000">
+                <article>
+                  <div class="content">
+                    <h3>בית בושת ישן</h3>
+                    <p>כתבה ישנה.</p>
+                    <footer><div class="pub-date">עודכן: 11:00 01/01/2026</div></footer>
+                  </div>
+                </article>
+              </a>
+            </li>
+          </ul>
+          <nav><a href="https://news.walla.co.il/archive/1?year=2026&month=3&page=2">2</a></nav>
+        </body></html>
+        """
+
+        async def fake_fetch_archive_page(
+            category_id: int, year: int, month: int, page_number: int
+        ) -> str | None:
+            calls.append((category_id, page_number))
+            del year, month
+            return old_page
+
+        monkeypatch.setattr(scraper, "_iter_months", lambda _cutoff, _now: [(2026, 3)])
+        monkeypatch.setattr(scraper, "_fetch_archive_page", fake_fetch_archive_page)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert articles == []
+        assert calls == [(1, 1), (10, 1)]
+
+    @pytest.mark.asyncio
+    async def test_fetch_deduplicates_urls_across_categories(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeated archive hits from multiple categories should collapse to one article."""
+        scraper = self._create_scraper()
+        html_content = load_fixture("html/walla_archive_page.html")
+
+        async def fake_fetch_archive_page(
+            category_id: int, year: int, month: int, page_number: int
+        ) -> str | None:
+            del category_id, year, month
+            return html_content if page_number == 1 else None
+
+        monkeypatch.setattr(scraper, "_iter_months", lambda _cutoff, _now: [(2026, 3)])
+        monkeypatch.setattr(scraper, "_fetch_archive_page", fake_fetch_archive_page)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://news.walla.co.il/item/3823239"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_partial_results_on_http_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HTTP failures on later pages should keep already collected Walla articles."""
+        scraper = self._create_scraper()
+        html_content = load_fixture("html/walla_archive_page.html")
+
+        async def fake_fetch_archive_page(
+            category_id: int, year: int, month: int, page_number: int
+        ) -> str | None:
+            del category_id, year, month
+            if page_number == 1:
+                return html_content
+            return None
+
+        monkeypatch.setattr(scraper, "_iter_months", lambda _cutoff, _now: [(2026, 3)])
+        monkeypatch.setattr(scraper, "_fetch_archive_page", fake_fetch_archive_page)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert len(articles) == 1
+        assert articles[0].title.startswith("בית בושת אותר")
+
+
 class TestMaarivScraper:
     """Integration tests for Maariv scraper."""
 
@@ -1757,7 +1989,7 @@ class TestRSSSource:
 
     def test_factory_helpers_create_expected_sources(self) -> None:
         """Factory helpers should return the canonical source names and URLs."""
-        from denbust.sources.rss import create_walla_source, create_ynet_source
+        from denbust.sources.rss import create_ynet_source
 
         ynet = create_ynet_source()
         walla = create_walla_source()
@@ -1765,7 +1997,6 @@ class TestRSSSource:
         assert ynet.name == "ynet"
         assert walla.name == "walla"
         assert "ynet.co.il" in ynet._feed_url
-        assert "walla.co.il" in walla._feed_url
 
     @respx.mock
     @pytest.mark.asyncio
