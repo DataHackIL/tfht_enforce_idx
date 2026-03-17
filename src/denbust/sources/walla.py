@@ -163,7 +163,9 @@ class WallaScraper(Source):
             )
             return None
 
-    def _build_archive_url(self, category_id: int, year: int, month: int, page_number: int = 1) -> str:
+    def _build_archive_url(
+        self, category_id: int, year: int, month: int, page_number: int = 1
+    ) -> str:
         """Build a Walla archive URL."""
         query = {"year": year, "month": month}
         if page_number > 1:
