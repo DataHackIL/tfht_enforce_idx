@@ -5,7 +5,7 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
-from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -186,6 +186,11 @@ class WallaScraper(Source):
 
     def _parse_archive_item(self, link: Tag) -> WallaArchiveEntry | None:
         """Parse a single Walla archive result item."""
+        href = str(link.get("href", ""))
+        url = self._normalize_article_url(urljoin(WALLA_BASE_URL, href))
+        if not self._is_article_url(url):
+            return None
+
         article = link.find("article")
         if not isinstance(article, Tag):
             return None
@@ -205,9 +210,6 @@ class WallaScraper(Source):
 
         snippet_tag = article.find("p")
         snippet = snippet_tag.get_text(" ", strip=True) if isinstance(snippet_tag, Tag) else ""
-
-        href = str(link.get("href", ""))
-        url = self._normalize_article_url(urljoin(WALLA_BASE_URL, href))
 
         return WallaArchiveEntry(url=url, title=title, snippet=snippet, date=date)
 
@@ -229,8 +231,8 @@ class WallaScraper(Source):
 
     def _matches_keywords(self, entry: WallaArchiveEntry, keywords: list[str]) -> bool:
         """Check whether a Walla archive entry matches any monitored keyword."""
-        haystack = f"{entry.title} {entry.snippet}"
-        return any(keyword in haystack for keyword in keywords)
+        haystack = f"{entry.title} {entry.snippet}".casefold()
+        return any(keyword.casefold() in haystack for keyword in keywords)
 
     def _has_next_page(
         self, html: str, category_id: int, year: int, month: int, page_number: int
@@ -239,17 +241,30 @@ class WallaScraper(Source):
         soup = BeautifulSoup(html, "lxml")
         next_page = page_number + 1
         expected_path = f"/archive/{category_id}"
-        expected_query = f"year={year}&month={month}&page={next_page}"
 
         for link in soup.find_all("a", href=True):
             href = str(link.get("href", ""))
             normalized = urljoin(WALLA_BASE_URL, href).replace("&amp;", "&")
-            if expected_path not in normalized:
+            parsed = urlsplit(normalized)
+            if parsed.path != expected_path:
                 continue
-            if expected_query in normalized:
+            params = parse_qs(parsed.query)
+            if (
+                params.get("year") == [str(year)]
+                and params.get("month") == [str(month)]
+                and params.get("page") == [str(next_page)]
+            ):
                 return True
 
         return False
+
+    def _is_article_url(self, url: str) -> bool:
+        """Check whether a normalized URL points to a Walla news article."""
+        parsed = urlsplit(url)
+        if parsed.netloc != "news.walla.co.il":
+            return False
+
+        return parsed.path.startswith("/item/")
 
     def _normalize_article_url(self, url: str) -> str:
         """Strip query and fragment components from Walla article URLs."""
