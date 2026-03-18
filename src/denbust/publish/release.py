@@ -55,7 +55,9 @@ class NullReleaseBuilder(ReleaseBuilder):
         return ReleaseManifest(
             dataset_name=dataset_name,
             release_version="phase-a-scaffold",
-            primary_files=[ReleaseArtifact(path=publication_dir / "README.txt", format=ReleaseFormat.PARQUET)],
+            primary_files=[
+                ReleaseArtifact(path=publication_dir / "README.txt", format=ReleaseFormat.PARQUET)
+            ],
             notes="Release publication is scaffolded but not implemented in Phase A.",
         )
 

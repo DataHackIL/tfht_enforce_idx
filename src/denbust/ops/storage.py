@@ -17,9 +17,7 @@ class OperationalStore(ABC):
         """Persist run-level metadata."""
 
     @abstractmethod
-    def upsert_records(
-        self, dataset_name: str, records: Sequence[Mapping[str, Any]]
-    ) -> None:
+    def upsert_records(self, dataset_name: str, records: Sequence[Mapping[str, Any]]) -> None:
         """Upsert operational records for a dataset."""
 
     @abstractmethod
@@ -42,9 +40,7 @@ class NullOperationalStore(OperationalStore):
     def write_run_metadata(self, snapshot: RunSnapshot) -> None:
         del snapshot
 
-    def upsert_records(
-        self, dataset_name: str, records: Sequence[Mapping[str, Any]]
-    ) -> None:
+    def upsert_records(self, dataset_name: str, records: Sequence[Mapping[str, Any]]) -> None:
         del dataset_name, records
 
     def fetch_records(self, dataset_name: str, *, limit: int | None = None) -> list[dict[str, Any]]:

@@ -485,7 +485,9 @@ class TestRunPipeline:
 
         run_pipeline(Path("agents/news.yaml"), days_override=7)
 
-        run_job_async_mock.assert_awaited_once_with(config, config_path=Path("agents/news.yaml"), days_override=7)
+        run_job_async_mock.assert_awaited_once_with(
+            config, config_path=Path("agents/news.yaml"), days_override=7
+        )
         output_items_mock.assert_called_once_with(snapshot.items, config)
         assert snapshot.errors == ["telegram: not implemented"]
         write_snapshot_mock.assert_called_once_with(config.state_paths.runs_dir, snapshot)

@@ -109,7 +109,11 @@ async def classify_articles(
 ) -> list[ClassifiedArticle]:
     """Classify all articles for relevance."""
     classified = await classifier.classify_batch(articles)
-    relevant = [classified_article for classified_article in classified if classified_article.classification.relevant]
+    relevant = [
+        classified_article
+        for classified_article in classified
+        if classified_article.classification.relevant
+    ]
     logger.info("Classified %s articles, %s are relevant", len(articles), len(relevant))
     return relevant
 

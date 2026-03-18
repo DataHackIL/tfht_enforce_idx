@@ -14,7 +14,9 @@ JobHandler = Callable[[Config, Path | None, int | None], Awaitable[RunSnapshot]]
 _REGISTRY: dict[tuple[str, str], JobHandler] = {}
 
 
-def register_job(dataset_name: DatasetName | str, job_name: JobName | str, handler: JobHandler) -> None:
+def register_job(
+    dataset_name: DatasetName | str, job_name: JobName | str, handler: JobHandler
+) -> None:
     """Register a dataset/job handler."""
     _REGISTRY[(str(dataset_name), str(job_name))] = handler
 
@@ -28,7 +30,5 @@ def require_job_handler(dataset_name: DatasetName | str, job_name: JobName | str
     """Return a handler or raise a clear error for unsupported jobs."""
     handler = get_job_handler(dataset_name, job_name)
     if handler is None:
-        raise ValueError(
-            f"Unsupported dataset/job combination: {dataset_name}/{job_name}"
-        )
+        raise ValueError(f"Unsupported dataset/job combination: {dataset_name}/{job_name}")
     return handler

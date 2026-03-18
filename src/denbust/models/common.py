@@ -40,4 +40,3 @@ class JobIdentity(BaseModel):
 
     dataset_name: DatasetName = DatasetName.NEWS_ITEMS
     job_name: JobName = JobName.INGEST
-
