@@ -20,15 +20,22 @@ from denbust.data_models import (
     SubCategory,
     UnifiedItem,
 )
+from denbust.models.common import DatasetName, JobName
+from denbust.ops.storage import LocalJsonOperationalStore
 from denbust.pipeline import (
+    _run_job_from_config,
     classify_articles,
     create_sources,
     deduplicate_articles,
     fetch_all_sources,
     filter_seen,
     mark_seen,
+    run_backup,
+    run_job,
+    run_job_async,
     run_pipeline,
     run_pipeline_async,
+    run_release,
     setup_logging,
 )
 from denbust.store.run_snapshots import RunSnapshot
@@ -470,22 +477,24 @@ class TestRunPipeline:
             output_formats=["cli"],
             items=[build_unified_item()],
         )
-        run_pipeline_async_mock = AsyncMock(return_value=snapshot)
+        run_job_async_mock = AsyncMock(return_value=snapshot)
         output_items_mock = MagicMock(return_value=["telegram: not implemented"])
         write_snapshot_mock = MagicMock()
 
         monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
         monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
-        monkeypatch.setattr("denbust.pipeline.run_pipeline_async", run_pipeline_async_mock)
+        monkeypatch.setattr("denbust.pipeline.run_job_async", run_job_async_mock)
         monkeypatch.setattr("denbust.pipeline.output_items", output_items_mock)
         monkeypatch.setattr("denbust.pipeline.write_run_snapshot", write_snapshot_mock)
 
         run_pipeline(Path("agents/news.yaml"), days_override=7)
 
-        run_pipeline_async_mock.assert_awaited_once_with(config, 7)
+        run_job_async_mock.assert_awaited_once_with(
+            config, config_path=Path("agents/news.yaml"), days_override=7
+        )
         output_items_mock.assert_called_once_with(snapshot.items, config)
         assert snapshot.errors == ["telegram: not implemented"]
-        write_snapshot_mock.assert_called_once_with(config.store.runs_dir, snapshot)
+        write_snapshot_mock.assert_called_once_with(config.state_paths.runs_dir, snapshot)
 
     def test_run_pipeline_exits_after_writing_fatal_snapshot(
         self, monkeypatch: pytest.MonkeyPatch
@@ -504,7 +513,7 @@ class TestRunPipeline:
 
         monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
         monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
-        monkeypatch.setattr("denbust.pipeline.run_pipeline_async", AsyncMock(return_value=snapshot))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", AsyncMock(return_value=snapshot))
         output_items_mock = MagicMock(return_value=[])
         monkeypatch.setattr("denbust.pipeline.output_items", output_items_mock)
         monkeypatch.setattr("denbust.pipeline.write_run_snapshot", write_snapshot_mock)
@@ -514,7 +523,7 @@ class TestRunPipeline:
 
         assert exc_info.value.code == 1
         output_items_mock.assert_not_called()
-        write_snapshot_mock.assert_called_once_with(config.store.runs_dir, snapshot)
+        write_snapshot_mock.assert_called_once_with(config.state_paths.runs_dir, snapshot)
 
     def test_run_pipeline_writes_snapshot_for_zero_item_runs(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -533,10 +542,133 @@ class TestRunPipeline:
 
         monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
         monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
-        monkeypatch.setattr("denbust.pipeline.run_pipeline_async", AsyncMock(return_value=snapshot))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", AsyncMock(return_value=snapshot))
         monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
 
         run_pipeline(Path("agents/news.yaml"))
 
         written = list((tmp_path / "runs").glob("*.json"))
         assert len(written) == 1
+
+    @pytest.mark.asyncio
+    async def test_run_job_async_rejects_unknown_dataset_job(self) -> None:
+        """Unregistered dataset/job combinations should fail clearly."""
+        config = Config(dataset_name="events", job_name="release")
+
+        with pytest.raises(ValueError, match="Unsupported dataset/job combination"):
+            await run_job_async(config)
+
+    @pytest.mark.asyncio
+    async def test_run_job_async_writes_run_metadata_via_operational_store(
+        self, tmp_path: Path
+    ) -> None:
+        """run_job_async should write run metadata through the operational store boundary."""
+        config = Config(dataset_name="news_items", job_name="release")
+        operational_store = LocalJsonOperationalStore(tmp_path / "ops")
+
+        result = await run_job_async(config, operational_store=operational_store)
+
+        metadata_path = tmp_path / "ops" / "run_metadata.jsonl"
+        assert result.job_name == "release"
+        assert metadata_path.exists()
+        assert '"job_name": "release"' in metadata_path.read_text(encoding="utf-8")
+
+    def test_scaffolded_release_and_backup_write_snapshots(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Release and backup wrappers should emit scaffold summaries and snapshots."""
+        config = Config(
+            dataset_name="news_items",
+            job_name="ingest",
+            store={"runs_dir": tmp_path / "runs"},
+        )
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+
+        run_release(config_path=Path("agents/release/news_items.yaml"), dataset_name="news_items")
+        run_backup(config_path=Path("agents/backup/news_items.yaml"), dataset_name="news_items")
+
+        out = capsys.readouterr().out
+        assert "release job scaffold executed" in out
+        assert "backup job scaffold executed" in out
+        assert len(list((tmp_path / "runs").glob("*.json"))) == 2
+
+    def test_run_job_wrapper_delegates_to_generic_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """run_job should forward its arguments to the shared config runner."""
+        delegated: dict[str, object] = {}
+
+        def fake_run_job_from_config(**kwargs: object) -> RunSnapshot:
+            delegated.update(kwargs)
+            return RunSnapshot(config_name="test-config")
+
+        monkeypatch.setattr("denbust.pipeline._run_job_from_config", fake_run_job_from_config)
+
+        run_job(
+            config_path=Path("agents/news/local.yaml"),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            days_override=5,
+        )
+
+        assert delegated == {
+            "config_path": Path("agents/news/local.yaml"),
+            "dataset_name": DatasetName.NEWS_ITEMS,
+            "job_name": JobName.INGEST,
+            "days_override": 5,
+            "operational_store": None,
+        }
+
+    def test_run_job_from_config_passes_operational_store_to_async_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Supplying an operational store should be forwarded to run_job_async."""
+        config = Config(days=4, output=OutputConfig(formats=[OutputFormat.CLI]))
+        snapshot = RunSnapshot(config_name=config.name)
+        operational_store = LocalJsonOperationalStore(Path("/tmp/ops"))
+        run_job_async_mock = AsyncMock(return_value=snapshot)
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", run_job_async_mock)
+        monkeypatch.setattr("denbust.pipeline.write_run_snapshot", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+
+        result = _run_job_from_config(
+            config_path=Path("agents/news/local.yaml"),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            days_override=6,
+            operational_store=operational_store,
+        )
+
+        assert result is snapshot
+        run_job_async_mock.assert_awaited_once_with(
+            config,
+            config_path=Path("agents/news/local.yaml"),
+            days_override=6,
+            operational_store=operational_store,
+        )
+
+    def test_run_job_from_config_exits_on_runner_value_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Runner-level value errors should print a clear error and exit 1."""
+        config = Config()
+        run_job_async_mock = AsyncMock(side_effect=ValueError("unsupported job"))
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", run_job_async_mock)
+
+        with pytest.raises(SystemExit) as exc_info:
+            _run_job_from_config(
+                config_path=Path("agents/news/local.yaml"),
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.INGEST,
+            )
+
+        assert exc_info.value.code == 1
+        assert "Error: unsupported job" in capsys.readouterr().out

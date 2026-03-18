@@ -6,6 +6,7 @@ from pathlib import Path
 from pydantic import HttpUrl
 
 from denbust.data_models import Category, SourceReference, SubCategory, UnifiedItem
+from denbust.models.common import DatasetName, JobName
 from denbust.store.run_snapshots import RunSnapshot, snapshot_filename, write_run_snapshot
 
 
@@ -34,8 +35,14 @@ class TestRunSnapshots:
         """Snapshots should be written under the configured runs directory."""
         snapshot = RunSnapshot(
             run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            started_at=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 3, 15, 4, 0, 3, tzinfo=UTC),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
             config_name="enforcement-news",
+            config_path="agents/news/local.yaml",
             days_searched=7,
+            source_count=6,
             output_formats=["cli", "email"],
             raw_article_count=3,
             unseen_article_count=2,
@@ -44,13 +51,19 @@ class TestRunSnapshots:
             seen_count_before=10,
             seen_count_after=11,
             items=[build_item()],
+            warnings=["partial source failure"],
             errors=["mako: timeout"],
+            result_summary="ingest completed with 1 unified item(s)",
+            release_manifest={"status": "placeholder"},
         )
 
         path = write_run_snapshot(tmp_path / "runs", snapshot)
 
         assert path.exists()
         content = path.read_text(encoding="utf-8")
+        assert '"dataset_name": "news_items"' in content
+        assert '"job_name": "ingest"' in content
         assert '"config_name": "enforcement-news"' in content
         assert '"output_formats": [' in content
+        assert '"warnings": [' in content
         assert '"errors": [' in content

@@ -1,0 +1,38 @@
+name: setup-denbust-state-job
+description: Set up Python, install denbust dependencies, and prepare a namespaced state directory.
+
+inputs:
+  python-version:
+    description: Python version to install
+    required: true
+  install-playwright:
+    description: Whether to install Playwright Chromium
+    required: false
+    default: "false"
+  state-job-dir:
+    description: Dataset/job state directory to prepare
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e ".[dev]"
+
+    - name: Install Playwright Chromium
+      if: ${{ inputs.install-playwright == 'true' }}
+      shell: bash
+      run: python -m playwright install chromium
+
+    - name: Ensure state directory exists
+      shell: bash
+      run: mkdir -p "${{ inputs.state-job-dir }}/runs" "${{ inputs.state-job-dir }}/publication"

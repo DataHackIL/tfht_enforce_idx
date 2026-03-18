@@ -1,5 +1,5 @@
-# GitHub Actions configuration for enforcement news monitoring
-name: enforcement-news-github
+# Default local configuration for enforcement news monitoring
+name: enforcement-news
 dataset_name: news_items
 job_name: ingest
 days: 21
@@ -11,7 +11,6 @@ sources:
     url: https://www.ynet.co.il/Integration/StoryRss2.xml
     enabled: true
 
-  # Scraped sources - archive/search scraping with keyword/date filtering
   - name: walla
     type: scraper
     enabled: true
@@ -54,7 +53,6 @@ dedup:
 output:
   formats:
     - cli
-    - email
 
 store:
   state_root: data

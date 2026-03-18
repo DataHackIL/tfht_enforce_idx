@@ -1,5 +1,7 @@
 # Default configuration for enforcement news monitoring
 name: enforcement-news
+dataset_name: news_items
+job_name: ingest
 days: 21  # How many days back to search
 max_articles: 30  # Warn if more articles than this (consider pre-filter)
 
@@ -55,5 +57,4 @@ output:
     - cli
 
 store:
-  seen_path: data/seen.json
-  runs_dir: data/runs
+  state_root: data

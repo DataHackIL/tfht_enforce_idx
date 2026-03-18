@@ -14,6 +14,7 @@ from denbust.config import (
     StoreConfig,
     load_config,
 )
+from denbust.models.common import DatasetName, JobName
 
 
 class TestConfig:
@@ -24,14 +25,21 @@ class TestConfig:
         config = Config()
 
         assert config.name == "enforcement-news"
+        assert config.dataset_name == DatasetName.NEWS_ITEMS
+        assert config.job_name == JobName.INGEST
         assert config.days == 3
         assert config.max_articles == 30
         assert len(config.keywords) > 0
         assert config.dedup.similarity_threshold == 0.7
         assert config.output.format == OutputFormat.CLI
         assert config.output.formats == [OutputFormat.CLI]
-        assert config.store.seen_path == Path("data/seen.json")
-        assert config.store.runs_dir == Path("data/runs")
+        assert config.store.state_root == Path("data")
+        assert config.store.seen_path is None
+        assert config.store.runs_dir is None
+        assert config.store.publication_dir is None
+        assert config.state_paths.seen_path == Path("data/news_items/ingest/seen.json")
+        assert config.state_paths.runs_dir == Path("data/news_items/ingest/runs")
+        assert config.state_paths.publication_dir == Path("data/news_items/ingest/publication")
 
     def test_custom_days(self) -> None:
         """Test custom days configuration."""
@@ -133,24 +141,77 @@ class TestConfig:
         store = StoreConfig.model_validate({"path": "custom/seen.json"})
 
         assert store.seen_path == Path("custom/seen.json")
-        assert store.runs_dir == Path("data/runs")
+        assert store.runs_dir is None
 
     def test_store_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Store paths should be overrideable through environment variables."""
+        monkeypatch.setenv("DENBUST_STATE_ROOT", "/tmp/state-root")
         monkeypatch.setenv("DENBUST_STORE_PATH", "/tmp/state/seen.json")
         monkeypatch.setenv("DENBUST_RUNS_DIR", "/tmp/state/runs")
 
-        config = Config(store=StoreConfig(seen_path=Path("ignored.json"), runs_dir=Path("ignored")))
+        config = Config(
+            store=StoreConfig(
+                state_root=Path("ignored-root"),
+                seen_path=Path("ignored.json"),
+                runs_dir=Path("ignored"),
+            )
+        )
 
         assert config.store.seen_path == Path("/tmp/state/seen.json")
         assert config.store.runs_dir == Path("/tmp/state/runs")
+        assert config.store.state_root == Path("/tmp/state-root")
+        assert config.state_paths.seen_path == Path("/tmp/state/seen.json")
+        assert config.state_paths.runs_dir == Path("/tmp/state/runs")
 
     def test_store_config_defaults_when_validating_none(self) -> None:
         """Validating a missing store config should use defaults."""
         store = StoreConfig.model_validate(None)
 
-        assert store.seen_path == Path("data/seen.json")
-        assert store.runs_dir == Path("data/runs")
+        assert store.state_root == Path("data")
+        assert store.seen_path is None
+        assert store.runs_dir is None
+
+    def test_config_normalizes_scan_job_to_ingest(self) -> None:
+        """Legacy scan naming should map to the canonical ingest job."""
+        config = Config.model_validate({"job_name": "scan"})
+
+        assert config.job_name == JobName.INGEST
+
+    def test_config_identity_normalizer_passthrough_for_non_mapping(self) -> None:
+        """The config identity normalizer should pass through non-mapping values unchanged."""
+        sentinel = object()
+
+        assert Config._normalize_identity(sentinel) is sentinel
+
+    def test_config_derives_namespaced_paths_from_state_root(self) -> None:
+        """State paths should be namespaced by dataset and job."""
+        config = Config(
+            dataset_name=DatasetName.DOCS_METADATA,
+            job_name=JobName.BACKUP,
+            store={"state_root": "state-root"},
+        )
+
+        assert config.state_paths.namespace_dir == Path("state-root/docs_metadata/backup")
+        assert config.state_paths.seen_path == Path("state-root/docs_metadata/backup/seen.json")
+        assert config.state_paths.runs_dir == Path("state-root/docs_metadata/backup/runs")
+        assert config.state_paths.publication_dir == Path(
+            "state-root/docs_metadata/backup/publication"
+        )
+
+    def test_config_explicit_paths_override_derived_root(self) -> None:
+        """Explicit YAML paths should bypass state_root derivation."""
+        config = Config(
+            store={
+                "state_root": "state-root",
+                "seen_path": "custom/seen.json",
+                "runs_dir": "custom/runs",
+                "publication_dir": "custom/publication",
+            }
+        )
+
+        assert config.state_paths.seen_path == Path("custom/seen.json")
+        assert config.state_paths.runs_dir == Path("custom/runs")
+        assert config.state_paths.publication_dir == Path("custom/publication")
 
     def test_store_normalizer_passthrough_for_non_mapping(self) -> None:
         """The pre-validator should pass through non-mapping values unchanged."""
@@ -232,4 +293,6 @@ store:
         config = load_config(config_path)
 
         assert config.store.seen_path == Path("state/seen.json")
-        assert config.store.runs_dir == Path("data/runs")
+        assert config.store.runs_dir is None
+        assert config.state_paths.seen_path == Path("state/seen.json")
+        assert config.state_paths.runs_dir == Path("data/news_items/ingest/runs")

@@ -6,27 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
-
-from denbust.data_models import UnifiedItem
-
-
-class RunSnapshot(BaseModel):
-    """Summary of a single denbust pipeline run."""
-
-    run_timestamp: datetime
-    config_name: str
-    days_searched: int
-    output_formats: list[str]
-    raw_article_count: int = 0
-    unseen_article_count: int = 0
-    relevant_article_count: int = 0
-    unified_item_count: int = 0
-    seen_count_before: int = 0
-    seen_count_after: int = 0
-    fatal: bool = False
-    items: list[UnifiedItem] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
+from denbust.models.runs import RunSnapshot
 
 
 def snapshot_filename(run_timestamp: datetime) -> str:

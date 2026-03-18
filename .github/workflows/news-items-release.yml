@@ -1,10 +1,6 @@
-name: weekly-state-run
+name: news-items-release
 
 on:
-  schedule:
-    # Runs at 04:30 UTC every Sunday, which is 06:30 in Israel Standard Time
-    # (UTC+2) and 07:30 during Israel daylight saving time (UTC+3).
-    - cron: "30 4 * * 0"
   workflow_dispatch:
 
 concurrency:
@@ -18,14 +14,14 @@ env:
   DEFAULT_PYTHON_VERSION: "3.11"
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
   DATASET_NAME: news_items
-  JOB_NAME: ingest
-  JOB_CONFIG_PATH: agents/news/github.yaml
-  STATE_JOB_DIR: state_repo/news_items/ingest
+  JOB_NAME: release
+  JOB_CONFIG_PATH: agents/release/news_items.yaml
+  STATE_JOB_DIR: state_repo/news_items/release
 
 jobs:
-  run-weekly-scan:
+  run-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code repo
@@ -42,24 +38,14 @@ jobs:
         uses: ./.github/actions/setup-denbust-state-job
         with:
           python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
-          install-playwright: "true"
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run weekly scan
+      - name: Run scaffolded release job
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DENBUST_EMAIL_SMTP_HOST: ${{ secrets.DENBUST_EMAIL_SMTP_HOST }}
-          DENBUST_EMAIL_SMTP_PORT: ${{ secrets.DENBUST_EMAIL_SMTP_PORT }}
-          DENBUST_EMAIL_SMTP_USERNAME: ${{ secrets.DENBUST_EMAIL_SMTP_USERNAME }}
-          DENBUST_EMAIL_SMTP_PASSWORD: ${{ secrets.DENBUST_EMAIL_SMTP_PASSWORD }}
-          DENBUST_EMAIL_FROM: ${{ secrets.DENBUST_EMAIL_FROM }}
-          DENBUST_EMAIL_TO: ${{ secrets.DENBUST_EMAIL_TO }}
-          DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
-          DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
           DENBUST_STATE_ROOT: state_repo
-        run: denbust scan --config ${{ env.JOB_CONFIG_PATH }}
+        run: denbust release --dataset ${{ env.DATASET_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
 
-      - name: Commit and push state changes
+      - name: Commit and push release state changes
         if: ${{ always() }}
         run: |
           if [[ -z "$(git -C state_repo status --short)" ]]; then
@@ -70,9 +56,6 @@ jobs:
           git -C state_repo config user.name "github-actions[bot]"
           git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [[ -f "${{ env.STATE_JOB_DIR }}/seen.json" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/seen.json"
-          fi
           if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
             git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs"
           fi
@@ -85,5 +68,5 @@ jobs:
             exit 0
           fi
 
-          git -C state_repo commit -m "chore(state): update weekly seen store and run snapshot"
+          git -C state_repo commit -m "chore(state): update release scaffold snapshot"
           git -C state_repo push

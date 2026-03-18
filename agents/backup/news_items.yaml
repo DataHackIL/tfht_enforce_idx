@@ -1,0 +1,11 @@
+# Scaffolded backup configuration for the news_items dataset
+name: news-items-backup
+dataset_name: news_items
+job_name: backup
+
+output:
+  formats:
+    - cli
+
+store:
+  state_root: data
