@@ -1,0 +1,11 @@
+# Scaffolded release configuration for the news_items dataset
+name: news-items-release
+dataset_name: news_items
+job_name: release
+
+output:
+  formats:
+    - cli
+
+store:
+  state_root: data

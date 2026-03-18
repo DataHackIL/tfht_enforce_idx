@@ -89,8 +89,10 @@ class TestCli:
             "days_override": 9,
         }
 
-    def test_release_and_backup_use_generic_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """release and backup should default to the new namespaced config path."""
+    def test_release_and_backup_use_dedicated_config_defaults(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """release and backup should default to dedicated config locations."""
         release_calls: list[tuple[Path, DatasetName]] = []
         backup_calls: list[tuple[Path, DatasetName]] = []
 
@@ -108,8 +110,8 @@ class TestCli:
 
         assert release_result.exit_code == 0
         assert backup_result.exit_code == 0
-        assert release_calls == [(Path("agents/news/local.yaml"), DatasetName.NEWS_ITEMS)]
-        assert backup_calls == [(Path("agents/news/local.yaml"), DatasetName.NEWS_ITEMS)]
+        assert release_calls == [(Path("agents/release/news_items.yaml"), DatasetName.NEWS_ITEMS)]
+        assert backup_calls == [(Path("agents/backup/news_items.yaml"), DatasetName.NEWS_ITEMS)]
 
     def test_version_prints_package_version(self) -> None:
         """Version should render the package version string."""

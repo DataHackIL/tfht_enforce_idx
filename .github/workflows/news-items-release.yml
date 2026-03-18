@@ -13,6 +13,10 @@ permissions:
 env:
   DEFAULT_PYTHON_VERSION: "3.11"
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
+  DATASET_NAME: news_items
+  JOB_NAME: release
+  JOB_CONFIG_PATH: agents/release/news_items.yaml
+  STATE_JOB_DIR: state_repo/news_items/release
 
 jobs:
   run-release:
@@ -30,24 +34,16 @@ jobs:
           token: ${{ secrets.STATE_REPO_PAT }}
           path: state_repo
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up denbust job
+        uses: ./.github/actions/setup-denbust-state-job
         with:
           python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
-          cache: "pip"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
-      - name: Ensure release state structure exists
-        run: mkdir -p state_repo/news_items/release/runs state_repo/news_items/release/publication
+          state-job-dir: ${{ env.STATE_JOB_DIR }}
 
       - name: Run scaffolded release job
         env:
           DENBUST_STATE_ROOT: state_repo
-        run: denbust release --dataset news_items --config agents/news/github.yaml
+        run: denbust release --dataset ${{ env.DATASET_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
 
       - name: Commit and push release state changes
         if: ${{ always() }}
@@ -60,11 +56,11 @@ jobs:
           git -C state_repo config user.name "github-actions[bot]"
           git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [[ -d state_repo/news_items/release/runs ]]; then
-            git -C state_repo add -- news_items/release/runs
+          if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs"
           fi
-          if [[ -d state_repo/news_items/release/publication ]]; then
-            git -C state_repo add -- news_items/release/publication
+          if [[ -d "${{ env.STATE_JOB_DIR }}/publication" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication"
           fi
 
           if [[ -z "$(git -C state_repo status --short)" ]]; then

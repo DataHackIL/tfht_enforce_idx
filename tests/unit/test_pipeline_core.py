@@ -20,6 +20,7 @@ from denbust.data_models import (
     SubCategory,
     UnifiedItem,
 )
+from denbust.ops.storage import LocalJsonOperationalStore
 from denbust.pipeline import (
     classify_articles,
     create_sources,
@@ -554,6 +555,21 @@ class TestRunPipeline:
         with pytest.raises(ValueError, match="Unsupported dataset/job combination"):
             await run_job_async(config)
 
+    @pytest.mark.asyncio
+    async def test_run_job_async_writes_run_metadata_via_operational_store(
+        self, tmp_path: Path
+    ) -> None:
+        """run_job_async should write run metadata through the operational store boundary."""
+        config = Config(dataset_name="news_items", job_name="release")
+        operational_store = LocalJsonOperationalStore(tmp_path / "ops")
+
+        result = await run_job_async(config, operational_store=operational_store)
+
+        metadata_path = tmp_path / "ops" / "run_metadata.jsonl"
+        assert result.job_name == "release"
+        assert metadata_path.exists()
+        assert '"job_name": "release"' in metadata_path.read_text(encoding="utf-8")
+
     def test_scaffolded_release_and_backup_write_snapshots(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -567,8 +583,8 @@ class TestRunPipeline:
         monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
         monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
 
-        run_release(config_path=Path("agents/news/local.yaml"), dataset_name="news_items")
-        run_backup(config_path=Path("agents/news/local.yaml"), dataset_name="news_items")
+        run_release(config_path=Path("agents/release/news_items.yaml"), dataset_name="news_items")
+        run_backup(config_path=Path("agents/backup/news_items.yaml"), dataset_name="news_items")
 
         out = capsys.readouterr().out
         assert "release job scaffold executed" in out

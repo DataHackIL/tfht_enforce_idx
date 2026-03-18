@@ -72,7 +72,7 @@ def release(
     """Run the scaffolded release job for a dataset."""
     from denbust.pipeline import run_release
 
-    config_path = config or Path("agents/news/local.yaml")
+    config_path = config or Path("agents/release/news_items.yaml")
     run_release(config_path=config_path, dataset_name=dataset)
 
 
@@ -90,7 +90,7 @@ def backup(
     """Run the scaffolded backup job for a dataset."""
     from denbust.pipeline import run_backup
 
-    config_path = config or Path("agents/news/local.yaml")
+    config_path = config or Path("agents/backup/news_items.yaml")
     run_backup(config_path=config_path, dataset_name=dataset)
 
 

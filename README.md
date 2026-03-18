@@ -63,8 +63,8 @@ Future-facing commands now exist as scaffolding:
 
 ```bash
 denbust run --dataset news_items --job ingest --config agents/news/local.yaml
-denbust release --dataset news_items --config agents/news/local.yaml
-denbust backup --dataset news_items --config agents/news/local.yaml
+denbust release --dataset news_items --config agents/release/news_items.yaml
+denbust backup --dataset news_items --config agents/backup/news_items.yaml
 ```
 
 ## Persistence Modes
@@ -105,6 +105,7 @@ The workflow:
 
 - checks out this repo
 - checks out the state repo into `state_repo/`
+- sets dataset/job env such as `DATASET_NAME=news_items` and `JOB_NAME=ingest`
 - runs `denbust scan --config agents/news/github.yaml`
 - points persistence at the checked-out state repo via `DENBUST_STATE_ROOT=state_repo`
 - commits and pushes the updated namespaced state files only if files changed
@@ -169,6 +170,7 @@ What is implemented now:
 - dataset/job-aware run snapshots
 - dataset/job-scoped local and state-repo persistence
 - CLI scaffolding for `run`, `release`, and `backup`
+- dedicated scaffold config locations for `release` and `backup`
 - placeholder release/backup workflows
 
 What remains scaffolded for later phases:
@@ -187,12 +189,38 @@ agents/
   news/
     local.yaml
     github.yaml
+  release/
+    news_items.yaml
+  backup/
+    news_items.yaml
 ```
 
 Backward-compatible shims are still present:
 
 - `agents/news.yaml`
 - `agents/news-github.yaml`
+
+Current intent:
+
+- `agents/news/...` drives ingest jobs
+- `agents/release/...` drives scaffolded release jobs
+- `agents/backup/...` drives scaffolded backup jobs
+
+The `release` and `backup` commands still accept any compatible config path you pass explicitly, but
+their default paths now point at dedicated scaffold config files instead of reusing the ingest config.
+
+## Workflow Parameterization
+
+The current GitHub Actions layer is still news-items-first, but it is now parameterized around shared
+dataset/job env variables:
+
+- `DATASET_NAME`
+- `JOB_NAME`
+- `JOB_CONFIG_PATH`
+- `STATE_JOB_DIR`
+
+This keeps the current scheduled news ingest behavior unchanged while making the workflow files easier
+to extend for future dataset/job combinations in Phase B.
 
 ## Example Output
 

@@ -16,7 +16,7 @@ from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
-from denbust.ops.storage import NullOperationalStore
+from denbust.ops.storage import NullOperationalStore, OperationalStore
 from denbust.output.email import send_email_report
 from denbust.output.formatter import print_items
 from denbust.publish.backup import NullBackupExecutor
@@ -281,12 +281,13 @@ async def run_job_async(
     *,
     config_path: Path | None = None,
     days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
 ) -> RunSnapshot:
     """Dispatch a dataset/job run through the registry."""
     ensure_default_jobs_registered()
     handler = require_job_handler(config.dataset_name, config.job_name)
     result = await handler(config, config_path, days_override)
-    NullOperationalStore().write_run_metadata(result)
+    (operational_store or NullOperationalStore()).write_run_metadata(result)
     return result
 
 
@@ -308,6 +309,7 @@ def _run_job_from_config(
     dataset_name: DatasetName | None,
     job_name: JobName | None,
     days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
 ) -> RunSnapshot:
     """Shared sync wrapper for CLI-triggered job runs."""
     setup_logging()
@@ -331,9 +333,23 @@ def _run_job_from_config(
     )
 
     try:
-        result = asyncio.run(
-            run_job_async(config, config_path=config_path, days_override=days_override)
-        )
+        if operational_store is None:
+            result = asyncio.run(
+                run_job_async(
+                    config,
+                    config_path=config_path,
+                    days_override=days_override,
+                )
+            )
+        else:
+            result = asyncio.run(
+                run_job_async(
+                    config,
+                    config_path=config_path,
+                    days_override=days_override,
+                    operational_store=operational_store,
+                )
+            )
     except ValueError as exc:
         print(f"Error: {exc}")
         sys.exit(1)
@@ -367,6 +383,7 @@ def run_job(
     dataset_name: DatasetName,
     job_name: JobName,
     days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
 ) -> None:
     """Run a dataset/job pair through the generic registry."""
     _run_job_from_config(
@@ -374,24 +391,37 @@ def run_job(
         dataset_name=dataset_name,
         job_name=job_name,
         days_override=days_override,
+        operational_store=operational_store,
     )
 
 
-def run_release(*, config_path: Path, dataset_name: DatasetName) -> None:
+def run_release(
+    *,
+    config_path: Path,
+    dataset_name: DatasetName,
+    operational_store: OperationalStore | None = None,
+) -> None:
     """Run the scaffolded release job for a dataset."""
     _run_job_from_config(
         config_path=config_path,
         dataset_name=dataset_name,
         job_name=JobName.RELEASE,
+        operational_store=operational_store,
     )
 
 
-def run_backup(*, config_path: Path, dataset_name: DatasetName) -> None:
+def run_backup(
+    *,
+    config_path: Path,
+    dataset_name: DatasetName,
+    operational_store: OperationalStore | None = None,
+) -> None:
     """Run the scaffolded backup job for a dataset."""
     _run_job_from_config(
         config_path=config_path,
         dataset_name=dataset_name,
         job_name=JobName.BACKUP,
+        operational_store=operational_store,
     )
 
 
