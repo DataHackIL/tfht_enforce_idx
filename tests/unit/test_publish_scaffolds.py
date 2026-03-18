@@ -43,7 +43,7 @@ def test_null_release_builder_describe_reports_scaffold_status() -> None:
 
 def test_release_builder_is_abstract() -> None:
     """The abstract release builder contract should remain explicit."""
-    with pytest.raises(TypeError, match="implementation for abstract method 'build_manifest'"):
+    with pytest.raises(TypeError, match="build_manifest"):
         IncompleteReleaseBuilder()
 
 
@@ -66,7 +66,7 @@ def test_null_backup_executor_describe_reports_scaffold_status() -> None:
 
 def test_backup_executor_is_abstract() -> None:
     """The abstract backup executor contract should remain explicit."""
-    with pytest.raises(TypeError, match="implementation for abstract method 'build_manifest'"):
+    with pytest.raises(TypeError, match="build_manifest"):
         IncompleteBackupExecutor()
 
 
