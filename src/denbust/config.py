@@ -7,6 +7,9 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from denbust.models.common import DatasetName, JobName, normalize_job_name
+from denbust.store.state_paths import DatasetStatePaths, resolve_dataset_state_paths
+
 
 class SourceType(StrEnum):
     """Type of news source."""
@@ -68,8 +71,10 @@ class OutputConfig(BaseModel):
 class StoreConfig(BaseModel):
     """Configuration for persistence."""
 
-    seen_path: Path = Path("data/seen.json")
-    runs_dir: Path = Path("data/runs")
+    state_root: Path = Path("data")
+    seen_path: Path | None = None
+    runs_dir: Path | None = None
+    publication_dir: Path | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -85,6 +90,10 @@ class StoreConfig(BaseModel):
         legacy_path = normalized.pop("path", None)
         if "seen_path" not in normalized and legacy_path is not None:
             normalized["seen_path"] = legacy_path
+
+        env_state_root = os.environ.get("DENBUST_STATE_ROOT")
+        if env_state_root:
+            normalized["state_root"] = env_state_root
 
         env_seen_path = os.environ.get("DENBUST_STORE_PATH")
         if env_seen_path:
@@ -116,6 +125,8 @@ class Config(BaseModel):
     """Root configuration for denbust."""
 
     name: str = "enforcement-news"
+    dataset_name: DatasetName = DatasetName.NEWS_ITEMS
+    job_name: JobName = JobName.INGEST
     days: int = Field(default=3, ge=1)
     max_articles: int = Field(default=30, ge=1)
     keywords: list[str] = Field(default_factory=lambda: DEFAULT_KEYWORDS.copy())
@@ -124,6 +135,31 @@ class Config(BaseModel):
     dedup: DedupConfig = Field(default_factory=DedupConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     store: StoreConfig = Field(default_factory=StoreConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_identity(cls, data: object) -> object:
+        """Normalize dataset/job identity for backward compatibility."""
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        if "dataset_name" not in normalized:
+            normalized["dataset_name"] = DatasetName.NEWS_ITEMS
+        normalized["job_name"] = normalize_job_name(normalized.get("job_name"))
+        return normalized
+
+    @property
+    def state_paths(self) -> DatasetStatePaths:
+        """Resolve dataset/job-scoped state paths for this config."""
+        return resolve_dataset_state_paths(
+            state_root=self.store.state_root,
+            dataset_name=self.dataset_name,
+            job_name=self.job_name,
+            seen_path=self.store.seen_path,
+            runs_dir=self.store.runs_dir,
+            publication_dir=self.store.publication_dir,
+        )
 
     @property
     def anthropic_api_key(self) -> str | None:

@@ -2,22 +2,41 @@
 
 מדד האכיפה - Enforcement Index
 
-Monitor Israeli news for anti-brothel law enforcement activity: raids, arrests, closures, trafficking cases.
+`denbust` is evolving from a single-purpose news scanner into a small multi-dataset platform for TFHT
+data jobs. Phase A keeps the current news ingest pipeline working while introducing shared dataset/job
+identity, namespaced state paths, shared policy models, and scaffolding for future release and backup
+flows.
 
-## What it does (Phase 1)
+Today, the only fully implemented dataset/job is:
 
-- Scans Israeli news RSS feeds (Ynet, Mako, Walla, etc.)
-- Finds reports about brothel raids, prostitution arrests, pimping, trafficking
-- Deduplicates same story across multiple sources
-- Outputs unified items with all source links
-- Supports output via CLI or SMTP email reports
+- `news_items / ingest`
+
+Scaffolded but not yet fully implemented:
+
+- `news_items / release`
+- `news_items / backup`
+
+Planned future datasets:
+
+- `docs_metadata`
+- `open_docs_fulltext`
+- `events`
+
+## What it does now
+
+- Scans Israeli news sources for enforcement activity: raids, arrests, closures, trafficking cases
+- Uses RSS and browser-backed scrapers
+- Classifies relevance with an LLM
+- Deduplicates the same story across multiple sources
+- Emits unified items via CLI or SMTP email
+- Persists dataset/job-scoped seen state and per-run JSON snapshots
 
 ## Quick Start
 
 ```bash
 pip install -e ".[dev]"
 python -m playwright install chromium
-denbust scan --config agents/news.yaml
+denbust scan --config agents/news/local.yaml
 ```
 
 To send reports by email, set `output.format: email` in your config and provide SMTP env vars
@@ -26,25 +45,56 @@ from `.env.example`.
 Mako scraping uses a headless Chromium browser. After installing dependencies on a new machine, run
 `python -m playwright install chromium` once before your first live scan.
 
+## Dataset And Job Model
+
+Phase A introduces explicit dataset and job identity in config and run snapshots:
+
+- `dataset_name`
+- `job_name`
+
+Current defaults remain:
+
+- `dataset_name: news_items`
+- `job_name: ingest`
+
+`denbust scan` is preserved as a compatibility alias for `news_items / ingest`.
+
+Future-facing commands now exist as scaffolding:
+
+```bash
+denbust run --dataset news_items --job ingest --config agents/news/local.yaml
+denbust release --dataset news_items --config agents/news/local.yaml
+denbust backup --dataset news_items --config agents/news/local.yaml
+```
+
 ## Persistence Modes
 
 ### Local mode
 
-Local runs continue to use the repo-local defaults:
+Local runs now use dataset/job-namespaced defaults under the repo-local state root:
 
-- seen store: `data/seen.json`
-- run snapshots: `data/runs/`
+- seen store: `data/news_items/ingest/seen.json`
+- run snapshots: `data/news_items/ingest/runs/`
+- publication scaffold dir: `data/news_items/ingest/publication/`
 
 Example:
 
 ```bash
-denbust scan --config agents/news.yaml
+denbust scan --config agents/news/local.yaml
 ```
 
-You can override the persistence locations without changing YAML by setting:
+You can override the persistence layout without changing YAML by setting:
 
+- `DENBUST_STATE_ROOT`
 - `DENBUST_STORE_PATH`
 - `DENBUST_RUNS_DIR`
+
+Precedence rules:
+
+1. `DENBUST_STORE_PATH` / `DENBUST_RUNS_DIR`
+2. `DENBUST_STATE_ROOT`
+3. explicit YAML store paths / `store.state_root`
+4. local default root `data/`
 
 ### GitHub Actions + state repo mode
 
@@ -55,11 +105,9 @@ The workflow:
 
 - checks out this repo
 - checks out the state repo into `state_repo/`
-- runs `denbust scan --config agents/news-github.yaml`
-- points persistence at the checked-out state repo via:
-  - `DENBUST_STORE_PATH=state_repo/seen.json`
-  - `DENBUST_RUNS_DIR=state_repo/runs`
-- commits and pushes the updated `seen.json` and new run snapshot only if files changed
+- runs `denbust scan --config agents/news/github.yaml`
+- points persistence at the checked-out state repo via `DENBUST_STATE_ROOT=state_repo`
+- commits and pushes the updated namespaced state files only if files changed
 
 Required secrets for GitHub-run mode:
 
@@ -78,15 +126,73 @@ Expected `tfht_enforce_idx_state` structure:
 
 ```text
 tfht_enforce_idx_state/
-├── seen.json
-└── runs/
+└── news_items/
+    ├── ingest/
+    │   ├── seen.json
+    │   ├── runs/
+    │   └── publication/
+    ├── release/
+    │   ├── runs/
+    │   └── publication/
+    └── backup/
+        ├── runs/
+        └── publication/
 ```
 
 Bootstrap notes:
 
-- `seen.json` may be absent initially; it will be created automatically once a run marks at least one URL as seen
-- `runs/` will be created automatically by the workflow if missing
+- `seen.json` may be absent initially; it is created once a run marks at least one URL as seen
+- `runs/` and `publication/` directories are created automatically by the workflows when needed
 - a small `README.md` in the state repo is fine but optional
+
+## Architecture Direction
+
+Phase A introduces shared platform primitives so future dataset jobs can reuse them:
+
+- `src/denbust/models/`
+  - dataset/job identity
+  - run snapshot model
+  - policy enums for rights, privacy, review, and publication status
+- `src/denbust/store/state_paths.py`
+  - centralized dataset/job state path resolution
+- `src/denbust/datasets/`
+  - explicit dataset/job registry
+- `src/denbust/ops/storage.py`
+  - operational-store abstraction with a null implementation
+- `src/denbust/publish/`
+  - release/export abstractions
+  - backup abstractions
+
+What is implemented now:
+
+- `news_items / ingest` end to end
+- dataset/job-aware run snapshots
+- dataset/job-scoped local and state-repo persistence
+- CLI scaffolding for `run`, `release`, and `backup`
+- placeholder release/backup workflows
+
+What remains scaffolded for later phases:
+
+- real operational persistence backends
+- Parquet release generation
+- remote backup uploads
+- additional dataset handlers beyond `news_items / ingest`
+
+## Config Layout
+
+Preferred checked-in config layout:
+
+```text
+agents/
+  news/
+    local.yaml
+    github.yaml
+```
+
+Backward-compatible shims are still present:
+
+- `agents/news.yaml`
+- `agents/news-github.yaml`
 
 ## Example Output
 
@@ -110,6 +216,6 @@ Bootstrap notes:
 
 ## Roadmap
 
-- **Phase 1** (current): News monitoring via RSS
-- **Phase 2**: Court records scraping
-- **Phase 3**: Analytics dashboard
+- **Phase A** (current): multi-dataset platform spine + working `news_items / ingest`
+- **Phase B**: `news_items` dataset evolution and release/backup implementation
+- **Later**: docs metadata, open-docs fulltext, events, and downstream analytics

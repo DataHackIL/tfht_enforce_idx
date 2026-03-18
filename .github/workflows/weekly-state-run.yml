@@ -49,7 +49,7 @@ jobs:
         run: python -m playwright install chromium
 
       - name: Ensure state repo structure exists
-        run: mkdir -p state_repo/runs
+        run: mkdir -p state_repo/news_items/ingest/runs state_repo/news_items/ingest/publication
 
       - name: Run weekly scan
         env:
@@ -62,9 +62,8 @@ jobs:
           DENBUST_EMAIL_TO: ${{ secrets.DENBUST_EMAIL_TO }}
           DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
           DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
-          DENBUST_STORE_PATH: state_repo/seen.json
-          DENBUST_RUNS_DIR: state_repo/runs
-        run: denbust scan --config agents/news-github.yaml
+          DENBUST_STATE_ROOT: state_repo
+        run: denbust scan --config agents/news/github.yaml
 
       - name: Commit and push state changes
         if: ${{ always() }}
@@ -77,11 +76,14 @@ jobs:
           git -C state_repo config user.name "github-actions[bot]"
           git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [[ -f state_repo/seen.json ]]; then
-            git -C state_repo add -- seen.json
+          if [[ -f state_repo/news_items/ingest/seen.json ]]; then
+            git -C state_repo add -- news_items/ingest/seen.json
           fi
-          if [[ -d state_repo/runs ]]; then
-            git -C state_repo add -- runs
+          if [[ -d state_repo/news_items/ingest/runs ]]; then
+            git -C state_repo add -- news_items/ingest/runs
+          fi
+          if [[ -d state_repo/news_items/ingest/publication ]]; then
+            git -C state_repo add -- news_items/ingest/publication
           fi
 
           if [[ -z "$(git -C state_repo status --short)" ]]; then

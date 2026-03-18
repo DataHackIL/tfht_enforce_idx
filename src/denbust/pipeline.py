@@ -1,4 +1,6 @@
-"""Pipeline orchestration for news scanning."""
+"""Pipeline orchestration and dataset/job dispatch."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -9,9 +11,16 @@ from pathlib import Path
 from denbust.classifier.relevance import Classifier, create_classifier
 from denbust.config import Config, OutputFormat, SourceType, load_config
 from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
+from denbust.datasets.jobs import ensure_default_jobs_registered
+from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
+from denbust.models.common import DatasetName, JobName
+from denbust.models.runs import RunSnapshot
+from denbust.ops.storage import NullOperationalStore
 from denbust.output.email import send_email_report
 from denbust.output.formatter import print_items
+from denbust.publish.backup import NullBackupExecutor
+from denbust.publish.release import NullReleaseBuilder
 from denbust.sources.base import Source
 from denbust.sources.haaretz import create_haaretz_source
 from denbust.sources.ice import create_ice_source
@@ -19,18 +28,14 @@ from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
 from denbust.sources.rss import RSSSource
 from denbust.sources.walla import create_walla_source
-from denbust.store.run_snapshots import RunSnapshot, write_run_snapshot
+from denbust.store.run_snapshots import write_run_snapshot
 from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
 
 
 def setup_logging(verbose: bool = False) -> None:
-    """Configure logging for the pipeline.
-
-    Args:
-        verbose: Enable verbose logging.
-    """
+    """Configure logging for the pipeline."""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -40,14 +45,7 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 def create_sources(config: Config) -> list[Source]:
-    """Create source instances from config.
-
-    Args:
-        config: Configuration object.
-
-    Returns:
-        List of Source instances.
-    """
+    """Create source instances from config."""
     sources: list[Source] = []
 
     for source_cfg in config.sources:
@@ -58,7 +56,7 @@ def create_sources(config: Config) -> list[Source]:
             if source_cfg.url:
                 sources.append(RSSSource(source_name=source_cfg.name, feed_url=source_cfg.url))
             else:
-                logger.warning(f"RSS source {source_cfg.name} missing URL, skipping")
+                logger.warning("RSS source %s missing URL, skipping", source_cfg.name)
 
         elif source_cfg.type == SourceType.SCRAPER:
             if source_cfg.name == "mako":
@@ -72,154 +70,120 @@ def create_sources(config: Config) -> list[Source]:
             elif source_cfg.name == "walla":
                 sources.append(create_walla_source())
             else:
-                logger.warning(f"Unknown scraper source: {source_cfg.name}")
+                logger.warning("Unknown scraper source: %s", source_cfg.name)
 
-    logger.info(f"Created {len(sources)} news sources")
+    logger.info("Created %s news sources", len(sources))
     return sources
 
 
 async def fetch_all_sources(
     sources: list[Source], days: int, keywords: list[str]
 ) -> tuple[list[RawArticle], list[str]]:
-    """Fetch articles from all sources.
-
-    Args:
-        sources: List of sources to fetch from.
-        days: Number of days back to search.
-        keywords: Keywords to filter by.
-
-    Returns:
-        Combined list of raw articles and summarized source errors.
-    """
+    """Fetch articles from all sources."""
     all_articles: list[RawArticle] = []
     errors: list[str] = []
 
     for source in sources:
         try:
-            logger.info(f"Fetching from {source.name}...")
+            logger.info("Fetching from %s...", source.name)
             articles = await source.fetch(days=days, keywords=keywords)
             all_articles.extend(articles)
-            logger.info(f"Found {len(articles)} articles from {source.name}")
-        except Exception as e:
-            logger.exception(f"Error fetching from {source.name}: {e}")
-            errors.append(f"{source.name}: {e}")
+            logger.info("Found %s articles from %s", len(articles), source.name)
+        except Exception as exc:
+            logger.exception("Error fetching from %s: %s", source.name, exc)
+            errors.append(f"{source.name}: {exc}")
 
-    logger.info(f"Total raw articles: {len(all_articles)}")
+    logger.info("Total raw articles: %s", len(all_articles))
     return all_articles, errors
 
 
 def filter_seen(articles: list[RawArticle], seen_store: SeenStore) -> list[RawArticle]:
-    """Filter out already-seen articles.
-
-    Args:
-        articles: List of articles.
-        seen_store: Seen URL store.
-
-    Returns:
-        List of unseen articles.
-    """
+    """Filter out already-seen articles."""
     unseen = [article for article in articles if not seen_store.is_seen(str(article.url))]
-    logger.info(f"Filtered to {len(unseen)} unseen articles (was {len(articles)})")
+    logger.info("Filtered to %s unseen articles (was %s)", len(unseen), len(articles))
     return unseen
 
 
 async def classify_articles(
     articles: list[RawArticle], classifier: Classifier
 ) -> list[ClassifiedArticle]:
-    """Classify all articles for relevance.
-
-    Args:
-        articles: List of raw articles.
-        classifier: Classifier instance.
-
-    Returns:
-        List of classified articles (only relevant ones).
-    """
+    """Classify all articles for relevance."""
     classified = await classifier.classify_batch(articles)
-
-    # Filter to only relevant articles
-    relevant = [c for c in classified if c.classification.relevant]
-    logger.info(f"Classified {len(articles)} articles, {len(relevant)} are relevant")
-
+    relevant = [classified_article for classified_article in classified if classified_article.classification.relevant]
+    logger.info("Classified %s articles, %s are relevant", len(articles), len(relevant))
     return relevant
 
 
 def deduplicate_articles(
     articles: list[ClassifiedArticle], deduplicator: Deduplicator
 ) -> list[UnifiedItem]:
-    """Deduplicate and unify articles.
-
-    Args:
-        articles: List of classified articles.
-        deduplicator: Deduplicator instance.
-
-    Returns:
-        List of unified items.
-    """
+    """Deduplicate and unify articles."""
     items = deduplicator.deduplicate(articles)
-    logger.info(f"Deduplicated to {len(items)} unique stories")
+    logger.info("Deduplicated to %s unique stories", len(items))
     return items
 
 
 def mark_seen(items: list[UnifiedItem], seen_store: SeenStore) -> None:
-    """Mark all URLs in unified items as seen.
-
-    Args:
-        items: Unified items.
-        seen_store: Seen URL store.
-    """
-    urls = []
+    """Mark all URLs in unified items as seen."""
+    urls: list[str] = []
     for item in items:
-        for source in item.sources:
-            urls.append(str(source.url))
+        urls.extend(str(source.url) for source in item.sources)
 
     seen_store.mark_seen(urls)
     seen_store.save()
-    logger.info(f"Marked {len(urls)} URLs as seen")
+    logger.info("Marked %s URLs as seen", len(urls))
 
 
-async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
-    """Run the full pipeline asynchronously.
-
-    Args:
-        config: Configuration object.
-        days: Number of days back to search.
-
-    Returns:
-        Summary of the pipeline run.
-    """
-    result = RunSnapshot(
+def _build_run_snapshot(
+    config: Config,
+    *,
+    config_path: Path | None,
+    days: int,
+) -> RunSnapshot:
+    """Create a generalized run snapshot scaffold for a job invocation."""
+    return RunSnapshot(
         run_timestamp=datetime.now(UTC),
+        dataset_name=config.dataset_name,
+        job_name=config.job_name,
         config_name=config.name,
+        config_path=str(config_path) if config_path is not None else None,
         days_searched=days,
         output_formats=[output_format.value for output_format in config.output.formats],
     )
 
-    # Check for API key
+
+async def run_news_ingest_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+) -> RunSnapshot:
+    """Run the current news ingest pipeline as a registered dataset job."""
+    days = days_override if days_override is not None else config.days
+    result = _build_run_snapshot(config, config_path=config_path, days=days)
+
     if not config.anthropic_api_key:
         logger.error("ANTHROPIC_API_KEY not set")
         print("Error: ANTHROPIC_API_KEY environment variable not set")
         result.fatal = True
         result.errors.append("ANTHROPIC_API_KEY not set")
-        return result
+        return result.finish("fatal: missing anthropic api key")
 
-    # Create components
     sources = create_sources(config)
+    result.source_count = len(sources)
     if not sources:
         logger.warning("No sources configured")
         result.fatal = True
         result.errors.append("No sources configured")
-        return result
+        return result.finish("fatal: no sources configured")
 
     classifier = create_classifier(
         api_key=config.anthropic_api_key,
         model=config.classifier.model,
     )
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
-    seen_store = create_seen_store(config.store.seen_path)
+    seen_store = create_seen_store(config.state_paths.seen_path)
     result.seen_count_before = seen_store.count
 
-    # 1. Fetch from all sources
     all_articles, source_errors = await fetch_all_sources(
         sources=sources,
         days=days,
@@ -227,82 +191,204 @@ async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
     )
     result.raw_article_count = len(all_articles)
     result.errors.extend(source_errors)
+    if source_errors:
+        result.warnings.append(f"{len(source_errors)} source(s) reported errors")
 
     if not all_articles:
         logger.info("No articles found from any source")
         result.seen_count_after = seen_store.count
-        return result
+        return result.finish("no articles found")
 
-    # 2. Filter out seen URLs
     unseen_articles = filter_seen(all_articles, seen_store)
     result.unseen_article_count = len(unseen_articles)
     if not unseen_articles:
         logger.info("All articles were already seen")
         result.seen_count_after = seen_store.count
-        return result
+        return result.finish("all fetched articles were already seen")
 
-    # 3. Check article count against max_articles threshold
     if len(unseen_articles) > config.max_articles:
-        logger.warning(
+        warning = (
             f"Article count ({len(unseen_articles)}) exceeds max_articles threshold "
             f"({config.max_articles}). Consider adding a pre-filter stage or reducing "
             f"the number of days/sources. Proceeding with classification anyway."
         )
+        logger.warning(warning)
+        result.warnings.append(warning)
 
-    # 4. Classify articles
     relevant_articles = await classify_articles(unseen_articles, classifier)
     result.relevant_article_count = len(relevant_articles)
     if not relevant_articles:
         logger.info("No relevant articles found")
         result.seen_count_after = seen_store.count
-        return result
+        return result.finish("no relevant articles found")
 
-    # 5. Deduplicate
     unified_items = deduplicate_articles(relevant_articles, deduplicator)
     result.unified_item_count = len(unified_items)
     result.items = unified_items
 
-    # 6. Mark as seen
     mark_seen(unified_items, seen_store)
     result.seen_count_after = seen_store.count
+    return result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
 
+
+async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
+    """Backward-compatible alias for the news ingest job."""
+    ingest_config = config.model_copy(
+        update={
+            "dataset_name": DatasetName.NEWS_ITEMS,
+            "job_name": JobName.INGEST,
+        }
+    )
+    return await run_news_ingest_job(ingest_config, config_path=None, days_override=days)
+
+
+async def run_scaffolded_release_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+) -> RunSnapshot:
+    """Emit a scaffold run result for the future release job."""
+    del days_override
+    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
+    builder = NullReleaseBuilder()
+    manifest = builder.build_manifest(config.dataset_name, config.state_paths.publication_dir)
+    result.release_manifest = manifest.model_dump(mode="json")
+    result.warnings.append("Release generation is scaffolded but not implemented in Phase A")
+    return result.finish("release job scaffold executed")
+
+
+async def run_scaffolded_backup_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+) -> RunSnapshot:
+    """Emit a scaffold run result for the future backup job."""
+    del days_override
+    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
+    executor = NullBackupExecutor()
+    manifest = executor.build_manifest(config.dataset_name, config.state_paths.state_root)
+    result.backup_manifest = manifest.model_dump(mode="json")
+    result.warnings.append("Backup execution is scaffolded but not implemented in Phase A")
+    return result.finish("backup job scaffold executed")
+
+
+async def run_job_async(
+    config: Config,
+    *,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+) -> RunSnapshot:
+    """Dispatch a dataset/job run through the registry."""
+    ensure_default_jobs_registered()
+    handler = require_job_handler(config.dataset_name, config.job_name)
+    result = await handler(config, config_path, days_override)
+    NullOperationalStore().write_run_metadata(result)
+    return result
+
+
+def _load_config_or_exit(config_path: Path) -> Config:
+    """Load a config file and exit with a helpful message on failure."""
+    try:
+        return load_config(config_path)
+    except FileNotFoundError:
+        print(f"Error: Config file not found: {config_path}")
+        sys.exit(1)
+    except Exception as exc:
+        print(f"Error loading config: {exc}")
+        sys.exit(1)
+
+
+def _run_job_from_config(
+    *,
+    config_path: Path,
+    dataset_name: DatasetName | None,
+    job_name: JobName | None,
+    days_override: int | None = None,
+) -> RunSnapshot:
+    """Shared sync wrapper for CLI-triggered job runs."""
+    setup_logging()
+    config = _load_config_or_exit(config_path)
+
+    update: dict[str, object] = {}
+    if dataset_name is not None:
+        update["dataset_name"] = dataset_name
+    if job_name is not None:
+        update["job_name"] = job_name
+    if update:
+        config = config.model_copy(update=update)
+
+    days = days_override if days_override is not None else config.days
+    logger.info(
+        "Starting %s/%s: %s, searching last %s days",
+        config.dataset_name,
+        config.job_name,
+        config.name,
+        days,
+    )
+
+    try:
+        result = asyncio.run(
+            run_job_async(config, config_path=config_path, days_override=days_override)
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+    if config.job_name == JobName.INGEST and not result.fatal:
+        output_errors = output_items(result.items, config)
+        result.errors.extend(output_errors)
+
+    write_run_snapshot(config.state_paths.runs_dir, result)
+
+    if config.job_name != JobName.INGEST:
+        print(result.result_summary or f"{config.job_name.value} job completed")
+
+    if result.fatal:
+        sys.exit(1)
     return result
 
 
 def run_pipeline(config_path: Path, days_override: int | None = None) -> None:
-    """Run the news scanning pipeline.
+    """Run the news ingest pipeline through the generic job runner."""
+    _run_job_from_config(
+        config_path=config_path,
+        dataset_name=DatasetName.NEWS_ITEMS,
+        job_name=JobName.INGEST,
+        days_override=days_override,
+    )
 
-    Args:
-        config_path: Path to YAML config file.
-        days_override: Override days from config if provided.
-    """
-    setup_logging()
 
-    # Load config
-    try:
-        config = load_config(config_path)
-    except FileNotFoundError:
-        print(f"Error: Config file not found: {config_path}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        sys.exit(1)
+def run_job(
+    *,
+    config_path: Path,
+    dataset_name: DatasetName,
+    job_name: JobName,
+    days_override: int | None = None,
+) -> None:
+    """Run a dataset/job pair through the generic registry."""
+    _run_job_from_config(
+        config_path=config_path,
+        dataset_name=dataset_name,
+        job_name=job_name,
+        days_override=days_override,
+    )
 
-    # Apply overrides
-    days = days_override if days_override is not None else config.days
 
-    logger.info(f"Starting pipeline: {config.name}, searching last {days} days")
+def run_release(*, config_path: Path, dataset_name: DatasetName) -> None:
+    """Run the scaffolded release job for a dataset."""
+    _run_job_from_config(
+        config_path=config_path,
+        dataset_name=dataset_name,
+        job_name=JobName.RELEASE,
+    )
 
-    # Run async pipeline
-    result = asyncio.run(run_pipeline_async(config, days))
 
-    # Output results only for non-fatal runs.
-    if not result.fatal:
-        output_errors = output_items(result.items, config)
-        result.errors.extend(output_errors)
-    write_run_snapshot(config.store.runs_dir, result)
-    if result.fatal:
-        sys.exit(1)
+def run_backup(*, config_path: Path, dataset_name: DatasetName) -> None:
+    """Run the scaffolded backup job for a dataset."""
+    _run_job_from_config(
+        config_path=config_path,
+        dataset_name=dataset_name,
+        job_name=JobName.BACKUP,
+    )
 
 
 def output_items(items: list[UnifiedItem], config: Config) -> list[str]:
@@ -321,7 +407,7 @@ def output_items(items: list[UnifiedItem], config: Config) -> list[str]:
                 recipients = ", ".join(config.email_to)
                 print(f"Email report sent to: {recipients}")
             except Exception as exc:
-                logger.exception(f"Failed to send email report: {exc}")
+                logger.exception("Failed to send email report: %s", exc)
                 print(f"Error sending email report: {exc}")
                 errors.append(f"email: {exc}")
                 if not cli_requested:

@@ -1,0 +1,76 @@
+name: news-items-backup
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: state-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.11"
+  STATE_REPO: DataHackIL/tfht_enforce_idx_state
+
+jobs:
+  run-backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@v6
+
+      - name: Checkout state repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.STATE_REPO }}
+          token: ${{ secrets.STATE_REPO_PAT }}
+          path: state_repo
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ensure backup state structure exists
+        run: mkdir -p state_repo/news_items/backup/runs state_repo/news_items/backup/publication
+
+      - name: Run scaffolded backup job
+        env:
+          DENBUST_STATE_ROOT: state_repo
+        run: denbust backup --dataset news_items --config agents/news/github.yaml
+
+      - name: Commit and push backup state changes
+        if: ${{ always() }}
+        run: |
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo config user.name "github-actions[bot]"
+          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ -d state_repo/news_items/backup/runs ]]; then
+            git -C state_repo add -- news_items/backup/runs
+          fi
+          if [[ -d state_repo/news_items/backup/publication ]]; then
+            git -C state_repo add -- news_items/backup/publication
+          fi
+
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No staged state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo commit -m "chore(state): update backup scaffold snapshot"
+          git -C state_repo push
