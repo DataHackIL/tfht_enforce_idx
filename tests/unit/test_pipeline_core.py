@@ -20,8 +20,10 @@ from denbust.data_models import (
     SubCategory,
     UnifiedItem,
 )
+from denbust.models.common import DatasetName, JobName
 from denbust.ops.storage import LocalJsonOperationalStore
 from denbust.pipeline import (
+    _run_job_from_config,
     classify_articles,
     create_sources,
     deduplicate_articles,
@@ -29,6 +31,7 @@ from denbust.pipeline import (
     filter_seen,
     mark_seen,
     run_backup,
+    run_job,
     run_job_async,
     run_pipeline,
     run_pipeline_async,
@@ -590,3 +593,82 @@ class TestRunPipeline:
         assert "release job scaffold executed" in out
         assert "backup job scaffold executed" in out
         assert len(list((tmp_path / "runs").glob("*.json"))) == 2
+
+    def test_run_job_wrapper_delegates_to_generic_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """run_job should forward its arguments to the shared config runner."""
+        delegated: dict[str, object] = {}
+
+        def fake_run_job_from_config(**kwargs: object) -> RunSnapshot:
+            delegated.update(kwargs)
+            return RunSnapshot(config_name="test-config")
+
+        monkeypatch.setattr("denbust.pipeline._run_job_from_config", fake_run_job_from_config)
+
+        run_job(
+            config_path=Path("agents/news/local.yaml"),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            days_override=5,
+        )
+
+        assert delegated == {
+            "config_path": Path("agents/news/local.yaml"),
+            "dataset_name": DatasetName.NEWS_ITEMS,
+            "job_name": JobName.INGEST,
+            "days_override": 5,
+            "operational_store": None,
+        }
+
+    def test_run_job_from_config_passes_operational_store_to_async_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Supplying an operational store should be forwarded to run_job_async."""
+        config = Config(days=4, output=OutputConfig(formats=[OutputFormat.CLI]))
+        snapshot = RunSnapshot(config_name=config.name)
+        operational_store = LocalJsonOperationalStore(Path("/tmp/ops"))
+        run_job_async_mock = AsyncMock(return_value=snapshot)
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", run_job_async_mock)
+        monkeypatch.setattr("denbust.pipeline.write_run_snapshot", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+
+        result = _run_job_from_config(
+            config_path=Path("agents/news/local.yaml"),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            days_override=6,
+            operational_store=operational_store,
+        )
+
+        assert result is snapshot
+        run_job_async_mock.assert_awaited_once_with(
+            config,
+            config_path=Path("agents/news/local.yaml"),
+            days_override=6,
+            operational_store=operational_store,
+        )
+
+    def test_run_job_from_config_exits_on_runner_value_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Runner-level value errors should print a clear error and exit 1."""
+        config = Config()
+        run_job_async_mock = AsyncMock(side_effect=ValueError("unsupported job"))
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", run_job_async_mock)
+
+        with pytest.raises(SystemExit) as exc_info:
+            _run_job_from_config(
+                config_path=Path("agents/news/local.yaml"),
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.INGEST,
+            )
+
+        assert exc_info.value.code == 1
+        assert "Error: unsupported job" in capsys.readouterr().out

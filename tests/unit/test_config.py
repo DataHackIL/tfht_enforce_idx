@@ -177,6 +177,12 @@ class TestConfig:
 
         assert config.job_name == JobName.INGEST
 
+    def test_config_identity_normalizer_passthrough_for_non_mapping(self) -> None:
+        """The config identity normalizer should pass through non-mapping values unchanged."""
+        sentinel = object()
+
+        assert Config._normalize_identity(sentinel) is sentinel
+
     def test_config_derives_namespaced_paths_from_state_root(self) -> None:
         """State paths should be namespaced by dataset and job."""
         config = Config(
