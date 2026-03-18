@@ -5,14 +5,16 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 import respx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from httpx import Response
 
 from denbust.data_models import RawArticle
+from denbust.sources.haaretz import HaaretzScraper, create_haaretz_source
 from denbust.sources.ice import IceScraper, create_ice_source
 from denbust.sources.maariv import MaarivScraper, create_maariv_source
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source
@@ -1300,6 +1302,773 @@ class TestIceScraper:
         articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=[keyword])
 
         assert len(articles) == 2
+
+
+class TestHaaretzScraper:
+    """Integration tests for Haaretz scraper."""
+
+    @staticmethod
+    def _create_scraper() -> HaaretzScraper:
+        """Create a scraper with rate limiting disabled for tests."""
+        return HaaretzScraper(rate_limit_delay_seconds=0)
+
+    def test_factory_helper_returns_named_source(self) -> None:
+        """Factory helper should return the canonical Haaretz source."""
+        scraper = create_haaretz_source()
+
+        assert scraper.name == "haaretz"
+
+    def test_build_search_url_uses_expected_query_shape(self) -> None:
+        """Search URLs should keep q/page params in canonical form."""
+        scraper = self._create_scraper()
+
+        assert scraper._build_search_url("בית בושת") == (
+            "https://www.haaretz.co.il/ty-search?q=%D7%91%D7%99%D7%AA+%D7%91%D7%95%D7%A9%D7%AA&page=1"
+        )
+        assert scraper._build_search_url("בית בושת", page_number=2) == (
+            "https://www.haaretz.co.il/ty-search?q=%D7%91%D7%99%D7%AA+%D7%91%D7%95%D7%A9%D7%AA&page=2"
+        )
+
+    def test_parse_search_results_from_fixture(self) -> None:
+        """Fixture HTML should parse into Haaretz search entries."""
+        scraper = self._create_scraper()
+        html_content = load_fixture("html/haaretz_search.html")
+
+        entries = scraper._parse_search_results(html_content)
+
+        assert len(entries) == 2
+        assert entries[0].title == "פשיטה על בית בושת בבת ים הובילה למעצר חשוד בסרסרות"
+        assert entries[0].date == datetime(2026, 3, 15, tzinfo=UTC)
+        assert entries[0].url == (
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/.premium/0000019d-1111-d111-a1bd-f11111110000"
+        )
+        assert entries[1].url == (
+            "https://www.haaretz.co.il/blogs/veredlee/2018-03-28/ty-article/0000017f-f8fa-d2d5-a9ff-f8fe0f460000"
+        )
+
+    def test_parse_search_results_falls_back_without_heading(self) -> None:
+        """Pages with result cards but no heading should still be parsed."""
+        scraper = self._create_scraper()
+        html_content = """
+        <html><body>
+          <div class="search-results">
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <div>תקציר קצר על סרסרות.</div>
+              <time>15 במרץ 2026</time>
+            </article>
+          </div>
+        </body></html>
+        """
+
+        entries = scraper._parse_search_results(html_content)
+
+        assert len(entries) == 1
+        assert entries[0].url == "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+
+    def test_parse_hebrew_date(self) -> None:
+        """Visible Hebrew month names should parse into UTC dates."""
+        scraper = self._create_scraper()
+
+        assert scraper._parse_hebrew_date("15 במרץ 2026") == datetime(2026, 3, 15, tzinfo=UTC)
+        assert scraper._parse_hebrew_date("16 באוגוסט 2023") == datetime(2023, 8, 16, tzinfo=UTC)
+        assert scraper._parse_hebrew_date("16 בחודשלאמוכר 2023") is None
+        assert scraper._parse_hebrew_date("32 באוגוסט 2023") is None
+        assert scraper._parse_hebrew_date("ללא תאריך") is None
+
+    def test_parse_search_result_rejects_non_article_and_missing_date(self) -> None:
+        """Only internal Haaretz article cards with dates should be emitted."""
+        scraper = self._create_scraper()
+
+        non_article = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="https://www.themarker.com/news/2026-03-15/ty-article/123">TheMarker</a></h3>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+        missing_date = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/123">ללא תאריך</a></h3>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(non_article, Tag)
+        assert isinstance(missing_date, Tag)
+        assert scraper._parse_search_result(non_article) is None
+        assert scraper._parse_search_result(missing_date) is None
+
+    def test_parse_search_result_skips_wrapper_text_containing_title(self) -> None:
+        """Snippet extraction should avoid wrapper text that duplicates the title."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <div>
+                <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+                <div>המשטרה עצרה חשוד בסרסרות.</div>
+              </div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.snippet == "המשטרה עצרה חשוד בסרסרות."
+
+    def test_parse_search_result_uses_first_valid_link_when_heading_anchor_missing(self) -> None:
+        """Cards should still parse when the heading exists but does not contain a link."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <h3>כותרת ללא קישור</h3>
+              <a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a>
+              <div>המשטרה עצרה חשוד.</div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.title == "פשיטה על בית בושת"
+
+    def test_parse_search_result_rejects_empty_title_and_missing_time(self) -> None:
+        """Cards without a usable title or time should be ignored."""
+        scraper = self._create_scraper()
+        empty_title = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc"> </a></h3>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+        missing_time = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(empty_title, Tag)
+        assert isinstance(missing_time, Tag)
+        assert scraper._parse_search_result(empty_title) is None
+        assert scraper._parse_search_result(missing_time) is None
+
+    def test_parse_search_result_rejects_invalid_date_and_empty_href(self) -> None:
+        """Cards with invalid parsed dates or unusable final URLs should be ignored."""
+        scraper = self._create_scraper()
+        invalid_date = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <time>15 בחודשלאמוכר 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+        empty_href = BeautifulSoup(
+            """
+            <article>
+              <a href="/news/law/2026-03-15/ty-article/abc">קישור משני תקין</a>
+              <h3><a href="">פשיטה על בית בושת</a></h3>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(invalid_date, Tag)
+        assert isinstance(empty_href, Tag)
+        assert scraper._parse_search_result(invalid_date) is None
+        assert scraper._parse_search_result(empty_href) is None
+
+    def test_parse_search_result_allows_empty_snippet_when_only_metadata_remains(self) -> None:
+        """Snippet extraction should allow empty snippets after skipping metadata-only nodes."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <div>פשיטה על בית בושת</div>
+              <div>15 במרץ 2026</div>
+              <div>פשיטה על בית בושת - עדכון</div>
+              <div>שמירת כתבה</div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.snippet == ""
+
+    def test_parse_search_result_skips_date_like_snippet_candidates(self) -> None:
+        """Date-looking metadata divs should not be used as snippets."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <div>16 במרץ 2026</div>
+              <div>המשטרה עצרה חשוד בסרסרות.</div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.snippet == "המשטרה עצרה חשוד בסרסרות."
+
+    def test_normalize_and_validate_article_urls(self) -> None:
+        """Haaretz URL normalization should keep article paths and reject unsupported URLs."""
+        scraper = self._create_scraper()
+
+        normalized = scraper._normalize_article_url(
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/.premium/abc?utm_source=search#top"
+        )
+
+        assert normalized == "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/.premium/abc"
+        assert scraper._is_article_url(normalized)
+        assert not scraper._is_article_url(
+            "https://www.themarker.com/news/2026-03-15/ty-article/abc"
+        )
+        assert not scraper._is_article_url(
+            "https://www.haaretz.co.il/labels/2026-03-15/ty-article/abc"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_sleeps_when_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Positive Haaretz rate limits should sleep between requests."""
+        scraper = HaaretzScraper(rate_limit_delay_seconds=0.25)
+        calls: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            calls.append(seconds)
+
+        monkeypatch.setattr("denbust.sources.haaretz.asyncio.sleep", fake_sleep)
+
+        await scraper._rate_limit()
+
+        assert calls == [0.25]
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_empty_for_invalid_days(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Invalid day windows should be rejected before opening the browser."""
+        scraper = self._create_scraper()
+        open_browser = AsyncMock()
+        mock_logger = MagicMock()
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser)
+        monkeypatch.setattr("denbust.sources.haaretz.logger", mock_logger)
+
+        articles = await scraper.fetch(days=0, keywords=["בית בושת"])
+
+        assert articles == []
+        open_browser.assert_not_called()
+        mock_logger.warning.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fetch_logs_browser_session_open_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Browser session open failures should be logged and return an empty result."""
+        scraper = self._create_scraper()
+        mock_logger = MagicMock()
+
+        async def open_browser() -> object:
+            raise RuntimeError("open failed")
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser)
+        monkeypatch.setattr("denbust.sources.haaretz.logger", mock_logger)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert articles == []
+        mock_logger.exception.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_open_and_close_browser_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Browser session setup and cleanup should mirror the Mako pattern."""
+        import playwright.async_api as playwright_async_api
+
+        scraper = self._create_scraper()
+        events: list[str] = []
+
+        class FakePage:
+            pass
+
+        class FakeContext:
+            def __init__(self) -> None:
+                self.page = FakePage()
+
+            async def new_page(self) -> FakePage:
+                events.append("new_page")
+                return self.page
+
+            async def route(self, pattern: str, handler: Any) -> None:
+                assert pattern == "**/*"
+                del handler
+                events.append("route")
+
+            async def close(self) -> None:
+                events.append("context_close")
+
+        class FakeBrowser:
+            def __init__(self) -> None:
+                self.context = FakeContext()
+
+            async def new_context(self, **kwargs: Any) -> FakeContext:
+                events.append("new_context")
+                assert kwargs["user_agent"].startswith("Mozilla/5.0")
+                assert kwargs["locale"] == "he-IL"
+                assert kwargs["viewport"]["width"] == 1440
+                return self.context
+
+            async def close(self) -> None:
+                events.append("browser_close")
+
+        class FakeChromium:
+            async def launch(self, headless: bool) -> FakeBrowser:
+                events.append("launch")
+                assert headless is True
+                return FakeBrowser()
+
+        class FakePlaywright:
+            chromium = FakeChromium()
+
+        class FakeManager:
+            async def __aenter__(self) -> FakePlaywright:
+                events.append("enter")
+                return FakePlaywright()
+
+            async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+                del exc_type, exc, tb
+                events.append("exit")
+
+        monkeypatch.setattr(playwright_async_api, "async_playwright", lambda: FakeManager())
+
+        session = await scraper._open_browser_session()
+        await scraper._close_browser_session(session)
+
+        assert session.page is not None
+        assert events == [
+            "enter",
+            "launch",
+            "new_context",
+            "route",
+            "new_page",
+            "context_close",
+            "browser_close",
+            "exit",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_open_browser_session_reports_missing_playwright(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing Playwright imports should raise an actionable runtime error."""
+        scraper = self._create_scraper()
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "playwright.async_api":
+                raise ImportError("missing playwright")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(RuntimeError, match="Playwright is not installed"):
+            await scraper._open_browser_session()
+
+    @pytest.mark.asyncio
+    async def test_open_browser_session_reports_launch_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Chromium launch failures should exit the manager and raise a clear error."""
+        import playwright.async_api as playwright_async_api
+
+        scraper = self._create_scraper()
+        events: list[str] = []
+
+        class FakeChromium:
+            async def launch(self, headless: bool) -> object:
+                del headless
+                raise RuntimeError("launch failed")
+
+        class FakePlaywright:
+            chromium = FakeChromium()
+
+        class FakeManager:
+            async def __aenter__(self) -> FakePlaywright:
+                return FakePlaywright()
+
+            async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+                del exc_type, exc, tb
+                events.append("exit")
+
+        monkeypatch.setattr(playwright_async_api, "async_playwright", lambda: FakeManager())
+
+        with pytest.raises(RuntimeError, match="Chromium could not be launched"):
+            await scraper._open_browser_session()
+
+        assert events == ["exit"]
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_page_html_reports_timeout(self) -> None:
+        """Search-page helper should raise a clear timeout error."""
+        import playwright.async_api as playwright_async_api
+
+        scraper = self._create_scraper()
+
+        class FakePage:
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                del url, wait_until, timeout
+                raise playwright_async_api.TimeoutError("timeout")
+
+        with pytest.raises(RuntimeError, match="navigation timed out"):
+            await scraper._fetch_search_page_html(FakePage(), "בית בושת", 2)
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_page_html_returns_content(self) -> None:
+        """Search-page helper should return rendered page content when ready."""
+        scraper = self._create_scraper()
+
+        class FakePage:
+            async def goto(self, url: str, wait_until: str, timeout: int) -> None:
+                del url, wait_until, timeout
+
+            async def wait_for_function(self, script: str, timeout: int) -> None:
+                del script, timeout
+
+            async def wait_for_timeout(self, timeout_ms: int) -> None:
+                assert timeout_ms == 500
+
+            async def content(self) -> str:
+                return "<html><body><h2>מציג תוצאות בנושא:</h2><article></article></body></html>"
+
+        html = await scraper._fetch_search_page_html(FakePage(), "בית בושת", 2)
+
+        assert "מציג תוצאות בנושא" in html
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_page_html_reports_missing_playwright(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Search-page helper should report missing Playwright imports."""
+        scraper = self._create_scraper()
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "playwright.async_api":
+                raise ImportError("missing playwright")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(RuntimeError, match="Playwright is not installed"):
+            await scraper._fetch_search_page_html(object(), "בית בושת", 1)
+
+    @pytest.mark.asyncio
+    async def test_fetch_collects_keyword_matches_across_pages(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Haaretz fetch should paginate numbered search pages until matches run out."""
+        scraper = self._create_scraper()
+        page_one = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            <div>המשטרה עצרה חשוד בסרסרות.</div>
+            <time>15 במרץ 2026</time>
+          </article>
+        </div></body></html>
+        """
+        page_two = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/blogs/veredlee/2026-03-14/ty-article/def">איך לסגור בית בושת</a></h3>
+            <div>כך תסייעו במיגור הזנות.</div>
+            <time>14 במרץ 2026</time>
+          </article>
+        </div></body></html>
+        """
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page
+            assert keyword == "בית בושת"
+            if page_number == 1:
+                return page_one
+            if page_number == 2:
+                return page_two
+            return None
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
+        monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc",
+            "https://www.haaretz.co.il/blogs/veredlee/2026-03-14/ty-article/def",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_stops_when_page_has_no_entries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fetch should stop cleanly when a numbered search page has no result cards."""
+        scraper = self._create_scraper()
+        calls: list[int] = []
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page, keyword
+            calls.append(page_number)
+            return "<html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2></div></body></html>"
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
+        monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert articles == []
+        assert calls == [1]
+
+    @pytest.mark.asyncio
+    async def test_fetch_logs_cleanup_failure_and_keeps_articles(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cleanup failures should be logged after successful article collection."""
+        scraper = self._create_scraper()
+        page_html = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            <div>המשטרה עצרה חשוד בסרסרות.</div>
+            <time>15 במרץ 2026</time>
+          </article>
+        </div></body></html>
+        """
+        mock_logger = MagicMock()
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page, keyword
+            return page_html if page_number == 1 else None
+
+        async def close_browser(_session: object) -> None:
+            raise RuntimeError("close failed")
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
+        monkeypatch.setattr(scraper, "_close_browser_session", close_browser)
+        monkeypatch.setattr("denbust.sources.haaretz.logger", mock_logger)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+        ]
+        mock_logger.exception.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fetch_stops_when_page_is_older_than_cutoff(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pagination should stop once the page contains only out-of-window results."""
+        scraper = self._create_scraper()
+        calls: list[int] = []
+        old_page = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/world/2012-10-29/ty-article/old">בית בושת ישן</a></h3>
+            <div>כתבה ישנה.</div>
+            <time>29 באוקטובר 2012</time>
+          </article>
+        </div></body></html>
+        """
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page, keyword
+            calls.append(page_number)
+            return old_page
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
+        monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert articles == []
+        assert calls == [1]
+
+    @pytest.mark.asyncio
+    async def test_search_keyword_skips_old_entries_on_mixed_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mixed pages should keep only in-window results before pagination stops."""
+        scraper = self._create_scraper()
+        page_html = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            <div>המשטרה עצרה חשוד בסרסרות.</div>
+            <time>15 במרץ 2026</time>
+          </article>
+          <article>
+            <h3><a href="/news/world/2012-10-29/ty-article/old">בית בושת ישן</a></h3>
+            <div>כתבה ישנה.</div>
+            <time>29 באוקטובר 2012</time>
+          </article>
+        </div></body></html>
+        """
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page, keyword
+            return page_html if page_number == 1 else None
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+
+        articles = await scraper._search_keyword(
+            SimpleNamespace(page=object()),
+            "בית בושת",
+            datetime(2026, 3, 1, tzinfo=UTC),
+        )
+
+        assert [str(article.url) for article in articles] == [
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_deduplicates_urls_across_keywords(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeated Haaretz hits from different keywords should collapse to one article."""
+        scraper = self._create_scraper()
+        page_html = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            <div>המשטרה עצרה חשוד בסרסרות.</div>
+            <time>15 במרץ 2026</time>
+          </article>
+        </div></body></html>
+        """
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page, keyword
+            return page_html if page_number == 1 else None
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
+        monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת", "סרסור"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_partial_results_on_search_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A later failing keyword should not discard earlier Haaretz results."""
+        scraper = self._create_scraper()
+        page_html = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            <div>המשטרה עצרה חשוד בסרסרות.</div>
+            <time>15 במרץ 2026</time>
+          </article>
+        </div></body></html>
+        """
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page
+            if keyword == "סרסור":
+                raise RuntimeError("boom")
+            return page_html if page_number == 1 else None
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
+        monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת", "סרסור"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_browser_route_blocks_known_tracker_urls(self) -> None:
+        """Known third-party tracker URLs should be blocked during Haaretz scraping."""
+        scraper = self._create_scraper()
+
+        class FakeRequest:
+            def __init__(self, resource_type: str, url: str) -> None:
+                self.resource_type = resource_type
+                self.url = url
+
+        class FakeRoute:
+            def __init__(self, request: FakeRequest) -> None:
+                self.request = request
+                self.action: str | None = None
+
+            async def abort(self) -> None:
+                self.action = "abort"
+
+            async def continue_(self) -> None:
+                self.action = "continue"
+
+        blocked = FakeRoute(FakeRequest("script", "https://www.googletagmanager.com/gtm.js?id=123"))
+        allowed = FakeRoute(FakeRequest("script", "https://www.haaretz.co.il/_next/static/app.js"))
+
+        await scraper._handle_browser_route(blocked)
+        await scraper._handle_browser_route(allowed)
+
+        assert blocked.action == "abort"
+        assert allowed.action == "continue"
 
 
 class TestWallaScraper:
