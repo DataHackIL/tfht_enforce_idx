@@ -227,7 +227,9 @@ class HaaretzScraper(Source):
 
         return articles
 
-    async def _fetch_search_page_html(self, page: Page, keyword: str, page_number: int) -> str | None:
+    async def _fetch_search_page_html(
+        self, page: Page, keyword: str, page_number: int
+    ) -> str | None:
         """Fetch rendered Haaretz search page HTML via Playwright."""
         try:
             from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -238,7 +240,9 @@ class HaaretzScraper(Source):
             ) from e
 
         url = self._build_search_url(keyword, page_number)
-        logger.info("Haaretz browser navigation started for search for '%s' page %s", keyword, page_number)
+        logger.info(
+            "Haaretz browser navigation started for search for '%s' page %s", keyword, page_number
+        )
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
@@ -290,7 +294,9 @@ class HaaretzScraper(Source):
         links = [
             link
             for link in article.select("a[href]")
-            if self._is_article_url(self._normalize_article_url(urljoin(HAARETZ_BASE_URL, str(link.get("href", "")))))
+            if self._is_article_url(
+                self._normalize_article_url(urljoin(HAARETZ_BASE_URL, str(link.get("href", ""))))
+            )
         ]
         if not links:
             return None

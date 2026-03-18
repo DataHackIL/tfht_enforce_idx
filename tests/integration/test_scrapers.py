@@ -1562,7 +1562,9 @@ class TestHaaretzScraper:
             return None
 
         monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
-        monkeypatch.setattr(scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object())))
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
         monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
 
         articles = await scraper.fetch(days=21, keywords=["בית בושת"])
@@ -1586,7 +1588,9 @@ class TestHaaretzScraper:
             return "<html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2></div></body></html>"
 
         monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
-        monkeypatch.setattr(scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object())))
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
         monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
 
         articles = await scraper.fetch(days=21, keywords=["בית בושת"])
@@ -1617,7 +1621,9 @@ class TestHaaretzScraper:
             return old_page
 
         monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
-        monkeypatch.setattr(scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object())))
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
         monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
 
         articles = await scraper.fetch(days=21, keywords=["בית בושת"])
@@ -1646,7 +1652,9 @@ class TestHaaretzScraper:
             return page_html if page_number == 1 else None
 
         monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
-        monkeypatch.setattr(scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object())))
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
         monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
 
         articles = await scraper.fetch(days=21, keywords=["בית בושת", "סרסור"])
@@ -1678,7 +1686,9 @@ class TestHaaretzScraper:
             return page_html if page_number == 1 else None
 
         monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
-        monkeypatch.setattr(scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object())))
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
         monkeypatch.setattr(scraper, "_close_browser_session", AsyncMock())
 
         articles = await scraper.fetch(days=21, keywords=["בית בושת", "סרסור"])
