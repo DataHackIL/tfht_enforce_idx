@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -1346,6 +1346,26 @@ class TestHaaretzScraper:
             "https://www.haaretz.co.il/blogs/veredlee/2018-03-28/ty-article/0000017f-f8fa-d2d5-a9ff-f8fe0f460000"
         )
 
+    def test_parse_search_results_falls_back_without_heading(self) -> None:
+        """Pages with result cards but no heading should still be parsed."""
+        scraper = self._create_scraper()
+        html_content = """
+        <html><body>
+          <div class="search-results">
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <div>תקציר קצר על סרסרות.</div>
+              <time>15 במרץ 2026</time>
+            </article>
+          </div>
+        </body></html>
+        """
+
+        entries = scraper._parse_search_results(html_content)
+
+        assert len(entries) == 1
+        assert entries[0].url == "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+
     def test_parse_hebrew_date(self) -> None:
         """Visible Hebrew month names should parse into UTC dates."""
         scraper = self._create_scraper()
@@ -1382,6 +1402,28 @@ class TestHaaretzScraper:
         assert scraper._parse_search_result(non_article) is None
         assert scraper._parse_search_result(missing_date) is None
 
+    def test_parse_search_result_skips_wrapper_text_containing_title(self) -> None:
+        """Snippet extraction should avoid wrapper text that duplicates the title."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <div>
+                <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+                <div>המשטרה עצרה חשוד בסרסרות.</div>
+              </div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.snippet == "המשטרה עצרה חשוד בסרסרות."
+
     def test_normalize_and_validate_article_urls(self) -> None:
         """Haaretz URL normalization should keep article paths and reject unsupported URLs."""
         scraper = self._create_scraper()
@@ -1413,6 +1455,22 @@ class TestHaaretzScraper:
         await scraper._rate_limit()
 
         assert calls == [0.25]
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_empty_for_invalid_days(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Invalid day windows should be rejected before opening the browser."""
+        scraper = self._create_scraper()
+        open_browser = AsyncMock()
+        mock_logger = MagicMock()
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser)
+        monkeypatch.setattr("denbust.sources.haaretz.logger", mock_logger)
+
+        articles = await scraper.fetch(days=0, keywords=["בית בושת"])
+
+        assert articles == []
+        open_browser.assert_not_called()
+        mock_logger.warning.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_open_and_close_browser_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1491,6 +1549,57 @@ class TestHaaretzScraper:
         ]
 
     @pytest.mark.asyncio
+    async def test_open_browser_session_reports_missing_playwright(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing Playwright imports should raise an actionable runtime error."""
+        scraper = self._create_scraper()
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "playwright.async_api":
+                raise ImportError("missing playwright")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(RuntimeError, match="Playwright is not installed"):
+            await scraper._open_browser_session()
+
+    @pytest.mark.asyncio
+    async def test_open_browser_session_reports_launch_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Chromium launch failures should exit the manager and raise a clear error."""
+        import playwright.async_api as playwright_async_api
+
+        scraper = self._create_scraper()
+        events: list[str] = []
+
+        class FakeChromium:
+            async def launch(self, headless: bool) -> object:
+                del headless
+                raise RuntimeError("launch failed")
+
+        class FakePlaywright:
+            chromium = FakeChromium()
+
+        class FakeManager:
+            async def __aenter__(self) -> FakePlaywright:
+                return FakePlaywright()
+
+            async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+                del exc_type, exc, tb
+                events.append("exit")
+
+        monkeypatch.setattr(playwright_async_api, "async_playwright", lambda: FakeManager())
+
+        with pytest.raises(RuntimeError, match="Chromium could not be launched"):
+            await scraper._open_browser_session()
+
+        assert events == ["exit"]
+
+    @pytest.mark.asyncio
     async def test_fetch_search_page_html_reports_timeout(self) -> None:
         """Search-page helper should raise a clear timeout error."""
         import playwright.async_api as playwright_async_api
@@ -1526,6 +1635,24 @@ class TestHaaretzScraper:
         html = await scraper._fetch_search_page_html(FakePage(), "בית בושת", 2)
 
         assert "מציג תוצאות בנושא" in html
+
+    @pytest.mark.asyncio
+    async def test_fetch_search_page_html_reports_missing_playwright(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Search-page helper should report missing Playwright imports."""
+        scraper = self._create_scraper()
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "playwright.async_api":
+                raise ImportError("missing playwright")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        with pytest.raises(RuntimeError, match="Playwright is not installed"):
+            await scraper._fetch_search_page_html(object(), "בית בושת", 1)
 
     @pytest.mark.asyncio
     async def test_fetch_collects_keyword_matches_across_pages(
@@ -1597,6 +1724,44 @@ class TestHaaretzScraper:
 
         assert articles == []
         assert calls == [1]
+
+    @pytest.mark.asyncio
+    async def test_fetch_logs_cleanup_failure_and_keeps_articles(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cleanup failures should be logged after successful article collection."""
+        scraper = self._create_scraper()
+        page_html = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            <div>המשטרה עצרה חשוד בסרסרות.</div>
+            <time>15 במרץ 2026</time>
+          </article>
+        </div></body></html>
+        """
+        mock_logger = MagicMock()
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page, keyword
+            return page_html if page_number == 1 else None
+
+        async def close_browser(_session: object) -> None:
+            raise RuntimeError("close failed")
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+        monkeypatch.setattr(
+            scraper, "_open_browser_session", AsyncMock(return_value=SimpleNamespace(page=object()))
+        )
+        monkeypatch.setattr(scraper, "_close_browser_session", close_browser)
+        monkeypatch.setattr("denbust.sources.haaretz.logger", mock_logger)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert [str(article.url) for article in articles] == [
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+        ]
+        mock_logger.exception.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_fetch_stops_when_page_is_older_than_cutoff(

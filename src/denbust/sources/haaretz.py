@@ -278,11 +278,16 @@ class HaaretzScraper(Source):
             ),
             None,
         )
-        if not isinstance(heading, Tag) or not isinstance(heading.parent, Tag):
-            return []
+        container: Tag = soup
+        if isinstance(heading, Tag) and isinstance(heading.parent, Tag):
+            container = heading.parent
+        else:
+            search_results = soup.select_one(".search-results")
+            if isinstance(search_results, Tag):
+                container = search_results
 
         entries: list[_HaaretzSearchEntry] = []
-        for article in heading.parent.find_all("article"):
+        for article in container.find_all("article"):
             entry = self._parse_search_result(article)
             if entry:
                 entries.append(entry)
@@ -325,12 +330,16 @@ class HaaretzScraper(Source):
 
         snippet = ""
         for candidate in article.find_all(["p", "div"]):
+            if candidate.find(["h2", "h3", "a"]):
+                continue
             text = candidate.get_text(" ", strip=True)
             if not text or text == title or text == "שמירת כתבה":
                 continue
             if text == time_tag.get_text(" ", strip=True):
                 continue
             if re.fullmatch(r"\d{1,2}\s+ב?[א-ת]+\s+\d{4}", text):
+                continue
+            if title in text:
                 continue
             snippet = text
             break
