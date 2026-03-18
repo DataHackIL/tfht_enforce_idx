@@ -154,6 +154,7 @@ class TestCreateSourcesWarnings:
                 SourceConfig(name="walla", type=SourceType.SCRAPER),
                 SourceConfig(name="mako", type=SourceType.SCRAPER),
                 SourceConfig(name="maariv", type=SourceType.SCRAPER),
+                SourceConfig(name="haaretz", type=SourceType.SCRAPER),
             ]
         )
 
@@ -162,10 +163,13 @@ class TestCreateSourcesWarnings:
         monkeypatch.setattr(
             "denbust.pipeline.create_maariv_source", lambda: FakeSource("maariv", [])
         )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_haaretz_source", lambda: FakeSource("haaretz", [])
+        )
 
         sources = create_sources(config)
 
-        assert [source.name for source in sources] == ["ynet", "walla", "mako", "maariv"]
+        assert [source.name for source in sources] == ["ynet", "walla", "mako", "maariv", "haaretz"]
 
 
 class TestFetchAndClassifyHelpers:

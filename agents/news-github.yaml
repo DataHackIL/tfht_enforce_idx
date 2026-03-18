@@ -22,6 +22,10 @@ sources:
     type: scraper
     enabled: true
 
+  - name: haaretz
+    type: scraper
+    enabled: true
+
   - name: ice
     type: scraper
     enabled: true
