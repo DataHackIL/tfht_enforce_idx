@@ -1523,6 +1523,27 @@ class TestHaaretzScraper:
         assert entry is not None
         assert entry.snippet == ""
 
+    def test_parse_search_result_skips_date_like_snippet_candidates(self) -> None:
+        """Date-looking metadata divs should not be used as snippets."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <div>16 במרץ 2026</div>
+              <div>המשטרה עצרה חשוד בסרסרות.</div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.snippet == "המשטרה עצרה חשוד בסרסרות."
+
     def test_normalize_and_validate_article_urls(self) -> None:
         """Haaretz URL normalization should keep article paths and reject unsupported URLs."""
         scraper = self._create_scraper()
