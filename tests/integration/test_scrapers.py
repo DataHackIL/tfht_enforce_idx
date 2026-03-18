@@ -1372,6 +1372,7 @@ class TestHaaretzScraper:
 
         assert scraper._parse_hebrew_date("15 במרץ 2026") == datetime(2026, 3, 15, tzinfo=UTC)
         assert scraper._parse_hebrew_date("16 באוגוסט 2023") == datetime(2023, 8, 16, tzinfo=UTC)
+        assert scraper._parse_hebrew_date("16 בחודשלאמוכר 2023") is None
         assert scraper._parse_hebrew_date("32 באוגוסט 2023") is None
         assert scraper._parse_hebrew_date("ללא תאריך") is None
 
@@ -1424,6 +1425,104 @@ class TestHaaretzScraper:
         assert entry is not None
         assert entry.snippet == "המשטרה עצרה חשוד בסרסרות."
 
+    def test_parse_search_result_uses_first_valid_link_when_heading_anchor_missing(self) -> None:
+        """Cards should still parse when the heading exists but does not contain a link."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <h3>כותרת ללא קישור</h3>
+              <a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a>
+              <div>המשטרה עצרה חשוד.</div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.title == "פשיטה על בית בושת"
+
+    def test_parse_search_result_rejects_empty_title_and_missing_time(self) -> None:
+        """Cards without a usable title or time should be ignored."""
+        scraper = self._create_scraper()
+        empty_title = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc"> </a></h3>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+        missing_time = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(empty_title, Tag)
+        assert isinstance(missing_time, Tag)
+        assert scraper._parse_search_result(empty_title) is None
+        assert scraper._parse_search_result(missing_time) is None
+
+    def test_parse_search_result_rejects_invalid_date_and_empty_href(self) -> None:
+        """Cards with invalid parsed dates or unusable final URLs should be ignored."""
+        scraper = self._create_scraper()
+        invalid_date = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <time>15 בחודשלאמוכר 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+        empty_href = BeautifulSoup(
+            """
+            <article>
+              <a href="/news/law/2026-03-15/ty-article/abc">קישור משני תקין</a>
+              <h3><a href="">פשיטה על בית בושת</a></h3>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(invalid_date, Tag)
+        assert isinstance(empty_href, Tag)
+        assert scraper._parse_search_result(invalid_date) is None
+        assert scraper._parse_search_result(empty_href) is None
+
+    def test_parse_search_result_allows_empty_snippet_when_only_metadata_remains(self) -> None:
+        """Snippet extraction should allow empty snippets after skipping metadata-only nodes."""
+        scraper = self._create_scraper()
+        article = BeautifulSoup(
+            """
+            <article>
+              <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+              <div>פשיטה על בית בושת</div>
+              <div>15 במרץ 2026</div>
+              <div>פשיטה על בית בושת - עדכון</div>
+              <div>שמירת כתבה</div>
+              <time>15 במרץ 2026</time>
+            </article>
+            """,
+            "lxml",
+        ).find("article")
+
+        assert isinstance(article, Tag)
+        entry = scraper._parse_search_result(article)
+
+        assert entry is not None
+        assert entry.snippet == ""
+
     def test_normalize_and_validate_article_urls(self) -> None:
         """Haaretz URL normalization should keep article paths and reject unsupported URLs."""
         scraper = self._create_scraper()
@@ -1473,6 +1572,25 @@ class TestHaaretzScraper:
         assert articles == []
         open_browser.assert_not_called()
         mock_logger.warning.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fetch_logs_browser_session_open_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Browser session open failures should be logged and return an empty result."""
+        scraper = self._create_scraper()
+        mock_logger = MagicMock()
+
+        async def open_browser() -> object:
+            raise RuntimeError("open failed")
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser)
+        monkeypatch.setattr("denbust.sources.haaretz.logger", mock_logger)
+
+        articles = await scraper.fetch(days=21, keywords=["בית בושת"])
+
+        assert articles == []
+        mock_logger.exception.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_open_and_close_browser_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1797,6 +1915,43 @@ class TestHaaretzScraper:
 
         assert articles == []
         assert calls == [1]
+
+    @pytest.mark.asyncio
+    async def test_search_keyword_skips_old_entries_on_mixed_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mixed pages should keep only in-window results before pagination stops."""
+        scraper = self._create_scraper()
+        page_html = """
+        <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
+          <article>
+            <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
+            <div>המשטרה עצרה חשוד בסרסרות.</div>
+            <time>15 במרץ 2026</time>
+          </article>
+          <article>
+            <h3><a href="/news/world/2012-10-29/ty-article/old">בית בושת ישן</a></h3>
+            <div>כתבה ישנה.</div>
+            <time>29 באוקטובר 2012</time>
+          </article>
+        </div></body></html>
+        """
+
+        async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
+            del page, keyword
+            return page_html if page_number == 1 else None
+
+        monkeypatch.setattr(scraper, "_fetch_search_page_html", fake_fetch)
+
+        articles = await scraper._search_keyword(
+            SimpleNamespace(page=object()),
+            "בית בושת",
+            datetime(2026, 3, 1, tzinfo=UTC),
+        )
+
+        assert [str(article.url) for article in articles] == [
+            "https://www.haaretz.co.il/news/law/2026-03-15/ty-article/abc"
+        ]
 
     @pytest.mark.asyncio
     async def test_fetch_deduplicates_urls_across_keywords(

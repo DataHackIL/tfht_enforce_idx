@@ -241,7 +241,7 @@ class HaaretzScraper(Source):
 
         url = self._build_search_url(keyword, page_number)
         logger.info(
-            "Haaretz browser navigation started for search for '%s' page %s", keyword, page_number
+            "Haaretz browser navigation started for keyword '%s' page %s", keyword, page_number
         )
 
         try:
@@ -278,7 +278,7 @@ class HaaretzScraper(Source):
             ),
             None,
         )
-        container: Tag = soup
+        container: BeautifulSoup | Tag = soup
         if isinstance(heading, Tag) and isinstance(heading.parent, Tag):
             container = heading.parent
         else:
