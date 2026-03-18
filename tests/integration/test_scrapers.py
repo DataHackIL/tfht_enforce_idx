@@ -1457,7 +1457,9 @@ class TestHaaretzScraper:
         assert calls == [0.25]
 
     @pytest.mark.asyncio
-    async def test_fetch_returns_empty_for_invalid_days(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fetch_returns_empty_for_invalid_days(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Invalid day windows should be rejected before opening the browser."""
         scraper = self._create_scraper()
         open_browser = AsyncMock()
