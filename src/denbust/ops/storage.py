@@ -75,9 +75,7 @@ class LocalJsonOperationalStore(OperationalStore):
             handle.write(json.dumps(snapshot.model_dump(mode="json"), ensure_ascii=False))
             handle.write("\n")
 
-    def upsert_records(
-        self, dataset_name: str, records: Sequence[Mapping[str, Any]]
-    ) -> None:
+    def upsert_records(self, dataset_name: str, records: Sequence[Mapping[str, Any]]) -> None:
         del dataset_name, records
 
     def fetch_records(self, dataset_name: str, *, limit: int | None = None) -> list[dict[str, Any]]:
