@@ -29,7 +29,7 @@ class TestCli:
         result = runner.invoke(app, ["scan"])
 
         assert result.exit_code == 0
-        assert captured["config_path"] == Path("agents/news/local.yaml")
+        assert captured["config_path"] == Path("agents/news.yaml")
         assert captured["days_override"] is None
 
     def test_scan_passes_explicit_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,9 +31,9 @@ class BackupManifest(BaseModel):
 class BackupExecutor(PhaseAScaffold):
     """Abstract backup executor."""
 
+    @abstractmethod
     def build_manifest(self, dataset_name: str, state_root: Path) -> BackupManifest:
         """Build a backup manifest for a dataset."""
-        raise NotImplementedError
 
 
 class NullBackupExecutor(BackupExecutor):

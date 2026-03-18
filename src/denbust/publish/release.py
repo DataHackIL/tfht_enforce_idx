@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -43,9 +44,9 @@ class ReleaseManifest(BaseModel):
 class ReleaseBuilder(PhaseAScaffold):
     """Abstract release builder interface."""
 
+    @abstractmethod
     def build_manifest(self, dataset_name: str, publication_dir: Path) -> ReleaseManifest:
         """Build a release manifest for a dataset."""
-        raise NotImplementedError
 
 
 class NullReleaseBuilder(ReleaseBuilder):

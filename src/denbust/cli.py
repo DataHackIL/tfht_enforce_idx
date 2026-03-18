@@ -28,7 +28,7 @@ def scan(
     """Scan news sources for enforcement-related articles."""
     from denbust.pipeline import run_pipeline
 
-    config_path = config or Path("agents/news/local.yaml")
+    config_path = config or Path("agents/news.yaml")
     run_pipeline(config_path=config_path, days_override=days)
 
 

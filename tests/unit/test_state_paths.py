@@ -20,18 +20,21 @@ def test_resolve_state_paths_derives_namespaced_defaults() -> None:
     assert paths.publication_dir == Path("data/news_items/ingest/publication")
 
 
-def test_resolve_state_paths_honors_explicit_overrides() -> None:
+def test_resolve_state_paths_honors_explicit_overrides(tmp_path: Path) -> None:
     """Explicit file and directory overrides should bypass derivation."""
+    seen_path = tmp_path / "custom-seen.json"
+    runs_dir = tmp_path / "custom-runs"
+    publication_dir = tmp_path / "custom-publication"
     paths = resolve_dataset_state_paths(
         state_root=Path("data"),
         dataset_name=DatasetName.EVENTS,
         job_name=JobName.BACKUP,
-        seen_path=Path("/tmp/custom-seen.json"),
-        runs_dir=Path("/tmp/custom-runs"),
-        publication_dir=Path("/tmp/custom-publication"),
+        seen_path=seen_path,
+        runs_dir=runs_dir,
+        publication_dir=publication_dir,
     )
 
     assert paths.namespace_dir == Path("data/events/backup")
-    assert paths.seen_path == Path("/tmp/custom-seen.json")
-    assert paths.runs_dir == Path("/tmp/custom-runs")
-    assert paths.publication_dir == Path("/tmp/custom-publication")
+    assert paths.seen_path == seen_path
+    assert paths.runs_dir == runs_dir
+    assert paths.publication_dir == publication_dir
