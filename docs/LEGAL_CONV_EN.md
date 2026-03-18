@@ -10,10 +10,10 @@ In Israel, the mere fact that a subject is “of public interest” **does not c
 
 Accordingly, the key distinction is between two models:
 
-**The riskier model:**  
+**The riskier model:**
 Scraping and republishing full article text, long paragraphs, images, many headlines on a significant scale, or a database that effectively serves as a “substitute” for the news sites. This may be considered copyright infringement, and it will certainly be exposed to contractual claims under the sites’ terms of use. ynet, for example, expressly prohibits the use of crawlers/robots for automatic searching, scanning, copying, or retrieval, and also prohibits creating a compilation/collection/database containing content originating from the site. Haaretz likewise prohibits scraping, mining, collecting, and copying information from the site in its terms of use. ([ynet.co.il](https://www.ynet.co.il/article/bkswwa3sn))
 
-**The relatively safer model:**  
+**The relatively safer model:**
 Building a **metadata-only** database: URL, site name, date, topic/tags, entities, an original summary written by you, and perhaps very short quotations where there is a clear justification. This rests on the principle that facts and data are not protected as such, but one must still be careful not to “extract” protected material or violate terms of use. ([nevo.co.il](https://www.nevo.co.il/law_html/law00/3953.htm))
 
 There is also a **privacy** layer. If the database includes names of victims, minors, witnesses, suspects, or sensitive information that is aggregated in a way that amplifies exposure, questions may arise under privacy law, and personal data repositories may also trigger additional regulatory obligations. ([gov.il](https://www.gov.il/he/pages/privacy_law?utm_source=chatgpt.com))
@@ -25,10 +25,10 @@ The practical conclusion:
 - It is strongly preferable to review each site individually: terms of use, robots.txt, and whether there is a suitable API/RSS feed/license.
 
 If the goal is a public-interest / research / nonprofit project, the conservative path is:
-1. Collect URLs and factual data only  
-2. Keep internal snapshots for research purposes only, not for publication  
-3. Publicly publish metadata + links + tags + an independent summary  
-4. Maintain a takedown/correction procedure  
+1. Collect URLs and factual data only
+2. Keep internal snapshots for research purposes only, not for publication
+3. Publicly publish metadata + links + tags + an independent summary
+4. Maintain a takedown/correction procedure
 5. Obtain a brief legal review before launch
 
 If you want, I can draft a **practical and relatively safe operating policy** for such a project in Israel, or a **legal/technical checklist** before collection and publication.
@@ -67,11 +67,11 @@ For example, youth court proceedings are held in camera by default. ([nevo.co.il
 ## 2) Official documents that can be collected for research, but not necessarily republished in full text
 This is where most of the “governmental” material you are probably looking for is found:
 
-- Annual reports of the governmental unit coordinating the fight against human trafficking  
-- Government studies on the implementation of the law prohibiting the consumption of prostitution  
-- State Attorney’s Office guidelines / enforcement guidelines  
-- Training booklets, position papers, inter-ministerial reviews  
-- Knesset Research and Information Center documents  
+- Annual reports of the governmental unit coordinating the fight against human trafficking
+- Government studies on the implementation of the law prohibiting the consumption of prostitution
+- State Attorney’s Office guidelines / enforcement guidelines
+- Training booklets, position papers, inter-ministerial reviews
+- Knesset Research and Information Center documents
 - Police / prosecution / ministry press releases
 
 There are currently, for example:
@@ -111,7 +111,7 @@ In practice, in Israel it is possible to build a fairly rich database from the f
 
 **Case law**
 - Judgments and decisions in human trafficking cases
-- Administrative / constitutional decisions on recognition of trafficking victims or state policy  
+- Administrative / constitutional decisions on recognition of trafficking victims or state policy
 For example, there are publicly available Supreme Court decisions on human trafficking and recognition of trafficking victims. ([gov.il](https://www.gov.il/BlobFolder/dynamiccollectorresultitem/decision1591-18/he/1591-18.pdf?utm_source=chatgpt.com))
 
 **Government reports**
@@ -146,13 +146,13 @@ The safest model is:
 ## Practical recommendation
 If the goal is a public-interest / research project on prostitution and human trafficking, I would structure it in 3 layers:
 
-1. **Fully open layer**  
+1. **Fully open layer**
    Legislation, Knesset proceedings, protocols, judgments, and judicial decisions only.
 
-2. **Open metadata layer**  
+2. **Open metadata layer**
    For all other documents: title, date, publishing body, URL, document type, independent summary, and tags.
 
-3. **Internal research layer**  
+3. **Internal research layer**
    Full copies of governmental PDF/HTML documents for analytical purposes only, without public republication, until a license or legal opinion is obtained.
 
 That is probably the most reasonable legal and practical structure.
