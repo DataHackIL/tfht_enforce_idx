@@ -27,6 +27,7 @@ jobs:
   run-release:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: news-items-release
 
     steps:
       - name: Checkout code repo

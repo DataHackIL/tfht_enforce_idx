@@ -27,6 +27,7 @@ jobs:
   run-weekly-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: news-items-ingest
 
     steps:
       - name: Checkout code repo

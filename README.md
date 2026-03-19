@@ -383,6 +383,15 @@ The Phase B integrations are intentionally split into:
 
 The release and backup workflows both support `workflow_dispatch` for manual runs and weekly schedules for automated runs.
 
+Recommended GitHub Environment mapping:
+
+- `news-items-ingest` for `daily-state-run.yml` and `weekly-state-run.yml`
+- `news-items-release` for `news-items-release.yml`
+- `news-items-backup` for `news-items-backup.yml`
+
+The code reads generic env vars at runtime, so the same variable names can safely have different
+values per GitHub Environment.
+
 ## Supabase setup
 
 Phase B adds SQL migrations under:
