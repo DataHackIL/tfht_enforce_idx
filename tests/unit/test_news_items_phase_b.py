@@ -204,6 +204,7 @@ def test_local_json_operational_store_upserts_on_canonical_url(tmp_path: Path) -
     rows = store.fetch_records("news_items")
     assert len(rows) == 1
     assert rows[0]["summary_one_sentence"] == "עודכן"
+    assert store.close() is None
 
 
 class _FakeResponse:

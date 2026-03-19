@@ -21,6 +21,7 @@ from denbust.data_models import (
     UnifiedItem,
 )
 from denbust.models.common import DatasetName, JobName
+from denbust.models.policies import PrivacyRisk
 from denbust.ops.storage import LocalJsonOperationalStore
 from denbust.pipeline import (
     _run_job_from_config,
@@ -33,6 +34,7 @@ from denbust.pipeline import (
     run_backup,
     run_job,
     run_job_async,
+    run_news_ingest_job,
     run_pipeline,
     run_pipeline_async,
     run_release,
@@ -435,6 +437,71 @@ class TestRunPipelineAsync:
         assert result.seen_count_after == 11
         mark_seen_mock.assert_called_once_with(unified, seen_store)
 
+    @pytest.mark.asyncio
+    async def test_run_news_ingest_job_records_privacy_mix_warning(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Successful ingest runs should summarize the privacy-risk mix."""
+
+        class FakeStore:
+            def __init__(self) -> None:
+                self.upserts: list[tuple[str, list[dict[str, object]]]] = []
+
+            def upsert_records(self, dataset_name: str, records: list[dict[str, object]]) -> None:
+                self.upserts.append((dataset_name, records))
+
+        class FakeOperationalRecord:
+            privacy_risk_level = PrivacyRisk.MEDIUM
+
+            def model_dump(self, mode: str = "json") -> dict[str, str]:
+                del mode
+                return {"id": "row-1"}
+
+        fake_store = FakeStore()
+        raw_article = build_raw_article()
+        unified_item = build_unified_item()
+        seen_store = MagicMock(count=2)
+        operational_record = FakeOperationalRecord()
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([raw_article], [])),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
+        monkeypatch.setattr(
+            "denbust.pipeline.classify_articles",
+            AsyncMock(return_value=[build_classified_article()]),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.deduplicate_articles",
+            lambda _articles, _deduplicator: [unified_item],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.build_operational_records",
+            AsyncMock(return_value=[operational_record]),
+        )
+
+        def fake_mark_seen(items: list[UnifiedItem], _seen_store: object) -> None:
+            del items
+            seen_store.count = 3
+
+        monkeypatch.setattr("denbust.pipeline.mark_seen", fake_mark_seen)
+
+        result = await run_news_ingest_job(
+            Config(output=OutputConfig(formats=[OutputFormat.CLI])),
+            operational_store=fake_store,
+        )
+
+        assert result.unified_item_count == 1
+        assert "privacy_risk_distribution=medium:1" in result.warnings
+        assert result.seen_count_after == 3
+        assert fake_store.upserts == [("news_items", [{"id": "row-1"}])]
+
 
 class TestRunPipeline:
     """Tests for the sync run_pipeline wrapper."""
@@ -635,6 +702,63 @@ class TestRunPipeline:
             for warning in result.warnings
         )
         assert fake_store.closed is True
+
+    @pytest.mark.asyncio
+    async def test_run_job_async_warns_when_store_close_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Store-close errors should become warnings instead of aborting the run."""
+
+        class FakeStore:
+            def write_run_metadata(self, snapshot: RunSnapshot) -> None:
+                del snapshot
+
+            def upsert_records(self, dataset_name: str, records: list[dict[str, object]]) -> None:
+                del dataset_name, records
+
+            def fetch_records(
+                self, dataset_name: str, *, limit: int | None = None
+            ) -> list[dict[str, object]]:
+                del dataset_name, limit
+                return []
+
+            def fetch_suppression_rules(self, dataset_name: str) -> list[dict[str, object]]:
+                del dataset_name
+                return []
+
+            def mark_publication_state(
+                self, dataset_name: str, record_ids: list[str], publication_status: str
+            ) -> None:
+                del dataset_name, record_ids, publication_status
+
+            def close(self) -> None:
+                raise RuntimeError("close boom")
+
+        async def fake_handler(
+            config: Config,
+            config_path: Path | None,
+            days_override: int | None,
+            operational_store: object,
+        ) -> RunSnapshot:
+            del config_path, days_override, operational_store
+            return RunSnapshot(
+                config_name=config.name,
+                dataset_name=config.dataset_name,
+                job_name=config.job_name,
+            ).finish("ok")
+
+        config = Config(dataset_name="news_items", job_name="release")
+        monkeypatch.setattr("denbust.pipeline.ensure_default_jobs_registered", lambda: None)
+        monkeypatch.setattr("denbust.pipeline.require_job_handler", lambda *_args: fake_handler)
+        monkeypatch.setattr("denbust.pipeline.create_operational_store", lambda _config: FakeStore())
+
+        result = await run_job_async(config)
+
+        assert result.result_summary == "ok"
+        assert any(
+            "operational_store_close_failed=RuntimeError: close boom" in warning
+            for warning in result.warnings
+        )
 
     def test_scaffolded_release_and_backup_write_snapshots(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
