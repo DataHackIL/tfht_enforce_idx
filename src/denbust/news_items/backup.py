@@ -131,7 +131,10 @@ def execute_latest_backup(config: Config, *, publication_root: Path) -> BackupMa
     targets: list[BackupTarget] = []
 
     if config.backup.google_drive.enabled and config.backup.google_drive.folder_id:
-        logger.info("Google Drive backup target is active for folder %s", config.backup.google_drive.folder_id)
+        logger.info(
+            "Google Drive backup target is active for folder %s",
+            config.backup.google_drive.folder_id,
+        )
         drive_uploader = GoogleDriveLatestBackupUploader(
             service_account_json=config.drive_service_account_json,
         )
