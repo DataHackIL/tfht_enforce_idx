@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import hashlib
 import json
 import logging
 import os
@@ -169,6 +170,9 @@ def test_news_items_release_builder_writes_release_bundle(tmp_path: Path) -> Non
     assert (release_dir / "news_items.parquet").exists()
     assert (release_dir / "README.md").exists()
     assert any(artifact.format is ReleaseFormat.PARQUET for artifact in manifest.primary_files)
+    manifest_sha = hashlib.sha256((release_dir / "MANIFEST.json").read_bytes()).hexdigest()
+    checksums = (release_dir / "checksums.txt").read_text(encoding="utf-8")
+    assert f"{manifest_sha}  MANIFEST.json" in checksums
 
 
 def test_execute_latest_backup_returns_empty_manifest_when_no_targets(tmp_path: Path) -> None:
@@ -218,6 +222,7 @@ class _FakeClient:
     def __init__(self, payloads: list[object] | None = None) -> None:
         self.calls: list[dict[str, object]] = []
         self._payloads = payloads or []
+        self.closed = False
 
     def request(self, method: str, url: str, **kwargs: object) -> _FakeResponse:
         self.calls.append({"method": method, "url": url, **kwargs})
@@ -228,6 +233,9 @@ class _FakeClient:
                 [{"dataset_name": "news_items", "suppression_reason": "x", "active": True}]
             )
         return _FakeResponse([])
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FakeTextBlock:
@@ -374,6 +382,32 @@ def test_news_item_enricher_parse_response_fallbacks() -> None:
     assert invalid_risk.privacy_risk_level is PrivacyRisk.LOW
     assert invalid_risk.organizations_mentioned == ["משטרה"]
     assert invalid_risk.topic_tags == ["brothel"]
+
+
+def test_news_item_enricher_parse_response_coerces_minor_schema_drift() -> None:
+    enricher = NewsItemEnricher.__new__(NewsItemEnricher)
+    item = build_unified_item()
+
+    enriched = enricher._parse_response(
+        json.dumps(
+            {
+                "summary_one_sentence": "סיכום עובדתי קצר",
+                "geography_region": {"bad": "value"},
+                "geography_city": 7,
+                "organizations_mentioned": "משטרת ישראל",
+                "topic_tags": {"bad": "value"},
+                "privacy_risk_level": "medium",
+            },
+            ensure_ascii=False,
+        ),
+        item,
+    )
+
+    assert enriched.geography_region is None
+    assert enriched.geography_city == "7"
+    assert enriched.organizations_mentioned == ["משטרת ישראל"]
+    assert enriched.topic_tags == []
+    assert enriched.privacy_risk_level is PrivacyRisk.MEDIUM
 
 
 @pytest.mark.asyncio
@@ -936,6 +970,21 @@ def test_supabase_store_noop_and_non_list_fallbacks() -> None:
     assert store._table_for_job("ingest") == config.operational.ingestion_runs_table
     assert store._table_for_job("release") == config.operational.release_runs_table
     assert store._table_for_job("backup") == config.operational.backup_runs_table
+
+
+def test_supabase_store_close_closes_underlying_client() -> None:
+    client = _FakeClient()
+    config = Config(operational={"provider": "supabase"})
+    store = SupabaseOperationalStore(
+        base_url="https://example.supabase.co/",
+        service_role_key="secret",
+        config=config.operational,
+        client=client,
+    )
+
+    store.close()
+
+    assert client.closed is True
 
 
 @pytest.mark.asyncio

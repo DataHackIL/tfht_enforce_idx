@@ -573,6 +573,69 @@ class TestRunPipeline:
         assert metadata_path.exists()
         assert '"job_name": "release"' in metadata_path.read_text(encoding="utf-8")
 
+    @pytest.mark.asyncio
+    async def test_run_job_async_warns_when_run_metadata_write_fails_and_closes_store(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Operational metadata failures should not suppress the returned snapshot."""
+
+        class FakeStore:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def write_run_metadata(self, snapshot: RunSnapshot) -> None:
+                del snapshot
+                raise RuntimeError("supabase unavailable")
+
+            def upsert_records(self, dataset_name: str, records: list[dict[str, object]]) -> None:
+                del dataset_name, records
+
+            def fetch_records(
+                self, dataset_name: str, *, limit: int | None = None
+            ) -> list[dict[str, object]]:
+                del dataset_name, limit
+                return []
+
+            def fetch_suppression_rules(self, dataset_name: str) -> list[dict[str, object]]:
+                del dataset_name
+                return []
+
+            def mark_publication_state(
+                self, dataset_name: str, record_ids: list[str], publication_status: str
+            ) -> None:
+                del dataset_name, record_ids, publication_status
+
+            def close(self) -> None:
+                self.closed = True
+
+        async def fake_handler(
+            config: Config,
+            config_path: Path | None,
+            days_override: int | None,
+            operational_store: object,
+        ) -> RunSnapshot:
+            del config_path, days_override, operational_store
+            return RunSnapshot(
+                config_name=config.name,
+                dataset_name=config.dataset_name,
+                job_name=config.job_name,
+            ).finish("ok")
+
+        fake_store = FakeStore()
+        config = Config(dataset_name="news_items", job_name="release")
+        monkeypatch.setattr("denbust.pipeline.ensure_default_jobs_registered", lambda: None)
+        monkeypatch.setattr("denbust.pipeline.require_job_handler", lambda *_args: fake_handler)
+        monkeypatch.setattr("denbust.pipeline.create_operational_store", lambda _config: fake_store)
+
+        result = await run_job_async(config)
+
+        assert result.result_summary == "ok"
+        assert any(
+            "operational_run_metadata_write_failed=RuntimeError: supabase unavailable" in warning
+            for warning in result.warnings
+        )
+        assert fake_store.closed is True
+
     def test_scaffolded_release_and_backup_write_snapshots(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

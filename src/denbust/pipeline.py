@@ -379,9 +379,33 @@ async def run_job_async(
     ensure_default_jobs_registered()
     handler = require_job_handler(config.dataset_name, config.job_name)
     store = operational_store or create_operational_store(config)
-    result = await handler(config, config_path, days_override, store)
-    store.write_run_metadata(result)
-    return result
+    owns_store = operational_store is None
+    result: RunSnapshot | None = None
+    try:
+        result = await handler(config, config_path, days_override, store)
+        try:
+            store.write_run_metadata(result)
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist operational run metadata for %s/%s: %s",
+                config.dataset_name.value,
+                config.job_name.value,
+                exc,
+            )
+            result.warnings.append(
+                f"operational_run_metadata_write_failed={type(exc).__name__}: {exc}"
+            )
+        return result
+    finally:
+        if owns_store:
+            try:
+                store.close()
+            except Exception as exc:
+                logger.warning("Failed to close operational store: %s", exc)
+                if result is not None:
+                    result.warnings.append(
+                        f"operational_store_close_failed={type(exc).__name__}: {exc}"
+                    )
 
 
 def _load_config_or_exit(config_path: Path) -> Config:

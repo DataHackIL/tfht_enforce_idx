@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+from typing import Any
 
 import anthropic
 from anthropic.types import TextBlock
@@ -91,6 +93,14 @@ class NewsItemEnricher:
         """Expose the model used for summary generation."""
         return self._model
 
+    def _create_message(self, prompt: str) -> anthropic.types.Message:
+        """Issue a blocking Anthropic request using the sync client."""
+        return self._client.messages.create(
+            model=self._model,
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
     async def enrich(self, item: UnifiedItem) -> NewsItemEnrichment:
         """Enrich a unified item with summary and metadata."""
         prompt = _SUMMARY_PROMPT.format(
@@ -102,11 +112,7 @@ class NewsItemEnricher:
         )
 
         try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=400,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            response = await asyncio.to_thread(self._create_message, prompt)
             text = ""
             if response.content:
                 first_block = response.content[0]
@@ -134,11 +140,44 @@ class NewsItemEnricher:
         except ValueError:
             privacy_risk = PrivacyRisk.LOW
 
+        geography_region = _optional_string(payload.get("geography_region"))
+        geography_city = _optional_string(payload.get("geography_city"))
         return NewsItemEnrichment(
             summary_one_sentence=summary,
-            geography_region=payload.get("geography_region"),
-            geography_city=payload.get("geography_city"),
-            organizations_mentioned=deduplicate_strings(payload.get("organizations_mentioned", [])),
-            topic_tags=deduplicate_strings(payload.get("topic_tags", [])),
+            geography_region=geography_region,
+            geography_city=geography_city,
+            organizations_mentioned=deduplicate_strings(
+                _string_list(payload.get("organizations_mentioned"))
+            ),
+            topic_tags=deduplicate_strings(_string_list(payload.get("topic_tags"))),
             privacy_risk_level=privacy_risk,
         )
+
+
+def _optional_string(value: Any) -> str | None:
+    """Coerce optional scalar payload values to strings when safe."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    return None
+
+
+def _string_list(value: Any) -> list[str]:
+    """Coerce lightly malformed LLM payload fields into string lists."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else []
+    if isinstance(value, list):
+        items: list[str] = []
+        for entry in value:
+            coerced = _optional_string(entry)
+            if coerced is not None:
+                items.append(coerced)
+        return items
+    return []

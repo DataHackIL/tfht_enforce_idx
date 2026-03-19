@@ -20,6 +20,10 @@ class OperationalStore(ABC):
         """Persist run-level metadata."""
 
     @abstractmethod
+    def close(self) -> None:
+        """Release any owned resources such as network clients."""
+
+    @abstractmethod
     def upsert_records(self, dataset_name: str, records: Sequence[Mapping[str, Any]]) -> None:
         """Upsert operational records for a dataset."""
 
@@ -46,6 +50,9 @@ class NullOperationalStore(OperationalStore):
 
     def write_run_metadata(self, snapshot: RunSnapshot) -> None:
         del snapshot
+
+    def close(self) -> None:
+        return None
 
     def upsert_records(self, dataset_name: str, records: Sequence[Mapping[str, Any]]) -> None:
         del dataset_name, records
@@ -91,6 +98,9 @@ class LocalJsonOperationalStore(OperationalStore):
         with open(self.run_metadata_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(snapshot.model_dump(mode="json"), ensure_ascii=False))
             handle.write("\n")
+
+    def close(self) -> None:
+        return None
 
     def upsert_records(self, dataset_name: str, records: Sequence[Mapping[str, Any]]) -> None:
         existing = self.fetch_records(dataset_name)

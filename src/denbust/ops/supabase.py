@@ -29,6 +29,9 @@ class SupabaseOperationalStore(OperationalStore):
         self._config = config
         self._client = client or httpx.Client(timeout=30.0)
 
+    def close(self) -> None:
+        self._client.close()
+
     def write_run_metadata(self, snapshot: RunSnapshot) -> None:
         table = self._table_for_job(snapshot.job_name.value)
         payload = snapshot.model_dump(mode="json")

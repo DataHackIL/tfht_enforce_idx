@@ -193,27 +193,22 @@ class NewsItemsReleaseBuilder(ReleaseBuilder):
         readme_path.write_text(_public_dataset_readme(manifest), encoding="utf-8")
         artifacts.append(_artifact_for_path(readme_path, fmt=ReleaseFormat.MARKDOWN))
 
+        manifest.primary_files = artifacts.copy()
         manifest_path = output_dir / "MANIFEST.json"
         manifest_path.write_text(
             json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        artifacts.append(_artifact_for_path(manifest_path, fmt=ReleaseFormat.JSON))
+        manifest_artifact = _artifact_for_path(manifest_path, fmt=ReleaseFormat.JSON)
+        artifacts_with_manifest = artifacts + [manifest_artifact]
 
         checksums_path = output_dir / "checksums.txt"
         checksums_path.write_text(
             "".join(
                 f"{artifact.sha256}  {artifact.path.name}\n"
-                for artifact in artifacts
+                for artifact in artifacts_with_manifest
                 if artifact.sha256
             ),
-            encoding="utf-8",
-        )
-        artifacts.append(_artifact_for_path(checksums_path, fmt=ReleaseFormat.TEXT))
-
-        manifest.primary_files = artifacts
-        manifest_path.write_text(
-            json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         return manifest
