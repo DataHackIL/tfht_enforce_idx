@@ -155,7 +155,11 @@ class ReleaseConfig(BaseModel):
 
 
 class GoogleDriveBackupConfig(BaseModel):
-    """Google Drive latest-backup target configuration."""
+    """Google Drive latest-backup target configuration.
+
+    `enabled` may be turned on explicitly in YAML or implicitly when
+    `DENBUST_DRIVE_FOLDER_ID` is present in the environment.
+    """
 
     enabled: bool = False
     folder_id: str | None = None
@@ -176,7 +180,11 @@ class GoogleDriveBackupConfig(BaseModel):
 
 
 class ObjectStorageBackupConfig(BaseModel):
-    """Object-storage latest-backup target configuration."""
+    """Object-storage latest-backup target configuration.
+
+    `enabled` may be turned on explicitly in YAML or implicitly when
+    `DENBUST_OBJECT_STORE_BUCKET` is present in the environment.
+    """
 
     enabled: bool = False
     bucket: str | None = None

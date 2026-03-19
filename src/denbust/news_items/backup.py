@@ -131,6 +131,7 @@ def execute_latest_backup(config: Config, *, publication_root: Path) -> BackupMa
     targets: list[BackupTarget] = []
 
     if config.backup.google_drive.enabled and config.backup.google_drive.folder_id:
+        logger.info("Google Drive backup target is active for folder %s", config.backup.google_drive.folder_id)
         drive_uploader = GoogleDriveLatestBackupUploader(
             service_account_json=config.drive_service_account_json,
         )
@@ -147,8 +148,18 @@ def execute_latest_backup(config: Config, *, publication_root: Path) -> BackupMa
                 uploaded_files=uploaded,
             )
         )
+    else:
+        logger.info(
+            "Google Drive backup target is inactive (enabled=%s, folder_id_present=%s)",
+            config.backup.google_drive.enabled,
+            bool(config.backup.google_drive.folder_id),
+        )
 
     if config.backup.object_storage.enabled and config.backup.object_storage.bucket:
+        logger.info(
+            "Object storage backup target is active for bucket %s",
+            config.backup.object_storage.bucket,
+        )
         object_uploader = ObjectStorageLatestBackupUploader(
             endpoint_url=config.object_store_endpoint_url,
             access_key_id=config.object_store_access_key_id,
@@ -167,6 +178,12 @@ def execute_latest_backup(config: Config, *, publication_root: Path) -> BackupMa
                 status="uploaded",
                 uploaded_files=uploaded,
             )
+        )
+    else:
+        logger.info(
+            "Object storage backup target is inactive (enabled=%s, bucket_present=%s)",
+            config.backup.object_storage.enabled,
+            bool(config.backup.object_storage.bucket),
         )
 
     return BackupManifest(

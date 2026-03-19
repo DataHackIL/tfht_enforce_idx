@@ -1,4 +1,11 @@
 # Release configuration for the news_items dataset
+#
+# Publication targets are intentionally configured through env/secrets:
+# - DENBUST_KAGGLE_DATASET enables Kaggle publishing
+# - DENBUST_HUGGINGFACE_REPO_ID enables Hugging Face publishing
+# - if neither target is configured, the release job still builds the bundle and
+#   writes release metadata/state, but skips public publication
+# - if a target is configured but its required auth secret is missing, the release job fails
 name: news-items-release
 dataset_name: news_items
 job_name: release

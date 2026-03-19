@@ -106,6 +106,7 @@ def publish_release_bundle(
     """Publish a built release bundle to the configured public targets."""
     targets: list[str] = []
     if config.release.kaggle_dataset:
+        logger.info("Kaggle publication target is active for dataset %s", config.release.kaggle_dataset)
         kaggle_publisher = KagglePublisher(
             username=config.kaggle_username,
             key=config.kaggle_key,
@@ -118,8 +119,14 @@ def publish_release_bundle(
                 dataset_slug=config.release.kaggle_dataset,
             )
         )
+    else:
+        logger.info("Kaggle publication target is inactive; release bundle will not be pushed to Kaggle.")
 
     if config.release.huggingface_repo_id:
+        logger.info(
+            "Hugging Face publication target is active for repo %s",
+            config.release.huggingface_repo_id,
+        )
         hf_publisher = HuggingFacePublisher(token=config.huggingface_token)
         targets.append(
             "huggingface:"
@@ -128,6 +135,10 @@ def publish_release_bundle(
                 manifest=manifest,
                 repo_id=config.release.huggingface_repo_id,
             )
+        )
+    else:
+        logger.info(
+            "Hugging Face publication target is inactive; release bundle will not be pushed to Hugging Face."
         )
 
     return targets

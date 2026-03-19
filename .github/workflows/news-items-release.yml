@@ -1,6 +1,7 @@
 name: news-items-release
 
 on:
+  # Weekly publication run for news_items release bundles.
   schedule:
     - cron: "15 4 * * 0"
   workflow_dispatch:
@@ -19,6 +20,8 @@ env:
   JOB_NAME: release
   JOB_CONFIG_PATH: agents/release/news_items.yaml
   STATE_JOB_DIR: state_repo/news_items/release
+  # Release artifacts are built into the release namespace under the shared state repo.
+  PUBLICATION_DIR: state_repo/news_items/release/publication
 
 jobs:
   run-release:
@@ -43,6 +46,13 @@ jobs:
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
       - name: Run release job
+        # Required secrets:
+        # - DENBUST_SUPABASE_URL
+        # - DENBUST_SUPABASE_SERVICE_ROLE_KEY
+        # Optional publication targets:
+        # - DENBUST_KAGGLE_DATASET + KAGGLE_USERNAME + KAGGLE_KEY
+        # - DENBUST_HUGGINGFACE_REPO_ID + HF_TOKEN
+        # If no publication target is configured, the job still builds and stores the release bundle.
         env:
           DENBUST_STATE_ROOT: state_repo
           DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}

@@ -283,6 +283,22 @@ Each `news_items` release currently writes:
 
 Release versions use a UTC date string such as `2026-03-22`.
 
+## Operational behavior matrix
+
+| Mode | Reads from | Writes to | External integrations |
+|---|---|---|---|
+| Local ingest | live sources + local seen store | local namespaced state + local JSON operational store (from `agents/news/local.yaml`) | Anthropic, optional SMTP |
+| GitHub ingest | live sources + shared state repo seen store | shared state repo + Supabase | Anthropic, Supabase, optional SMTP |
+| Weekly release | Supabase `news_items` rows | release bundle under `news_items/release/publication` + release run snapshot | optional Kaggle, optional Hugging Face |
+| Weekly backup | latest built release bundle under `news_items/release/publication` | backup run snapshot under `news_items/backup/runs` | optional Google Drive, optional S3-compatible object storage |
+
+In other words:
+
+- local ingest uses local state plus the local JSON operational store by default
+- GitHub ingest uses the shared state repo plus Supabase
+- release reads releasable rows from Supabase, builds the bundle, and only publishes to public targets when they are configured
+- backup does not rebuild the release; it uploads the latest already-built bundle when backup targets are configured
+
 ## Required environment variables
 
 ### Ingest
@@ -311,6 +327,61 @@ Release versions use a UTC date string such as `2026-03-22`.
 - `DENBUST_OBJECT_STORE_ENDPOINT_URL`
 - `DENBUST_OBJECT_STORE_ACCESS_KEY_ID`
 - `DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY`
+
+## Integration activation and failure semantics
+
+The Phase B integrations are intentionally split into:
+
+- required backends for a given job
+- optional targets that are only activated when explicitly configured
+
+### Supabase
+
+- `DENBUST_SUPABASE_URL` and `DENBUST_SUPABASE_SERVICE_ROLE_KEY` are required for the checked-in GitHub ingest config and for the checked-in release config
+- the service-role key is used because ingest, release, and suppression-aware export assembly all need privileged operational access
+- if the selected config uses `operational.provider: supabase` and these variables are missing, the job fails
+
+### Kaggle
+
+- Kaggle publishing is activated only when `DENBUST_KAGGLE_DATASET` is set
+- if `DENBUST_KAGGLE_DATASET` is not set, the release job still builds the bundle and skips Kaggle publication
+- if `DENBUST_KAGGLE_DATASET` is set but `KAGGLE_USERNAME` or `KAGGLE_KEY` is missing, the release job fails
+
+### Hugging Face
+
+- Hugging Face publication is activated only when `DENBUST_HUGGINGFACE_REPO_ID` is set
+- if `DENBUST_HUGGINGFACE_REPO_ID` is not set, the release job still builds the bundle and skips Hugging Face publication
+- if `DENBUST_HUGGINGFACE_REPO_ID` is set but `HF_TOKEN` is missing, the release job fails
+
+### Google Drive backup
+
+- Google Drive backup is activated when the backup config enables the target or when `DENBUST_DRIVE_FOLDER_ID` is present
+- the checked-in backup config keeps the target disabled for local safety; in GitHub Actions the folder-id secret can activate it implicitly
+- if the target is inactive, backup skips Google Drive cleanly
+- if the target is active but `DENBUST_DRIVE_SERVICE_ACCOUNT_JSON` is missing, the backup job fails
+
+### Object-storage backup
+
+- object-storage backup is activated when the backup config enables the target or when `DENBUST_OBJECT_STORE_BUCKET` is present
+- `DENBUST_OBJECT_STORE_PREFIX` is optional and defaults to `news_items/latest`
+- if the target is inactive, backup skips object storage cleanly
+- if the target is active but `DENBUST_OBJECT_STORE_ACCESS_KEY_ID` or `DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY` is missing, the backup job fails
+
+### Partial success behavior
+
+- release is considered successful if the bundle is built; skipped public targets are surfaced as warnings in logs/run snapshots
+- backup is considered successful if the command completes; zero configured targets is treated as a warning, not a failure
+- if a configured publication or backup target is missing required credentials, that target currently fails the job rather than silently skipping
+
+## GitHub Actions secret/setup matrix
+
+| Workflow | Required secrets | Optional secrets |
+|---|---|---|
+| `daily-state-run.yml` / `weekly-state-run.yml` | `STATE_REPO_PAT`, `ANTHROPIC_API_KEY`, `DENBUST_SUPABASE_URL`, `DENBUST_SUPABASE_SERVICE_ROLE_KEY` | SMTP/email secrets if email output is enabled |
+| `news-items-release.yml` | `STATE_REPO_PAT`, `DENBUST_SUPABASE_URL`, `DENBUST_SUPABASE_SERVICE_ROLE_KEY` | `DENBUST_KAGGLE_DATASET`, `KAGGLE_USERNAME`, `KAGGLE_KEY`, `DENBUST_HUGGINGFACE_REPO_ID`, `HF_TOKEN` |
+| `news-items-backup.yml` | `STATE_REPO_PAT` | `DENBUST_DRIVE_FOLDER_ID`, `DENBUST_DRIVE_SERVICE_ACCOUNT_JSON`, `DENBUST_OBJECT_STORE_BUCKET`, `DENBUST_OBJECT_STORE_PREFIX`, `DENBUST_OBJECT_STORE_ENDPOINT_URL`, `DENBUST_OBJECT_STORE_ACCESS_KEY_ID`, `DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY` |
+
+The release and backup workflows both support `workflow_dispatch` for manual runs and weekly schedules for automated runs.
 
 ## Supabase setup
 
@@ -358,6 +429,13 @@ Release and backup jobs rely on dedicated configs:
 
 - `agents/release/news_items.yaml`
 - `agents/backup/news_items.yaml`
+
+For backup specifically:
+
+- the checked-in YAML keeps both targets disabled for local safety
+- `DENBUST_DRIVE_FOLDER_ID` auto-enables Google Drive backup at config-load time
+- `DENBUST_OBJECT_STORE_BUCKET` auto-enables object-storage backup at config-load time
+- because the backup config no longer hardcodes `store.publication_dir`, it reads the latest release bundle from the current state root under `news_items/release/publication`
 
 ## Current limitations
 

@@ -1,6 +1,7 @@
 name: news-items-backup
 
 on:
+  # Weekly latest-backup upload for the already-built news_items release bundle.
   schedule:
     - cron: "45 4 * * 0"
   workflow_dispatch:
@@ -43,6 +44,11 @@ jobs:
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
       - name: Run backup job
+        # Target activation is env-driven:
+        # - DENBUST_DRIVE_FOLDER_ID activates Google Drive backup
+        # - DENBUST_OBJECT_STORE_BUCKET activates object-storage backup
+        # If neither destination is configured, the job completes with no uploaded targets.
+        # If a target is active but its auth secret is missing, the backup job fails.
         env:
           DENBUST_STATE_ROOT: state_repo
           DENBUST_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DENBUST_DRIVE_SERVICE_ACCOUNT_JSON }}
