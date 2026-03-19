@@ -96,15 +96,16 @@ class LocalJsonOperationalStore(OperationalStore):
         existing = self.fetch_records(dataset_name)
         by_identity: dict[str, dict[str, Any]] = {}
         for record in existing:
-            key = str(record.get("canonical_url") or record.get("id"))
-            if key:
-                by_identity[key] = record
+            raw_key = record.get("canonical_url") or record.get("id")
+            if raw_key is not None and raw_key != "":
+                by_identity[str(raw_key)] = record
 
         for incoming_record in records:
             payload = dict(incoming_record)
-            key = str(payload.get("canonical_url") or payload.get("id"))
-            if not key:
+            raw_key = payload.get("canonical_url") or payload.get("id")
+            if raw_key is None or raw_key == "":
                 continue
+            key = str(raw_key)
             current = by_identity.get(key)
             if current is not None and "created_at" in current and "created_at" not in payload:
                 payload["created_at"] = current["created_at"]

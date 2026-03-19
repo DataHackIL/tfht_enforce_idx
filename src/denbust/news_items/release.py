@@ -83,8 +83,6 @@ def _schema_markdown() -> str:
     for field_name, payload in properties.items():
         field_type = payload.get("type") or payload.get("anyOf") or payload.get("$ref", "object")
         if isinstance(field_type, list):
-            field_type = ",".join(str(part) for part in field_type)
-        if isinstance(field_type, list):
             rendered_type = ", ".join(str(part) for part in field_type)
         elif isinstance(field_type, dict):
             rendered_type = json.dumps(field_type, ensure_ascii=False)

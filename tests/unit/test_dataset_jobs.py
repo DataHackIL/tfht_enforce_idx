@@ -42,6 +42,33 @@ async def test_run_news_items_ingest_wrapper_calls_pipeline(
 
 
 @pytest.mark.asyncio
+async def test_run_news_items_ingest_wrapper_passes_operational_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ingest wrapper should pass an explicit operational store through."""
+    expected = build_snapshot()
+    mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr("denbust.pipeline.run_news_ingest_job", mock)
+
+    config = Config()
+    store = object()
+    result = await _run_news_items_ingest(
+        config,
+        Path("agents/news/local.yaml"),
+        7,
+        operational_store=store,  # type: ignore[arg-type]
+    )
+
+    assert result is expected
+    mock.assert_awaited_once_with(
+        config,
+        config_path=Path("agents/news/local.yaml"),
+        days_override=7,
+        operational_store=store,
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_scaffolded_release_wrapper_calls_pipeline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
