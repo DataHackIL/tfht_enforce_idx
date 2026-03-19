@@ -3,16 +3,19 @@
 מדד האכיפה - Enforcement Index
 
 `denbust` is evolving from a single-purpose news scanner into a small multi-dataset platform for TFHT
-data jobs. Phase A keeps the current news ingest pipeline working while introducing shared dataset/job
-identity, namespaced state paths, shared policy models, and scaffolding for future release and backup
-flows.
+data jobs. Phase A introduced the shared platform spine. Phase B turns the first real dataset,
+`news_items`, into an end-to-end operational flow with:
 
-Today, the only fully implemented dataset/job is:
+- normalized metadata records
+- Supabase operational persistence
+- privacy/review/suppression gating
+- weekly public release bundle generation
+- publication hooks for Kaggle and Hugging Face
+- latest-backup upload hooks for Google Drive and S3-compatible object storage
+
+Today, the implemented dataset/jobs are:
 
 - `news_items / ingest`
-
-Scaffolded but not yet fully implemented:
-
 - `news_items / release`
 - `news_items / backup`
 
@@ -28,7 +31,11 @@ Planned future datasets:
 - Uses RSS and browser-backed scrapers
 - Classifies relevance with an LLM
 - Deduplicates the same story across multiple sources
-- Emits unified items via CLI or SMTP email
+- Emits unified items via CLI or SMTP email for the ingest workflow
+- Persists normalized `news_items` operational rows
+- Builds metadata-only weekly release bundles
+- Publishes release bundles to Kaggle and Hugging Face when configured
+- Uploads the latest release bundle to Google Drive and S3-compatible object storage when configured
 - Persists dataset/job-scoped seen state and per-run JSON snapshots
 
 ## Quick Start
@@ -37,6 +44,8 @@ Planned future datasets:
 pip install -e ".[dev]"
 python -m playwright install chromium
 denbust scan --config agents/news/local.yaml
+denbust release --config agents/release/news_items.yaml
+denbust backup --config agents/backup/news_items.yaml
 ```
 
 To send reports by email, set `output.format: email` in your config and provide SMTP env vars
@@ -59,7 +68,7 @@ Current defaults remain:
 
 `denbust scan` is preserved as a compatibility alias for `news_items / ingest`.
 
-Future-facing commands now exist as scaffolding:
+Future-facing commands now exist as real `news_items` jobs:
 
 ```bash
 denbust run --dataset news_items --job ingest --config agents/news/local.yaml
@@ -166,19 +175,27 @@ Phase A introduces shared platform primitives so future dataset jobs can reuse t
 
 What is implemented now:
 
-- `news_items / ingest` end to end
-- dataset/job-aware run snapshots
-- dataset/job-scoped local and state-repo persistence
-- CLI scaffolding for `run`, `release`, and `backup`
-- dedicated scaffold config locations for `release` and `backup`
-- placeholder release/backup workflows
+- `news_items / ingest`
+  - live source ingestion
+  - canonical URL normalization
+  - LLM relevance classification
+  - one-sentence summary generation
+  - privacy/review/publication/takedown status assignment
+  - operational persistence through the configured store
+- `news_items / release`
+  - reads operational rows
+  - filters to publicly releasable metadata-only rows
+  - writes `news_items.parquet`, `news_items.csv`, `MANIFEST.json`, `SCHEMA.json`, `SCHEMA.md`, `README.md`, and `checksums.txt`
+  - publishes to Kaggle and Hugging Face when configured
+- `news_items / backup`
+  - finds the latest release bundle
+  - uploads it to Google Drive and S3-compatible object storage when configured
 
-What remains scaffolded for later phases:
+Still intentionally deferred:
 
-- real operational persistence backends
-- Parquet release generation
-- remote backup uploads
-- additional dataset handlers beyond `news_items / ingest`
+- additional dataset implementations beyond `news_items`
+- richer human review tooling / admin UI
+- more advanced privacy policies beyond the current pragmatic gate
 
 ## Config Layout
 
@@ -203,11 +220,11 @@ Backward-compatible shims are still present:
 Current intent:
 
 - `agents/news/...` drives ingest jobs
-- `agents/release/...` drives scaffolded release jobs
-- `agents/backup/...` drives scaffolded backup jobs
+- `agents/release/...` drives release jobs
+- `agents/backup/...` drives backup jobs
 
 The `release` and `backup` commands still accept any compatible config path you pass explicitly, but
-their default paths now point at dedicated scaffold config files instead of reusing the ingest config.
+their default paths now point at dedicated config files instead of reusing the ingest config.
 
 ## Workflow Parameterization
 
@@ -220,7 +237,211 @@ dataset/job env variables:
 - `STATE_JOB_DIR`
 
 This keeps the current scheduled news ingest behavior unchanged while making the workflow files easier
-to extend for future dataset/job combinations in Phase B.
+to extend for future dataset/job combinations.
+
+## `news_items` public dataset
+
+The public `news_items` dataset is metadata-only. Each public row contains:
+
+- deterministic row id
+- source name and source domain
+- original and canonical URL
+- publication and retrieval timestamps
+- title
+- category and sub-category
+- one-sentence factual summary
+- geographic fields when available
+- organizations and topic tags
+- rights / privacy / review / publication / takedown status
+- release version
+
+The public dataset intentionally excludes:
+
+- article full text
+- cached HTML
+- page screenshots or snapshots
+- private ingestion diagnostics
+
+Rows are excluded from public release when they are:
+
+- suppressed by a takedown/suppression rule
+- marked `internal_only`
+- still pending privacy review
+- otherwise non-public under the shared policy enums
+
+## Release bundle contents
+
+Each `news_items` release currently writes:
+
+- `news_items.parquet` as the canonical export
+- `news_items.csv`
+- `MANIFEST.json`
+- `SCHEMA.json`
+- `SCHEMA.md`
+- `README.md`
+- `checksums.txt`
+
+Release versions use a UTC date string such as `2026-03-22`.
+
+## Operational behavior matrix
+
+| Mode | Reads from | Writes to | External integrations |
+|---|---|---|---|
+| Local ingest | live sources + local seen store | local namespaced state + local JSON operational store (from `agents/news/local.yaml`) | Anthropic, optional SMTP |
+| GitHub ingest | live sources + shared state repo seen store | shared state repo + Supabase | Anthropic, Supabase, optional SMTP |
+| Weekly release | Supabase `news_items` rows | release bundle under `news_items/release/publication` + release run snapshot | optional Kaggle, optional Hugging Face |
+| Weekly backup | latest built release bundle under `news_items/release/publication` | backup run snapshot under `news_items/backup/runs` | optional Google Drive, optional S3-compatible object storage |
+
+In other words:
+
+- local ingest uses local state plus the local JSON operational store by default
+- GitHub ingest uses the shared state repo plus Supabase
+- release reads releasable rows from Supabase, builds the bundle, and only publishes to public targets when they are configured
+- backup does not rebuild the release; it uploads the latest already-built bundle when backup targets are configured
+
+## Required environment variables
+
+### Ingest
+
+- `ANTHROPIC_API_KEY`
+- `DENBUST_SUPABASE_URL` for GitHub/Supabase-backed ingest
+- `DENBUST_SUPABASE_SERVICE_ROLE_KEY` for GitHub/Supabase-backed ingest
+- SMTP variables when email output is enabled
+
+### Release
+
+- `DENBUST_SUPABASE_URL`
+- `DENBUST_SUPABASE_SERVICE_ROLE_KEY`
+- `DENBUST_KAGGLE_DATASET` to enable Kaggle publishing
+- `KAGGLE_USERNAME`
+- `KAGGLE_KEY`
+- `DENBUST_HUGGINGFACE_REPO_ID` to enable Hugging Face publishing
+- `HF_TOKEN`
+
+### Backup
+
+- `DENBUST_DRIVE_SERVICE_ACCOUNT_JSON`
+- `DENBUST_DRIVE_FOLDER_ID`
+- `DENBUST_OBJECT_STORE_BUCKET`
+- `DENBUST_OBJECT_STORE_PREFIX` (optional; defaults to `news_items/latest`)
+- `DENBUST_OBJECT_STORE_ENDPOINT_URL`
+- `DENBUST_OBJECT_STORE_ACCESS_KEY_ID`
+- `DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY`
+
+## Integration activation and failure semantics
+
+The Phase B integrations are intentionally split into:
+
+- required backends for a given job
+- optional targets that are only activated when explicitly configured
+
+### Supabase
+
+- `DENBUST_SUPABASE_URL` and `DENBUST_SUPABASE_SERVICE_ROLE_KEY` are required for the checked-in GitHub ingest config and for the checked-in release config
+- the service-role key is used because ingest, release, and suppression-aware export assembly all need privileged operational access
+- if the selected config uses `operational.provider: supabase` and these variables are missing, the job fails
+
+### Kaggle
+
+- Kaggle publishing is activated only when `DENBUST_KAGGLE_DATASET` is set
+- if `DENBUST_KAGGLE_DATASET` is not set, the release job still builds the bundle and skips Kaggle publication
+- if `DENBUST_KAGGLE_DATASET` is set but `KAGGLE_USERNAME` or `KAGGLE_KEY` is missing, the release job fails
+
+### Hugging Face
+
+- Hugging Face publication is activated only when `DENBUST_HUGGINGFACE_REPO_ID` is set
+- if `DENBUST_HUGGINGFACE_REPO_ID` is not set, the release job still builds the bundle and skips Hugging Face publication
+- if `DENBUST_HUGGINGFACE_REPO_ID` is set but `HF_TOKEN` is missing, the release job fails
+
+### Google Drive backup
+
+- Google Drive backup is activated when the backup config enables the target or when `DENBUST_DRIVE_FOLDER_ID` is present
+- the checked-in backup config keeps the target disabled for local safety; in GitHub Actions the folder-id secret can activate it implicitly
+- if the target is inactive, backup skips Google Drive cleanly
+- if the target is active but `DENBUST_DRIVE_SERVICE_ACCOUNT_JSON` is missing, the backup job fails
+
+### Object-storage backup
+
+- object-storage backup is activated when the backup config enables the target or when `DENBUST_OBJECT_STORE_BUCKET` is present
+- `DENBUST_OBJECT_STORE_PREFIX` is optional and defaults to `news_items/latest`
+- if the target is inactive, backup skips object storage cleanly
+- if the target is active but `DENBUST_OBJECT_STORE_ACCESS_KEY_ID` or `DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY` is missing, the backup job fails
+
+### Partial success behavior
+
+- release is considered successful if the bundle is built; skipped public targets are surfaced as warnings in logs/run snapshots
+- backup is considered successful if the command completes; zero configured targets is treated as a warning, not a failure
+- if a configured publication or backup target is missing required credentials, that target currently fails the job rather than silently skipping
+
+## GitHub Actions secret/setup matrix
+
+| Workflow | Required secrets | Optional secrets |
+|---|---|---|
+| `daily-state-run.yml` / `weekly-state-run.yml` | `STATE_REPO_PAT`, `ANTHROPIC_API_KEY`, `DENBUST_SUPABASE_URL`, `DENBUST_SUPABASE_SERVICE_ROLE_KEY` | SMTP/email secrets if email output is enabled |
+| `news-items-release.yml` | `STATE_REPO_PAT`, `DENBUST_SUPABASE_URL`, `DENBUST_SUPABASE_SERVICE_ROLE_KEY` | `DENBUST_KAGGLE_DATASET`, `KAGGLE_USERNAME`, `KAGGLE_KEY`, `DENBUST_HUGGINGFACE_REPO_ID`, `HF_TOKEN` |
+| `news-items-backup.yml` | `STATE_REPO_PAT` | `DENBUST_DRIVE_FOLDER_ID`, `DENBUST_DRIVE_SERVICE_ACCOUNT_JSON`, `DENBUST_OBJECT_STORE_BUCKET`, `DENBUST_OBJECT_STORE_PREFIX`, `DENBUST_OBJECT_STORE_ENDPOINT_URL`, `DENBUST_OBJECT_STORE_ACCESS_KEY_ID`, `DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY` |
+
+The release and backup workflows both support `workflow_dispatch` for manual runs and weekly schedules for automated runs.
+
+## Supabase setup
+
+Phase B adds SQL migrations under:
+
+```text
+supabase/migrations/
+```
+
+Apply the `news_items` migration before running Supabase-backed jobs. The schema includes:
+
+- `news_items`
+- `ingestion_runs`
+- `release_runs`
+- `backup_runs`
+- `suppression_rules`
+
+`suppression_rules` is the minimal takedown/suppression path. Add rows there by canonical URL or row
+id to block future public releases.
+
+## Local development modes
+
+### Local end-to-end mode
+
+The checked-in local ingest config uses the local JSON operational store:
+
+```bash
+denbust scan --config agents/news/local.yaml
+denbust release --config agents/release/news_items.yaml
+denbust backup --config agents/backup/news_items.yaml
+```
+
+To run release locally without Supabase, either:
+
+- switch `operational.provider` to `local_json` in the release config, or
+- provide a custom config path with that override
+
+### GitHub operational mode
+
+The checked-in GitHub ingest config uses the Supabase operational store:
+
+- `agents/news/github.yaml`
+
+Release and backup jobs rely on dedicated configs:
+
+- `agents/release/news_items.yaml`
+- `agents/backup/news_items.yaml`
+
+For backup specifically:
+
+- the checked-in YAML keeps both targets disabled for local safety
+- `DENBUST_DRIVE_FOLDER_ID` auto-enables Google Drive backup at config-load time
+- `DENBUST_OBJECT_STORE_BUCKET` auto-enables object-storage backup at config-load time
+- because the backup config no longer hardcodes `store.publication_dir`, it reads the latest release bundle from the current state root under `news_items/release/publication`
+
+## Current limitations
+
+- privacy/risk gating is intentionally lightweight and conservative, not a substitute for legal review
+- publication and backup integrations require external credentials and cannot be fully exercised in CI
+- only `news_items` is implemented end to end in this phase
 
 ## Example Output
 

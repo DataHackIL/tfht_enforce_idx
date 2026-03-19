@@ -79,3 +79,5 @@ class UnifiedItem(BaseModel):
     date: datetime
     category: Category
     sub_category: SubCategory | None = None
+    canonical_url: HttpUrl | None = None
+    primary_source_name: str | None = None

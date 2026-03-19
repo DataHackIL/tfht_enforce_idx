@@ -1,6 +1,7 @@
 name: weekly-state-run
 
 on:
+  # Weekly catch-up ingest for news_items, with manual dispatch for ad hoc reruns.
   schedule:
     # Runs at 04:30 UTC every Sunday, which is 06:30 in Israel Standard Time
     # (UTC+2) and 07:30 during Israel daylight saving time (UTC+3).
@@ -46,8 +47,16 @@ jobs:
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
       - name: Run weekly scan
+        # Required secrets:
+        # - ANTHROPIC_API_KEY
+        # - DENBUST_SUPABASE_URL
+        # - DENBUST_SUPABASE_SERVICE_ROLE_KEY
+        # Optional if email output is enabled in config:
+        # - DENBUST_EMAIL_SMTP_* / DENBUST_EMAIL_FROM / DENBUST_EMAIL_TO / DENBUST_EMAIL_SUBJECT
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
+          DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
           DENBUST_EMAIL_SMTP_HOST: ${{ secrets.DENBUST_EMAIL_SMTP_HOST }}
           DENBUST_EMAIL_SMTP_PORT: ${{ secrets.DENBUST_EMAIL_SMTP_PORT }}
           DENBUST_EMAIL_SMTP_USERNAME: ${{ secrets.DENBUST_EMAIL_SMTP_USERNAME }}

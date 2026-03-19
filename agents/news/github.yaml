@@ -57,3 +57,6 @@ output:
 
 store:
   state_root: data
+
+operational:
+  provider: supabase

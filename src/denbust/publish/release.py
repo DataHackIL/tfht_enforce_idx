@@ -1,4 +1,4 @@
-"""Release/export scaffolding for future public dataset publication."""
+"""Release/export models and interfaces for dataset publication."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ class ReleaseFormat(StrEnum):
     """Supported release artifact formats."""
 
     PARQUET = "parquet"
+    CSV = "csv"
+    JSON = "json"
+    MARKDOWN = "markdown"
+    TEXT = "text"
 
 
 class ReleaseArtifact(BaseModel):
@@ -24,6 +28,7 @@ class ReleaseArtifact(BaseModel):
     path: Path
     format: ReleaseFormat
     row_count: int = 0
+    sha256: str | None = None
 
 
 class ReleaseManifest(BaseModel):
@@ -39,6 +44,7 @@ class ReleaseManifest(BaseModel):
     source_coverage_window: str | None = None
     rights_policy_version: str = "phase-a"
     privacy_policy_version: str = "phase-a"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ReleaseBuilder(PhaseAScaffold):

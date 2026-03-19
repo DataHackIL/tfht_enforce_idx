@@ -7,8 +7,11 @@ import pytest
 from denbust.config import (
     Config,
     DedupConfig,
+    GoogleDriveBackupConfig,
+    ObjectStorageBackupConfig,
     OutputConfig,
     OutputFormat,
+    ReleaseConfig,
     SourceConfig,
     SourceType,
     StoreConfig,
@@ -218,6 +221,68 @@ class TestConfig:
         sentinel = object()
 
         assert StoreConfig._normalize_paths(sentinel) is sentinel
+
+    def test_release_config_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Release config should pick up configured publication targets from env."""
+        monkeypatch.setenv("DENBUST_KAGGLE_DATASET", "owner/news-items")
+        monkeypatch.setenv("DENBUST_HUGGINGFACE_REPO_ID", "org/news-items")
+
+        config = ReleaseConfig.model_validate(None)
+
+        assert config.kaggle_dataset == "owner/news-items"
+        assert config.huggingface_repo_id == "org/news-items"
+
+    def test_release_config_validator_passthrough_for_non_mapping(self) -> None:
+        """ReleaseConfig's pre-validator should leave non-mapping values untouched."""
+        sentinel = object()
+
+        assert ReleaseConfig._apply_env_overrides(sentinel) is sentinel
+
+    def test_backup_target_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Backup target configs should enable themselves when env vars are present."""
+        monkeypatch.setenv("DENBUST_DRIVE_FOLDER_ID", "drive-folder")
+        monkeypatch.setenv("DENBUST_OBJECT_STORE_BUCKET", "bucket")
+        monkeypatch.setenv("DENBUST_OBJECT_STORE_PREFIX", "latest/news-items")
+
+        drive = GoogleDriveBackupConfig.model_validate(None)
+        object_storage = ObjectStorageBackupConfig.model_validate(None)
+
+        assert drive.enabled is True
+        assert drive.folder_id == "drive-folder"
+        assert object_storage.enabled is True
+        assert object_storage.bucket == "bucket"
+        assert object_storage.prefix == "latest/news-items"
+
+    def test_backup_target_validators_passthrough_for_non_mapping(self) -> None:
+        """Backup config pre-validators should leave non-mapping values untouched."""
+        sentinel = object()
+
+        assert GoogleDriveBackupConfig._apply_env_overrides(sentinel) is sentinel
+        assert ObjectStorageBackupConfig._apply_env_overrides(sentinel) is sentinel
+
+    def test_phase_b_env_properties(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Phase B service credentials should be exposed through config properties."""
+        monkeypatch.setenv("DENBUST_SUPABASE_URL", "https://supabase.example")
+        monkeypatch.setenv("DENBUST_SUPABASE_SERVICE_ROLE_KEY", "service-role")
+        monkeypatch.setenv("HF_TOKEN", "hf-token")
+        monkeypatch.setenv("KAGGLE_USERNAME", "kaggle-user")
+        monkeypatch.setenv("KAGGLE_KEY", "kaggle-key")
+        monkeypatch.setenv("DENBUST_DRIVE_SERVICE_ACCOUNT_JSON", "/tmp/sa.json")
+        monkeypatch.setenv("DENBUST_OBJECT_STORE_ENDPOINT_URL", "https://r2.example")
+        monkeypatch.setenv("DENBUST_OBJECT_STORE_ACCESS_KEY_ID", "access")
+        monkeypatch.setenv("DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY", "secret")
+
+        config = Config()
+
+        assert config.supabase_url == "https://supabase.example"
+        assert config.supabase_service_role_key == "service-role"
+        assert config.huggingface_token == "hf-token"
+        assert config.kaggle_username == "kaggle-user"
+        assert config.kaggle_key == "kaggle-key"
+        assert config.drive_service_account_json == "/tmp/sa.json"
+        assert config.object_store_endpoint_url == "https://r2.example"
+        assert config.object_store_access_key_id == "access"
+        assert config.object_store_secret_access_key == "secret"
 
 
 class TestLoadConfig:

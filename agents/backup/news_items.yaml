@@ -1,4 +1,12 @@
-# Scaffolded backup configuration for the news_items dataset
+# Backup configuration for the news_items dataset
+#
+# Local-safe default:
+# - both backup targets stay disabled unless explicitly enabled
+# - in GitHub Actions, DENBUST_DRIVE_FOLDER_ID auto-enables Google Drive
+# - in GitHub Actions, DENBUST_OBJECT_STORE_BUCKET auto-enables object storage
+# - if a target is enabled (from YAML or env) but its auth secret is missing, the backup job fails
+# - the backup job reads the latest release bundle from the same state root under
+#   <state_root>/news_items/release/publication
 name: news-items-backup
 dataset_name: news_items
 job_name: backup
@@ -9,3 +17,9 @@ output:
 
 store:
   state_root: data
+
+backup:
+  google_drive:
+    enabled: false
+  object_storage:
+    enabled: false

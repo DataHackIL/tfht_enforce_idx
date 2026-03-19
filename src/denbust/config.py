@@ -106,6 +106,114 @@ class StoreConfig(BaseModel):
         return normalized
 
 
+class OperationalProvider(StrEnum):
+    """Operational persistence backend."""
+
+    NONE = "none"
+    LOCAL_JSON = "local_json"
+    SUPABASE = "supabase"
+
+
+class OperationalConfig(BaseModel):
+    """Configuration for operational persistence."""
+
+    provider: OperationalProvider = OperationalProvider.NONE
+    root_dir: Path | None = None
+    supabase_schema: str = "public"
+    news_items_table: str = "news_items"
+    ingestion_runs_table: str = "ingestion_runs"
+    release_runs_table: str = "release_runs"
+    backup_runs_table: str = "backup_runs"
+    suppression_rules_table: str = "suppression_rules"
+
+
+class ReleaseConfig(BaseModel):
+    """Configuration for release/export generation."""
+
+    schema_version: str = "news_items-v1"
+    include_csv: bool = True
+    kaggle_dataset: str | None = None
+    huggingface_repo_id: str | None = None
+    rights_policy_version: str = "news_items-v1"
+    privacy_policy_version: str = "news_items-v1"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_env_overrides(cls, data: object) -> object:
+        if data is None:
+            normalized: dict[str, object] = {}
+        elif isinstance(data, dict):
+            normalized = dict(data)
+        else:
+            return data
+
+        if os.environ.get("DENBUST_KAGGLE_DATASET"):
+            normalized["kaggle_dataset"] = os.environ["DENBUST_KAGGLE_DATASET"]
+        if os.environ.get("DENBUST_HUGGINGFACE_REPO_ID"):
+            normalized["huggingface_repo_id"] = os.environ["DENBUST_HUGGINGFACE_REPO_ID"]
+        return normalized
+
+
+class GoogleDriveBackupConfig(BaseModel):
+    """Google Drive latest-backup target configuration.
+
+    `enabled` may be turned on explicitly in YAML or implicitly when
+    `DENBUST_DRIVE_FOLDER_ID` is present in the environment.
+    """
+
+    enabled: bool = False
+    folder_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_env_overrides(cls, data: object) -> object:
+        if data is None:
+            normalized: dict[str, object] = {}
+        elif isinstance(data, dict):
+            normalized = dict(data)
+        else:
+            return data
+        if os.environ.get("DENBUST_DRIVE_FOLDER_ID"):
+            normalized["folder_id"] = os.environ["DENBUST_DRIVE_FOLDER_ID"]
+            normalized["enabled"] = True
+        return normalized
+
+
+class ObjectStorageBackupConfig(BaseModel):
+    """Object-storage latest-backup target configuration.
+
+    `enabled` may be turned on explicitly in YAML or implicitly when
+    `DENBUST_OBJECT_STORE_BUCKET` is present in the environment.
+    """
+
+    enabled: bool = False
+    bucket: str | None = None
+    prefix: str = "news_items/latest"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_env_overrides(cls, data: object) -> object:
+        if data is None:
+            normalized: dict[str, object] = {}
+        elif isinstance(data, dict):
+            normalized = dict(data)
+        else:
+            return data
+        if os.environ.get("DENBUST_OBJECT_STORE_BUCKET"):
+            normalized["bucket"] = os.environ["DENBUST_OBJECT_STORE_BUCKET"]
+            normalized["enabled"] = True
+        if os.environ.get("DENBUST_OBJECT_STORE_PREFIX"):
+            normalized["prefix"] = os.environ["DENBUST_OBJECT_STORE_PREFIX"]
+        return normalized
+
+
+class BackupConfig(BaseModel):
+    """Configuration for backup upload targets."""
+
+    google_drive: GoogleDriveBackupConfig = Field(default_factory=GoogleDriveBackupConfig)
+    object_storage: ObjectStorageBackupConfig = Field(default_factory=ObjectStorageBackupConfig)
+
+
 # Default keywords for searching news articles (Hebrew)
 DEFAULT_KEYWORDS: list[str] = [
     "זנות",  # prostitution
@@ -135,6 +243,9 @@ class Config(BaseModel):
     dedup: DedupConfig = Field(default_factory=DedupConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     store: StoreConfig = Field(default_factory=StoreConfig)
+    operational: OperationalConfig = Field(default_factory=OperationalConfig)
+    release: ReleaseConfig = Field(default_factory=ReleaseConfig)
+    backup: BackupConfig = Field(default_factory=BackupConfig)
 
     @model_validator(mode="before")
     @classmethod
@@ -221,6 +332,51 @@ class Config(BaseModel):
     def email_subject(self) -> str | None:
         """Get optional email subject from environment."""
         return os.environ.get("DENBUST_EMAIL_SUBJECT")
+
+    @property
+    def supabase_url(self) -> str | None:
+        """Get Supabase project URL from the environment."""
+        return os.environ.get("DENBUST_SUPABASE_URL")
+
+    @property
+    def supabase_service_role_key(self) -> str | None:
+        """Get the Supabase service role key from the environment."""
+        return os.environ.get("DENBUST_SUPABASE_SERVICE_ROLE_KEY")
+
+    @property
+    def huggingface_token(self) -> str | None:
+        """Get the Hugging Face token from the environment."""
+        return os.environ.get("HF_TOKEN")
+
+    @property
+    def kaggle_username(self) -> str | None:
+        """Get the Kaggle username from the environment."""
+        return os.environ.get("KAGGLE_USERNAME")
+
+    @property
+    def kaggle_key(self) -> str | None:
+        """Get the Kaggle API key from the environment."""
+        return os.environ.get("KAGGLE_KEY")
+
+    @property
+    def drive_service_account_json(self) -> str | None:
+        """Get the Google Drive service-account JSON from the environment."""
+        return os.environ.get("DENBUST_DRIVE_SERVICE_ACCOUNT_JSON")
+
+    @property
+    def object_store_endpoint_url(self) -> str | None:
+        """Get the object-storage endpoint URL from the environment."""
+        return os.environ.get("DENBUST_OBJECT_STORE_ENDPOINT_URL")
+
+    @property
+    def object_store_access_key_id(self) -> str | None:
+        """Get the object-storage access key ID from the environment."""
+        return os.environ.get("DENBUST_OBJECT_STORE_ACCESS_KEY_ID")
+
+    @property
+    def object_store_secret_access_key(self) -> str | None:
+        """Get the object-storage secret access key from the environment."""
+        return os.environ.get("DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY")
 
 
 def load_config(path: Path) -> Config:
