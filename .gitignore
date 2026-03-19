@@ -212,6 +212,10 @@ LOCAL_AGENTS.md
 .DS_Store
 
 data/local/
+data/*/ingest/
+data/*/release/
+data/*/backup/
+data/*/operational/
 agents/local/
 .env.local
 

@@ -43,3 +43,11 @@ class PublicationStatus(StrEnum):
     SUPPRESSED = "suppressed"
     PUBLISHED = "published"
     INTERNAL_ONLY = "internal_only"
+
+
+class TakedownStatus(StrEnum):
+    """Takedown or suppression lifecycle."""
+
+    NONE = "none"
+    REQUESTED = "requested"
+    SUPPRESSED = "suppressed"

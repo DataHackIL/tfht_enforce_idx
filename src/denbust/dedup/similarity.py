@@ -173,6 +173,8 @@ class Deduplicator:
             date=primary.article.date,
             category=primary.classification.category,
             sub_category=primary.classification.sub_category,
+            canonical_url=primary.article.url,
+            primary_source_name=primary.article.source_name,
         )
 
 

@@ -81,10 +81,26 @@ def test_null_operational_store_methods_are_noops() -> None:
 
 
 def test_local_json_operational_store_noop_record_methods(tmp_path: Path) -> None:
-    """The local JSON store should expose the same no-op record API for Phase A."""
+    """The local JSON store should persist and mutate records for local Phase B flows."""
     store = LocalJsonOperationalStore(tmp_path / "ops")
 
     assert store.run_metadata_path == tmp_path / "ops" / "run_metadata.jsonl"
-    store.upsert_records("news_items", [{"id": "1"}])
-    assert store.fetch_records("news_items", limit=2) == []
+    store.upsert_records(
+        "news_items",
+        [
+            {
+                "id": "1",
+                "canonical_url": "https://example.com/article",
+                "publication_datetime": "2026-03-18T00:00:00Z",
+            }
+        ],
+    )
+    assert store.fetch_records("news_items", limit=2) == [
+        {
+            "id": "1",
+            "canonical_url": "https://example.com/article",
+            "publication_datetime": "2026-03-18T00:00:00Z",
+        }
+    ]
     store.mark_publication_state("news_items", ["1"], "published")
+    assert store.fetch_records("news_items")[0]["publication_status"] == "published"

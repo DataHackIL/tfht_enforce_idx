@@ -8,8 +8,9 @@ from pathlib import Path
 from denbust.config import Config
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
+from denbust.ops.storage import OperationalStore
 
-JobHandler = Callable[[Config, Path | None, int | None], Awaitable[RunSnapshot]]
+JobHandler = Callable[[Config, Path | None, int | None, OperationalStore], Awaitable[RunSnapshot]]
 
 _REGISTRY: dict[tuple[str, str], JobHandler] = {}
 

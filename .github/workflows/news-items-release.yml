@@ -1,6 +1,8 @@
 name: news-items-release
 
 on:
+  schedule:
+    - cron: "15 4 * * 0"
   workflow_dispatch:
 
 concurrency:
@@ -40,9 +42,16 @@ jobs:
           python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run scaffolded release job
+      - name: Run release job
         env:
           DENBUST_STATE_ROOT: state_repo
+          DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
+          DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
+          DENBUST_KAGGLE_DATASET: ${{ secrets.DENBUST_KAGGLE_DATASET }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          DENBUST_HUGGINGFACE_REPO_ID: ${{ secrets.DENBUST_HUGGINGFACE_REPO_ID }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: denbust release --dataset ${{ env.DATASET_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
 
       - name: Commit and push release state changes
@@ -68,5 +77,5 @@ jobs:
             exit 0
           fi
 
-          git -C state_repo commit -m "chore(state): update release scaffold snapshot"
+          git -C state_repo commit -m "chore(state): update news_items release outputs"
           git -C state_repo push

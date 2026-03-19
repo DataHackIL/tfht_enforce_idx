@@ -56,3 +56,6 @@ output:
 
 store:
   state_root: data
+
+operational:
+  provider: local_json

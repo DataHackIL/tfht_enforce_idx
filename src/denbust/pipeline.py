@@ -16,11 +16,15 @@ from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
-from denbust.ops.storage import NullOperationalStore, OperationalStore
+from denbust.news_items.backup import execute_latest_backup
+from denbust.news_items.ingest import build_operational_records, summarize_privacy_mix
+from denbust.news_items.normalize import canonicalize_news_url
+from denbust.news_items.publication import publish_release_bundle
+from denbust.news_items.release import NewsItemsReleaseBuilder, select_releasable_records
+from denbust.ops.factory import create_operational_store
+from denbust.ops.storage import OperationalStore
 from denbust.output.email import send_email_report
 from denbust.output.formatter import print_items
-from denbust.publish.backup import NullBackupExecutor
-from denbust.publish.release import NullReleaseBuilder
 from denbust.sources.base import Source
 from denbust.sources.haaretz import create_haaretz_source
 from denbust.sources.ice import create_ice_source
@@ -32,6 +36,15 @@ from denbust.store.run_snapshots import write_run_snapshot
 from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
+
+
+def release_publication_dir(config: Config) -> Path:
+    """Return the publication directory that holds built release bundles."""
+    if config.job_name == JobName.RELEASE:
+        return config.state_paths.publication_dir
+    return config.store.publication_dir or (
+        config.store.state_root / config.dataset_name / JobName.RELEASE / "publication"
+    )
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -99,7 +112,11 @@ async def fetch_all_sources(
 
 def filter_seen(articles: list[RawArticle], seen_store: SeenStore) -> list[RawArticle]:
     """Filter out already-seen articles."""
-    unseen = [article for article in articles if not seen_store.is_seen(str(article.url))]
+    unseen = [
+        article
+        for article in articles
+        if not seen_store.is_seen(canonicalize_news_url(str(article.url)))
+    ]
     logger.info("Filtered to %s unseen articles (was %s)", len(unseen), len(articles))
     return unseen
 
@@ -131,7 +148,7 @@ def mark_seen(items: list[UnifiedItem], seen_store: SeenStore) -> None:
     """Mark all URLs in unified items as seen."""
     urls: list[str] = []
     for item in items:
-        urls.extend(str(source.url) for source in item.sources)
+        urls.extend(canonicalize_news_url(str(source.url)) for source in item.sources)
 
     seen_store.mark_seen(urls)
     seen_store.save()
@@ -160,6 +177,7 @@ async def run_news_ingest_job(
     config: Config,
     config_path: Path | None = None,
     days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
 ) -> RunSnapshot:
     """Run the current news ingest pipeline as a registered dataset job."""
     days = days_override if days_override is not None else config.days
@@ -230,6 +248,23 @@ async def run_news_ingest_job(
     result.unified_item_count = len(unified_items)
     result.items = unified_items
 
+    store = operational_store or create_operational_store(config)
+    records = await build_operational_records(
+        unified_items,
+        config=config,
+        operational_store=store,
+    )
+    store.upsert_records(
+        config.dataset_name.value,
+        [record.model_dump(mode="json") for record in records],
+    )
+    privacy_counts = summarize_privacy_mix(records)
+    if privacy_counts:
+        risk_summary = ", ".join(
+            f"{risk.value}:{count}" for risk, count in sorted(privacy_counts.items(), key=lambda item: item[0].value)
+        )
+        result.warnings.append(f"privacy_risk_distribution={risk_summary}")
+
     mark_seen(unified_items, seen_store)
     result.seen_count_after = seen_store.count
     return result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
@@ -246,34 +281,89 @@ async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
     return await run_news_ingest_job(ingest_config, config_path=None, days_override=days)
 
 
+async def run_news_items_release_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    """Build and publish a metadata-only release bundle for news_items."""
+    del days_override
+    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
+    store = operational_store or create_operational_store(config)
+    builder = NewsItemsReleaseBuilder(config=config)
+    rows = store.fetch_records(config.dataset_name.value)
+    manifest = builder.build_release_bundle(
+        publication_dir=config.state_paths.publication_dir,
+        rows=rows,
+    )
+    published_targets = publish_release_bundle(
+        config=config,
+        release_dir=config.state_paths.publication_dir / manifest.release_version,
+        manifest=manifest,
+    )
+    result.release_manifest = manifest.model_dump(mode="json")
+    result.unified_item_count = manifest.row_count
+    if published_targets:
+        result.warnings.append(f"published_targets={','.join(published_targets)}")
+        public_ids = [
+            row.id for row in select_releasable_records(rows, release_version=manifest.release_version)
+        ]
+        store.mark_publication_state(
+            config.dataset_name.value,
+            public_ids,
+            "published",
+        )
+    else:
+        result.warnings.append("No publication targets configured; built release bundle only.")
+    return result.finish(f"release built for {manifest.row_count} public row(s)")
+
+
+async def run_news_items_backup_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    """Upload the latest release bundle to configured backup targets."""
+    del days_override
+    del operational_store
+    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
+    manifest = execute_latest_backup(config, publication_root=release_publication_dir(config))
+    result.backup_manifest = manifest.model_dump(mode="json")
+    if not manifest.targets:
+        result.warnings.append("No backup targets configured.")
+    return result.finish(f"backup completed for {len(manifest.targets)} target(s)")
+
+
 async def run_scaffolded_release_job(
     config: Config,
     config_path: Path | None = None,
     days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
 ) -> RunSnapshot:
-    """Emit a scaffold run result for the future release job."""
-    del days_override
-    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
-    builder = NullReleaseBuilder()
-    manifest = builder.build_manifest(config.dataset_name, config.state_paths.publication_dir)
-    result.release_manifest = manifest.model_dump(mode="json")
-    result.warnings.append("Release generation is scaffolded but not implemented in Phase A")
-    return result.finish("release job scaffold executed")
+    """Backward-compatible alias for the Phase B release job."""
+    return await run_news_items_release_job(
+        config,
+        config_path=config_path,
+        days_override=days_override,
+        operational_store=operational_store,
+    )
 
 
 async def run_scaffolded_backup_job(
     config: Config,
     config_path: Path | None = None,
     days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
 ) -> RunSnapshot:
-    """Emit a scaffold run result for the future backup job."""
-    del days_override
-    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
-    executor = NullBackupExecutor()
-    manifest = executor.build_manifest(config.dataset_name, config.state_paths.state_root)
-    result.backup_manifest = manifest.model_dump(mode="json")
-    result.warnings.append("Backup execution is scaffolded but not implemented in Phase A")
-    return result.finish("backup job scaffold executed")
+    """Backward-compatible alias for the Phase B backup job."""
+    return await run_news_items_backup_job(
+        config,
+        config_path=config_path,
+        days_override=days_override,
+        operational_store=operational_store,
+    )
 
 
 async def run_job_async(
@@ -286,8 +376,9 @@ async def run_job_async(
     """Dispatch a dataset/job run through the registry."""
     ensure_default_jobs_registered()
     handler = require_job_handler(config.dataset_name, config.job_name)
-    result = await handler(config, config_path, days_override)
-    (operational_store or NullOperationalStore()).write_run_metadata(result)
+    store = operational_store or create_operational_store(config)
+    result = await handler(config, config_path, days_override, store)
+    store.write_run_metadata(result)
     return result
 
 
@@ -317,9 +408,9 @@ def _run_job_from_config(
 
     update: dict[str, object] = {}
     if dataset_name is not None:
-        update["dataset_name"] = dataset_name
+        update["dataset_name"] = DatasetName(dataset_name)
     if job_name is not None:
-        update["job_name"] = job_name
+        update["job_name"] = JobName(job_name)
     if update:
         config = config.model_copy(update=update)
 

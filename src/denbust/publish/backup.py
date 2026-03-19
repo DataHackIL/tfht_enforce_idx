@@ -1,4 +1,4 @@
-"""Backup scaffolding for future remote backup targets."""
+"""Backup models and interfaces for dataset backup execution."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ class BackupTarget(BaseModel):
     name: str
     kind: str
     location: str
+    status: str = "pending"
+    uploaded_files: list[str] = Field(default_factory=list)
 
 
 class BackupManifest(BaseModel):
@@ -24,6 +26,7 @@ class BackupManifest(BaseModel):
 
     dataset_name: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    release_version: str | None = None
     targets: list[BackupTarget] = Field(default_factory=list)
     notes: str | None = None
 

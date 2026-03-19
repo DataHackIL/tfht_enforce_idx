@@ -1,4 +1,4 @@
-# Scaffolded release configuration for the news_items dataset
+# Release configuration for the news_items dataset
 name: news-items-release
 dataset_name: news_items
 job_name: release
@@ -9,3 +9,12 @@ output:
 
 store:
   state_root: data
+
+operational:
+  provider: supabase
+
+release:
+  schema_version: news_items-v1
+  include_csv: true
+  rights_policy_version: news_items-v1
+  privacy_policy_version: news_items-v1

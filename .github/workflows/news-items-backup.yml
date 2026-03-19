@@ -1,6 +1,8 @@
 name: news-items-backup
 
 on:
+  schedule:
+    - cron: "45 4 * * 0"
   workflow_dispatch:
 
 concurrency:
@@ -40,9 +42,16 @@ jobs:
           python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run scaffolded backup job
+      - name: Run backup job
         env:
           DENBUST_STATE_ROOT: state_repo
+          DENBUST_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DENBUST_DRIVE_SERVICE_ACCOUNT_JSON }}
+          DENBUST_DRIVE_FOLDER_ID: ${{ secrets.DENBUST_DRIVE_FOLDER_ID }}
+          DENBUST_OBJECT_STORE_BUCKET: ${{ secrets.DENBUST_OBJECT_STORE_BUCKET }}
+          DENBUST_OBJECT_STORE_PREFIX: ${{ secrets.DENBUST_OBJECT_STORE_PREFIX }}
+          DENBUST_OBJECT_STORE_ENDPOINT_URL: ${{ secrets.DENBUST_OBJECT_STORE_ENDPOINT_URL }}
+          DENBUST_OBJECT_STORE_ACCESS_KEY_ID: ${{ secrets.DENBUST_OBJECT_STORE_ACCESS_KEY_ID }}
+          DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY: ${{ secrets.DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY }}
         run: denbust backup --dataset ${{ env.DATASET_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
 
       - name: Commit and push backup state changes
@@ -68,5 +77,5 @@ jobs:
             exit 0
           fi
 
-          git -C state_repo commit -m "chore(state): update backup scaffold snapshot"
+          git -C state_repo commit -m "chore(state): update news_items backup outputs"
           git -C state_repo push

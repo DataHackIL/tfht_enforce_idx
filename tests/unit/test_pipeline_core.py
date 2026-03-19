@@ -590,8 +590,8 @@ class TestRunPipeline:
         run_backup(config_path=Path("agents/backup/news_items.yaml"), dataset_name="news_items")
 
         out = capsys.readouterr().out
-        assert "release job scaffold executed" in out
-        assert "backup job scaffold executed" in out
+        assert "release built for 0 public row(s)" in out
+        assert "backup completed for 0 target(s)" in out
         assert len(list((tmp_path / "runs").glob("*.json"))) == 2
 
     def test_run_job_wrapper_delegates_to_generic_runner(

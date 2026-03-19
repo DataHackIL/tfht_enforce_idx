@@ -48,6 +48,8 @@ jobs:
       - name: Run weekly scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
+          DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
           DENBUST_EMAIL_SMTP_HOST: ${{ secrets.DENBUST_EMAIL_SMTP_HOST }}
           DENBUST_EMAIL_SMTP_PORT: ${{ secrets.DENBUST_EMAIL_SMTP_PORT }}
           DENBUST_EMAIL_SMTP_USERNAME: ${{ secrets.DENBUST_EMAIL_SMTP_USERNAME }}

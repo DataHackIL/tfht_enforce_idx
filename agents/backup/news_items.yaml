@@ -1,4 +1,4 @@
-# Scaffolded backup configuration for the news_items dataset
+# Backup configuration for the news_items dataset
 name: news-items-backup
 dataset_name: news_items
 job_name: backup
@@ -9,3 +9,10 @@ output:
 
 store:
   state_root: data
+  publication_dir: data/news_items/release/publication
+
+backup:
+  google_drive:
+    enabled: false
+  object_storage:
+    enabled: false
