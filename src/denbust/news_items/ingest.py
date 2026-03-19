@@ -65,7 +65,9 @@ async def build_operational_records(
 
     records: list[NewsItemOperationalRecord] = []
     for item in items:
-        enrichment = await enricher.enrich(item) if enricher is not None else fallback_enrichment(item)
+        enrichment = (
+            await enricher.enrich(item) if enricher is not None else fallback_enrichment(item)
+        )
         rule_risk, rule_reason = infer_privacy_risk(_combined_privacy_input(item))
         privacy_risk = merge_privacy_risk(enrichment.privacy_risk_level, rule_risk)
         privacy_reason = rule_reason or enrichment.privacy_reason

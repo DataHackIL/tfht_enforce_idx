@@ -183,7 +183,9 @@ class _FakeClient:
     def request(self, method: str, url: str, **kwargs: object) -> _FakeResponse:
         self.calls.append({"method": method, "url": url, **kwargs})
         if url.endswith("/suppression_rules"):
-            return _FakeResponse([{"dataset_name": "news_items", "suppression_reason": "x", "active": True}])
+            return _FakeResponse(
+                [{"dataset_name": "news_items", "suppression_reason": "x", "active": True}]
+            )
         return _FakeResponse([])
 
 

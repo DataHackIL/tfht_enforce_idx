@@ -261,7 +261,8 @@ async def run_news_ingest_job(
     privacy_counts = summarize_privacy_mix(records)
     if privacy_counts:
         risk_summary = ", ".join(
-            f"{risk.value}:{count}" for risk, count in sorted(privacy_counts.items(), key=lambda item: item[0].value)
+            f"{risk.value}:{count}"
+            for risk, count in sorted(privacy_counts.items(), key=lambda item: item[0].value)
         )
         result.warnings.append(f"privacy_risk_distribution={risk_summary}")
 
@@ -307,7 +308,8 @@ async def run_news_items_release_job(
     if published_targets:
         result.warnings.append(f"published_targets={','.join(published_targets)}")
         public_ids = [
-            row.id for row in select_releasable_records(rows, release_version=manifest.release_version)
+            row.id
+            for row in select_releasable_records(rows, release_version=manifest.release_version)
         ]
         store.mark_publication_state(
             config.dataset_name.value,

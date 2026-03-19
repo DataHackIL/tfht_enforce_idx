@@ -90,7 +90,9 @@ def _schema_markdown() -> str:
             rendered_type = json.dumps(field_type, ensure_ascii=False)
         else:
             rendered_type = str(field_type)
-        lines.append(f"| {field_name} | {rendered_type} | {'yes' if field_name in required else 'no'} |")
+        lines.append(
+            f"| {field_name} | {rendered_type} | {'yes' if field_name in required else 'no'} |"
+        )
     lines.append("")
     lines.append("Public exports are metadata-only and intentionally exclude article full text.")
     return "\n".join(lines) + "\n"
@@ -157,22 +159,30 @@ class NewsItemsReleaseBuilder(ReleaseBuilder):
         if public_rows:
             newest = max(row.publication_datetime for row in public_rows).astimezone(UTC)
             oldest = min(row.publication_datetime for row in public_rows).astimezone(UTC)
-            manifest.source_coverage_window = f"{oldest.date().isoformat()}..{newest.date().isoformat()}"
+            manifest.source_coverage_window = (
+                f"{oldest.date().isoformat()}..{newest.date().isoformat()}"
+            )
         else:
             manifest.warnings.append("Release contains zero publicly releasable rows.")
 
         artifacts: list[ReleaseArtifact] = []
         parquet_path = output_dir / "news_items.parquet"
         self._write_parquet(public_rows, parquet_path)
-        artifacts.append(_artifact_for_path(parquet_path, fmt=ReleaseFormat.PARQUET, row_count=len(public_rows)))
+        artifacts.append(
+            _artifact_for_path(parquet_path, fmt=ReleaseFormat.PARQUET, row_count=len(public_rows))
+        )
 
         if self._config.release.include_csv:
             csv_path = output_dir / "news_items.csv"
             self._write_csv(public_rows, csv_path)
-            artifacts.append(_artifact_for_path(csv_path, fmt=ReleaseFormat.CSV, row_count=len(public_rows)))
+            artifacts.append(
+                _artifact_for_path(csv_path, fmt=ReleaseFormat.CSV, row_count=len(public_rows))
+            )
 
         schema_json_path = output_dir / "SCHEMA.json"
-        schema_json_path.write_text(json.dumps(_schema_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        schema_json_path.write_text(
+            json.dumps(_schema_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         artifacts.append(_artifact_for_path(schema_json_path, fmt=ReleaseFormat.JSON))
 
         schema_md_path = output_dir / "SCHEMA.md"
@@ -186,12 +196,19 @@ class NewsItemsReleaseBuilder(ReleaseBuilder):
         artifacts.append(_artifact_for_path(readme_path, fmt=ReleaseFormat.MARKDOWN))
 
         manifest_path = output_dir / "MANIFEST.json"
-        manifest_path.write_text(json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
         artifacts.append(_artifact_for_path(manifest_path, fmt=ReleaseFormat.JSON))
 
         checksums_path = output_dir / "checksums.txt"
         checksums_path.write_text(
-            "".join(f"{artifact.sha256}  {artifact.path.name}\n" for artifact in artifacts if artifact.sha256),
+            "".join(
+                f"{artifact.sha256}  {artifact.path.name}\n"
+                for artifact in artifacts
+                if artifact.sha256
+            ),
             encoding="utf-8",
         )
         artifacts.append(_artifact_for_path(checksums_path, fmt=ReleaseFormat.TEXT))
@@ -219,7 +236,9 @@ class NewsItemsReleaseBuilder(ReleaseBuilder):
             import pyarrow as pa  # type: ignore[import-untyped]
             import pyarrow.parquet as pq  # type: ignore[import-untyped]
         except ImportError as exc:
-            raise RuntimeError("pyarrow is required to build the news_items Parquet release.") from exc
+            raise RuntimeError(
+                "pyarrow is required to build the news_items Parquet release."
+            ) from exc
 
         schema = pa.schema(
             [

@@ -35,7 +35,9 @@ class KagglePublisher:
             "subtitle": "Metadata-only public release",
             "licenses": [{"name": "CC-BY-4.0"}],
         }
-        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        metadata_path.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
 
         previous_username = os.environ.get("KAGGLE_USERNAME")
         previous_key = os.environ.get("KAGGLE_KEY")
@@ -60,7 +62,9 @@ class KagglePublisher:
             else:
                 os.environ["KAGGLE_KEY"] = previous_key
 
-        logger.info("Published release %s to Kaggle dataset %s", manifest.release_version, dataset_slug)
+        logger.info(
+            "Published release %s to Kaggle dataset %s", manifest.release_version, dataset_slug
+        )
         return dataset_slug
 
 
