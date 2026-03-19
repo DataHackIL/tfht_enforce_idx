@@ -750,7 +750,9 @@ class TestRunPipeline:
         config = Config(dataset_name="news_items", job_name="release")
         monkeypatch.setattr("denbust.pipeline.ensure_default_jobs_registered", lambda: None)
         monkeypatch.setattr("denbust.pipeline.require_job_handler", lambda *_args: fake_handler)
-        monkeypatch.setattr("denbust.pipeline.create_operational_store", lambda _config: FakeStore())
+        monkeypatch.setattr(
+            "denbust.pipeline.create_operational_store", lambda _config: FakeStore()
+        )
 
         result = await run_job_async(config)
 
