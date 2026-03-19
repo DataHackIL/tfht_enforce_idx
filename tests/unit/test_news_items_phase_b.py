@@ -251,7 +251,9 @@ class _FakeDriveFiles:
 
     def list(self, **kwargs: object) -> _FakeDriveExecutable:
         self.list_calls.append(dict(kwargs))
-        payload = {"files": [{"id": "existing"}]} if "MANIFEST" in str(kwargs.get("q")) else {"files": []}
+        payload = (
+            {"files": [{"id": "existing"}]} if "MANIFEST" in str(kwargs.get("q")) else {"files": []}
+        )
         return _FakeDriveExecutable(payload)
 
     def update(self, **kwargs: object) -> _FakeDriveExecutable:
@@ -409,7 +411,9 @@ async def test_news_item_enricher_handles_text_blocks_and_errors(
 
     failing_enricher = NewsItemEnricher.__new__(NewsItemEnricher)
     failing_enricher._model = "test-model"
-    failing_enricher._client = SimpleNamespace(messages=_FakeAnthropicMessages(RuntimeError("boom")))
+    failing_enricher._client = SimpleNamespace(
+        messages=_FakeAnthropicMessages(RuntimeError("boom"))
+    )
 
     fallback = await failing_enricher.enrich(item)
 
@@ -513,7 +517,10 @@ def test_release_builder_raises_clear_error_when_pyarrow_missing(
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     with pytest.raises(RuntimeError, match="pyarrow is required"):
-        builder._write_parquet([build_record().to_public_record(release_version="2026-03-19")], tmp_path / "rows.parquet")
+        builder._write_parquet(
+            [build_record().to_public_record(release_version="2026-03-19")],
+            tmp_path / "rows.parquet",
+        )
 
 
 def test_find_latest_release_dir_errors_when_missing(tmp_path: Path) -> None:
@@ -576,7 +583,10 @@ def test_google_drive_uploader_updates_existing_and_creates_new_files(
     assert uploaded == ["MANIFEST.json", "news_items.csv"]
     assert len(fake_service.files().update_calls) == 1
     assert len(fake_service.files().create_calls) == 1
-    assert "\\'" in fake_service.files().list_calls[0]["q"] or "MANIFEST" in fake_service.files().list_calls[0]["q"]
+    assert (
+        "\\'" in fake_service.files().list_calls[0]["q"]
+        or "MANIFEST" in fake_service.files().list_calls[0]["q"]
+    )
 
 
 def test_object_storage_uploader_requires_credentials(tmp_path: Path) -> None:
@@ -619,7 +629,9 @@ def test_execute_latest_backup_with_all_targets(
 ) -> None:
     builder = NewsItemsReleaseBuilder(config=Config(job_name="release"))
     record = build_record()
-    manifest = builder.build_release_bundle(publication_dir=tmp_path, rows=[record.model_dump(mode="json")])
+    manifest = builder.build_release_bundle(
+        publication_dir=tmp_path, rows=[record.model_dump(mode="json")]
+    )
 
     monkeypatch.setattr(
         "denbust.news_items.backup.GoogleDriveLatestBackupUploader.upload",
@@ -688,7 +700,10 @@ def test_kaggle_publisher_authenticates_and_restores_env(
 
     assert slug == "owner/news-items"
     assert calls[0][0] == "authenticate"
-    assert json.loads((release_dir / "dataset-metadata.json").read_text(encoding="utf-8"))["id"] == "owner/news-items"
+    assert (
+        json.loads((release_dir / "dataset-metadata.json").read_text(encoding="utf-8"))["id"]
+        == "owner/news-items"
+    )
     assert os.environ["KAGGLE_USERNAME"] == "previous-user"
     assert os.environ["KAGGLE_KEY"] == "previous-key"
 
@@ -806,7 +821,9 @@ def test_publish_release_bundle_dispatches_all_configured_targets(
     assert targets == ["kaggle:owner/news-items", "huggingface:org/news-items"]
 
 
-def test_operational_store_factory_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_operational_store_factory_branches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     none_config = Config(operational={"provider": "none"})
     assert isinstance(create_operational_store(none_config), NullOperationalStore)
 
@@ -844,7 +861,10 @@ def test_operational_store_factory_branches(tmp_path: Path, monkeypatch: pytest.
 def test_local_json_operational_store_misc_branches(tmp_path: Path) -> None:
     store = LocalJsonOperationalStore(tmp_path / "ops")
 
-    assert store.suppression_rules_path("news_items") == tmp_path / "ops" / "news_items_suppression_rules.json"
+    assert (
+        store.suppression_rules_path("news_items")
+        == tmp_path / "ops" / "news_items_suppression_rules.json"
+    )
     store.upsert_records("news_items", [{"summary": "missing identity"}])
     assert store.fetch_records("news_items") == []
 
@@ -929,7 +949,9 @@ async def test_release_publication_dir_and_release_job_mark_published(
         def __init__(self) -> None:
             self.mark_calls: list[tuple[str, list[str], str]] = []
 
-        def fetch_records(self, dataset_name: str, *, limit: int | None = None) -> list[dict[str, Any]]:
+        def fetch_records(
+            self, dataset_name: str, *, limit: int | None = None
+        ) -> list[dict[str, Any]]:
             del dataset_name, limit
             return [{"id": "row-1"}]
 
@@ -955,13 +977,17 @@ async def test_release_publication_dir_and_release_job_mark_published(
         def __init__(self, *, config: Config) -> None:
             del config
 
-        def build_release_bundle(self, *, publication_dir: Path, rows: list[dict[str, Any]]) -> ReleaseManifest:
+        def build_release_bundle(
+            self, *, publication_dir: Path, rows: list[dict[str, Any]]
+        ) -> ReleaseManifest:
             del publication_dir, rows
             return manifest
 
     fake_row = SimpleNamespace(id="row-1")
     monkeypatch.setattr("denbust.pipeline.NewsItemsReleaseBuilder", FakeBuilder)
-    monkeypatch.setattr("denbust.pipeline.publish_release_bundle", lambda **_kwargs: ["kaggle:owner/news"])
+    monkeypatch.setattr(
+        "denbust.pipeline.publish_release_bundle", lambda **_kwargs: ["kaggle:owner/news"]
+    )
 
     def fake_select_releasable_records(
         rows: list[dict[str, Any]], *, release_version: str
@@ -969,7 +995,9 @@ async def test_release_publication_dir_and_release_job_mark_published(
         del rows, release_version
         return [fake_row]
 
-    monkeypatch.setattr("denbust.pipeline.select_releasable_records", fake_select_releasable_records)
+    monkeypatch.setattr(
+        "denbust.pipeline.select_releasable_records", fake_select_releasable_records
+    )
 
     result = await run_news_items_release_job(release_config, operational_store=store)
 
