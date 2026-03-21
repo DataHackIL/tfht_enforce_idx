@@ -353,9 +353,7 @@ class TestDailyReviewClients:
                         [{"body": ""}],
                         link='malformed-link-entry, <https://api.github.com/repositories/1/issues?page=3>; rel="next"',
                     )
-                return FakeResponse(
-                    [{"body": "<!-- denbust-review:page-three-problem -->\nbody"}]
-                )
+                return FakeResponse([{"body": "<!-- denbust-review:page-three-problem -->\nbody"}])
 
             def close(self) -> None:
                 return None
