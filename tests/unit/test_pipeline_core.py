@@ -402,7 +402,8 @@ class TestRunPipelineAsync:
         classifier.classify_batch = AsyncMock(
             return_value=[build_classified_article("https://example.com/rejected", relevant=False)]
         )
-        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
+        source = type("SourceStub", (), {"name": "test"})()
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [source])
         monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
         monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
@@ -416,7 +417,13 @@ class TestRunPipelineAsync:
 
         assert result.result_summary == "no relevant articles found"
         assert result.debug_payload is not None
+        assert result.debug_payload["schema_version"] == "news_items.ingest.debug.v1"
         assert result.debug_payload["counts"]["unseen_article_count"] == 1
+        assert result.debug_payload["classifier_summary"]["rejected_article_count"] == 1
+        assert result.debug_payload["problems"]["all_unseen_rejected"] is True
+        assert "all_unseen_rejected" in result.debug_payload["suspicions"]
+        assert result.debug_payload["source_summaries"][0]["source_name"] == "test"
+        assert result.debug_payload["source_summaries"][0]["raw_article_count"] == 1
         rejected = result.debug_payload["rejected_articles"]
         assert len(rejected) == 1
         assert rejected[0]["canonical_url"] == "https://example.com/rejected"
@@ -569,8 +576,21 @@ class TestRunPipeline:
         ).finish("no relevant articles found")
         snapshot.set_debug_payload(
             {
-                "rejected_articles": [{"title": "כתבה", "relevant": False}],
+                "schema_version": "news_items.ingest.debug.v1",
+                "run_timestamp": "2026-03-15T04:00:00Z",
+                "dataset_name": "news_items",
+                "job_name": "ingest",
+                "config_name": config.name,
+                "result_summary": "no relevant articles found",
                 "counts": {"unseen_article_count": 1},
+                "workflow": {},
+                "source_summaries": [],
+                "classifier_summary": {"rejected_article_count": 1},
+                "problems": {"all_unseen_rejected": True},
+                "suspicions": ["all_unseen_rejected"],
+                "warnings": [],
+                "errors": [],
+                "rejected_articles": [{"title": "כתבה", "relevant": False}],
             }
         )
 
@@ -587,9 +607,13 @@ class TestRunPipeline:
 
         assert result is snapshot
         debug_path = config.state_paths.logs_dir / "2026-03-15T04-00-00-000000Z.json"
+        summary_path = config.state_paths.logs_dir / "2026-03-15T04-00-00-000000Z.summary.json"
         assert debug_path.exists()
+        assert summary_path.exists()
         content = debug_path.read_text(encoding="utf-8")
         assert '"rejected_articles": [' in content
+        summary_content = summary_path.read_text(encoding="utf-8")
+        assert '"suspicions": [' in summary_content
 
     def test_run_pipeline_exits_on_invalid_config(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]

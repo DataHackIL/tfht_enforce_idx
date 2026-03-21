@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,7 +33,11 @@ from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
 from denbust.sources.rss import RSSSource
 from denbust.sources.walla import create_walla_source
-from denbust.store.run_snapshots import write_run_debug_log, write_run_snapshot
+from denbust.store.run_snapshots import (
+    write_run_debug_log,
+    write_run_debug_summary,
+    write_run_snapshot,
+)
 from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
@@ -216,9 +221,158 @@ def _serialize_unified_item(item: UnifiedItem) -> dict[str, object]:
     }
 
 
+def _source_name_from_error(error: str) -> str | None:
+    """Extract a source name from the standard `source: message` error format."""
+    source_name, separator, _message = error.partition(":")
+    if not separator:
+        return None
+    source_name = source_name.strip()
+    return source_name or None
+
+
+def _build_source_summaries(
+    *,
+    source_names: list[str],
+    raw_articles: list[RawArticle],
+    errors: list[str],
+) -> list[dict[str, object]]:
+    """Summarize per-source outcomes for machine-readable diagnostics."""
+    article_counts: dict[str, int] = {}
+    for article in raw_articles:
+        article_counts[article.source_name] = article_counts.get(article.source_name, 0) + 1
+
+    error_map: dict[str, list[str]] = {}
+    for error in errors:
+        source_name = _source_name_from_error(error)
+        if source_name is None:
+            continue
+        error_map.setdefault(source_name, []).append(error)
+
+    return [
+        {
+            "source_name": source_name,
+            "raw_article_count": article_counts.get(source_name, 0),
+            "had_error": source_name in error_map,
+            "error_messages": error_map.get(source_name, []),
+            "returned_zero_results": article_counts.get(source_name, 0) == 0
+            and source_name not in error_map,
+        }
+        for source_name in source_names
+    ]
+
+
+def _build_classifier_summary(
+    *,
+    unseen_articles: list[RawArticle],
+    classified_articles: list[ClassifiedArticle],
+) -> dict[str, object]:
+    """Summarize classifier outputs and anomalies."""
+    rejected_by_category: dict[str, int] = {}
+    relevant_count = 0
+    rejected_count = 0
+    for article in classified_articles:
+        if article.classification.relevant:
+            relevant_count += 1
+            continue
+        rejected_count += 1
+        category = article.classification.category.value
+        rejected_by_category[category] = rejected_by_category.get(category, 0) + 1
+
+    return {
+        "unseen_article_count": len(unseen_articles),
+        "classified_article_count": len(classified_articles),
+        "relevant_article_count": relevant_count,
+        "rejected_article_count": rejected_count,
+        "rejected_by_category": rejected_by_category,
+        "classification_output_anomaly": len(classified_articles) != len(unseen_articles),
+    }
+
+
+def _build_problem_summary(
+    *,
+    source_summaries: list[dict[str, object]],
+    classifier_summary: dict[str, object],
+    result: RunSnapshot,
+) -> dict[str, object]:
+    """Build compact problem buckets for downstream automation."""
+    source_errors = [
+        summary["source_name"]
+        for summary in source_summaries
+        if bool(summary.get("had_error"))
+    ]
+    zero_result_sources = [
+        summary["source_name"]
+        for summary in source_summaries
+        if bool(summary.get("returned_zero_results"))
+    ]
+    return {
+        "source_errors": source_errors,
+        "zero_result_sources": zero_result_sources,
+        "all_unseen_rejected": bool(result.unseen_article_count and result.relevant_article_count == 0),
+        "no_relevant_items": result.relevant_article_count == 0,
+        "classification_output_anomaly": bool(
+            classifier_summary.get("classification_output_anomaly", False)
+        ),
+    }
+
+
+def _build_suspicions(
+    *,
+    source_summaries: list[dict[str, object]],
+    classifier_summary: dict[str, object],
+    result: RunSnapshot,
+) -> list[str]:
+    """Build a stable list of suspicion signals for automated triage."""
+    suspicions: list[str] = []
+    source_errors = [
+        summary["source_name"]
+        for summary in source_summaries
+        if bool(summary.get("had_error"))
+    ]
+    zero_result_sources = [
+        summary["source_name"]
+        for summary in source_summaries
+        if bool(summary.get("returned_zero_results"))
+    ]
+    if source_errors:
+        suspicions.append("source_errors_present")
+    if len(source_errors) >= max(1, len(source_summaries) // 2):
+        suspicions.append("source_error_rate_high")
+    if zero_result_sources:
+        suspicions.append("sources_returned_zero_results")
+    if result.unseen_article_count and result.relevant_article_count == 0:
+        suspicions.append("all_unseen_rejected")
+    if result.relevant_article_count == 0:
+        suspicions.append("no_relevant_items")
+    if bool(classifier_summary.get("classification_output_anomaly", False)):
+        suspicions.append("classification_output_anomaly")
+    return suspicions
+
+
+def _workflow_metadata() -> dict[str, object]:
+    """Collect lightweight workflow metadata when running under GitHub Actions."""
+    run_id = os.getenv("GITHUB_RUN_ID")
+    repository = os.getenv("GITHUB_REPOSITORY")
+    server_url = os.getenv("GITHUB_SERVER_URL")
+    run_url: str | None = None
+    if run_id and repository and server_url:
+        run_url = f"{server_url}/{repository}/actions/runs/{run_id}"
+
+    return {
+        "workflow_name": os.getenv("GITHUB_WORKFLOW"),
+        "job_name": os.getenv("GITHUB_JOB"),
+        "run_id": run_id,
+        "run_attempt": os.getenv("GITHUB_RUN_ATTEMPT"),
+        "repository": repository,
+        "ref_name": os.getenv("GITHUB_REF_NAME"),
+        "run_url": run_url,
+    }
+
+
 def _build_ingest_debug_payload(
     *,
     result: RunSnapshot,
+    source_names: list[str],
     raw_articles: list[RawArticle],
     unseen_articles: list[RawArticle],
     classified_articles: list[ClassifiedArticle],
@@ -231,7 +385,22 @@ def _build_ingest_debug_payload(
     rejected_articles = [
         article for article in classified_articles if not article.classification.relevant
     ]
+    source_summaries = _build_source_summaries(
+        source_names=source_names,
+        raw_articles=raw_articles,
+        errors=result.errors,
+    )
+    classifier_summary = _build_classifier_summary(
+        unseen_articles=unseen_articles,
+        classified_articles=classified_articles,
+    )
+    problems = _build_problem_summary(
+        source_summaries=source_summaries,
+        classifier_summary=classifier_summary,
+        result=result,
+    )
     return {
+        "schema_version": "news_items.ingest.debug.v1",
         "run_timestamp": result.run_timestamp.isoformat(),
         "dataset_name": result.dataset_name.value,
         "job_name": result.job_name.value,
@@ -239,6 +408,7 @@ def _build_ingest_debug_payload(
         "config_path": result.config_path,
         "days_searched": result.days_searched,
         "result_summary": result.result_summary,
+        "workflow": _workflow_metadata(),
         "counts": {
             "source_count": result.source_count,
             "raw_article_count": result.raw_article_count,
@@ -248,6 +418,14 @@ def _build_ingest_debug_payload(
             "seen_count_before": result.seen_count_before,
             "seen_count_after": result.seen_count_after,
         },
+        "source_summaries": source_summaries,
+        "classifier_summary": classifier_summary,
+        "problems": problems,
+        "suspicions": _build_suspicions(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        ),
         "warnings": result.warnings,
         "errors": result.errors,
         "raw_articles": [_serialize_raw_article(article) for article in raw_articles],
@@ -283,6 +461,7 @@ async def run_news_ingest_job(
         return result.finish("fatal: missing anthropic api key")
 
     sources = create_sources(config)
+    source_names = [source.name for source in sources]
     result.source_count = len(sources)
     if not sources:
         logger.warning("No sources configured")
@@ -316,11 +495,12 @@ async def run_news_ingest_job(
         result.seen_count_after = seen_store.count
         result.finish("no articles found")
         result.set_debug_payload(
-            _build_ingest_debug_payload(
-                result=result,
-                raw_articles=all_articles,
-                unseen_articles=unseen_articles,
-                classified_articles=classified_articles,
+                _build_ingest_debug_payload(
+                    result=result,
+                    source_names=source_names,
+                    raw_articles=all_articles,
+                    unseen_articles=unseen_articles,
+                    classified_articles=classified_articles,
                 unified_items=unified_items,
             )
         )
@@ -333,11 +513,12 @@ async def run_news_ingest_job(
         result.seen_count_after = seen_store.count
         result.finish("all fetched articles were already seen")
         result.set_debug_payload(
-            _build_ingest_debug_payload(
-                result=result,
-                raw_articles=all_articles,
-                unseen_articles=unseen_articles,
-                classified_articles=classified_articles,
+                _build_ingest_debug_payload(
+                    result=result,
+                    source_names=source_names,
+                    raw_articles=all_articles,
+                    unseen_articles=unseen_articles,
+                    classified_articles=classified_articles,
                 unified_items=unified_items,
             )
         )
@@ -361,11 +542,12 @@ async def run_news_ingest_job(
         logger.info("No relevant articles found")
         result.seen_count_after = seen_store.count
         result.set_debug_payload(
-            _build_ingest_debug_payload(
-                result=result.finish("no relevant articles found"),
-                raw_articles=all_articles,
-                unseen_articles=unseen_articles,
-                classified_articles=classified_articles,
+                _build_ingest_debug_payload(
+                    result=result.finish("no relevant articles found"),
+                    source_names=source_names,
+                    raw_articles=all_articles,
+                    unseen_articles=unseen_articles,
+                    classified_articles=classified_articles,
                 unified_items=unified_items,
             )
         )
@@ -397,11 +579,12 @@ async def run_news_ingest_job(
     result.seen_count_after = seen_store.count
     result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
     result.set_debug_payload(
-        _build_ingest_debug_payload(
-            result=result,
-            raw_articles=all_articles,
-            unseen_articles=unseen_articles,
-            classified_articles=classified_articles,
+            _build_ingest_debug_payload(
+                result=result,
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
             unified_items=unified_items,
         )
     )
@@ -613,6 +796,7 @@ def _run_job_from_config(
 
     if result.debug_payload is not None:
         write_run_debug_log(config.state_paths.logs_dir, result, result.debug_payload)
+        write_run_debug_summary(config.state_paths.logs_dir, result, result.debug_payload)
     write_run_snapshot(config.state_paths.runs_dir, result)
 
     if config.job_name != JobName.INGEST:

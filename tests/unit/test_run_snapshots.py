@@ -11,6 +11,7 @@ from denbust.store.run_snapshots import (
     RunSnapshot,
     snapshot_filename,
     write_run_debug_log,
+    write_run_debug_summary,
     write_run_snapshot,
 )
 
@@ -92,3 +93,40 @@ class TestRunSnapshots:
         content = path.read_text(encoding="utf-8")
         assert '"rejected_articles": [' in content
         assert '"relevant": false' in content
+
+    def test_write_run_debug_summary_creates_compact_machine_json(self, tmp_path: Path) -> None:
+        """Compact run summaries should retain only automation-oriented fields."""
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            config_name="enforcement-news",
+        )
+
+        path = write_run_debug_summary(
+            tmp_path / "logs",
+            snapshot,
+            {
+                "schema_version": "news_items.ingest.debug.v1",
+                "run_timestamp": "2026-03-15T04:00:00Z",
+                "dataset_name": "news_items",
+                "job_name": "ingest",
+                "config_name": "enforcement-news",
+                "result_summary": "no relevant articles found",
+                "counts": {"unseen_article_count": 2},
+                "workflow": {"run_id": "123"},
+                "source_summaries": [{"source_name": "mako", "raw_article_count": 0}],
+                "classifier_summary": {"rejected_article_count": 2},
+                "problems": {"all_unseen_rejected": True},
+                "suspicions": ["all_unseen_rejected"],
+                "warnings": [],
+                "errors": [],
+                "rejected_articles": [{"title": "כתבה"}],
+            },
+        )
+
+        assert path.exists()
+        content = path.read_text(encoding="utf-8")
+        assert '"schema_version": "news_items.ingest.debug.v1"' in content
+        assert '"suspicions": [' in content
+        assert '"rejected_articles"' not in content
