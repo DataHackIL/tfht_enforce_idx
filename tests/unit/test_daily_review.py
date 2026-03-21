@@ -246,6 +246,7 @@ class TestDailyReviewClients:
         )
         reviewer = AnthropicDailyReviewer(api_key="test", model="model")
         assert reviewer.review(artifacts) == ReviewResult()
+        assert "non-list 'issues' payload" in capsys.readouterr().out
 
         class FakeClientNoText:
             def __init__(self, **_: object) -> None:

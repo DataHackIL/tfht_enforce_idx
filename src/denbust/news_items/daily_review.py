@@ -225,6 +225,7 @@ class AnthropicDailyReviewer:
             return ReviewResult()
         issues_payload = payload.get("issues", [])
         if not isinstance(issues_payload, list):
+            print("Daily review returned a non-list 'issues' payload; treating as no issues.")
             return ReviewResult()
 
         issues: list[IssueCandidate] = []
