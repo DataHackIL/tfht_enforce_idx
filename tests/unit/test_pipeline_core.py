@@ -568,7 +568,10 @@ class TestRunPipeline:
             config_name=config.name,
         ).finish("no relevant articles found")
         snapshot.set_debug_payload(
-            {"rejected_articles": [{"title": "כתבה", "relevant": False}], "counts": {"unseen_article_count": 1}}
+            {
+                "rejected_articles": [{"title": "כתבה", "relevant": False}],
+                "counts": {"unseen_article_count": 1},
+            }
         )
 
         monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())

@@ -255,8 +255,12 @@ def _build_ingest_debug_payload(
         "classified_articles": [
             _serialize_classified_article(article) for article in classified_articles
         ],
-        "relevant_articles": [_serialize_classified_article(article) for article in relevant_articles],
-        "rejected_articles": [_serialize_classified_article(article) for article in rejected_articles],
+        "relevant_articles": [
+            _serialize_classified_article(article) for article in relevant_articles
+        ],
+        "rejected_articles": [
+            _serialize_classified_article(article) for article in rejected_articles
+        ],
         "unified_items": [_serialize_unified_item(item) for item in unified_items],
     }
 
