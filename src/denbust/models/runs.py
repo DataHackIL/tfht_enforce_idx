@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from denbust.data_models import UnifiedItem
 from denbust.models.common import DatasetName, JobName
@@ -37,6 +37,7 @@ class RunSnapshot(BaseModel):
     result_summary: str | None = None
     release_manifest: dict[str, Any] | None = None
     backup_manifest: dict[str, Any] | None = None
+    _debug_payload: dict[str, Any] | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _normalize_timestamps(self) -> RunSnapshot:
@@ -52,4 +53,14 @@ class RunSnapshot(BaseModel):
         self.finished_at = datetime.now(UTC)
         if result_summary is not None:
             self.result_summary = result_summary
+        return self
+
+    @property
+    def debug_payload(self) -> dict[str, Any] | None:
+        """Optional non-public diagnostic payload for state-repo logging."""
+        return self._debug_payload
+
+    def set_debug_payload(self, payload: dict[str, Any] | None) -> RunSnapshot:
+        """Attach a non-serialized debug payload to the snapshot."""
+        self._debug_payload = payload
         return self

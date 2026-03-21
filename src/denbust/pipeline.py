@@ -32,7 +32,7 @@ from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
 from denbust.sources.rss import RSSSource
 from denbust.sources.walla import create_walla_source
-from denbust.store.run_snapshots import write_run_snapshot
+from denbust.store.run_snapshots import write_run_debug_log, write_run_snapshot
 from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
@@ -173,6 +173,94 @@ def _build_run_snapshot(
     )
 
 
+def _serialize_raw_article(article: RawArticle) -> dict[str, object]:
+    """Render a raw fetched article for internal debug logs."""
+    return {
+        "source_name": article.source_name,
+        "url": str(article.url),
+        "canonical_url": canonicalize_news_url(str(article.url)),
+        "title": article.title,
+        "snippet": article.snippet,
+        "publication_datetime": article.date.isoformat(),
+    }
+
+
+def _serialize_classified_article(article: ClassifiedArticle) -> dict[str, object]:
+    """Render a classified article for internal debug logs."""
+    return {
+        **_serialize_raw_article(article.article),
+        "relevant": article.classification.relevant,
+        "category": article.classification.category.value,
+        "sub_category": (
+            article.classification.sub_category.value
+            if article.classification.sub_category is not None
+            else None
+        ),
+        "confidence": article.classification.confidence,
+    }
+
+
+def _serialize_unified_item(item: UnifiedItem) -> dict[str, object]:
+    """Render a unified item for internal debug logs."""
+    return {
+        "headline": item.headline,
+        "summary": item.summary,
+        "category": item.category.value,
+        "sub_category": item.sub_category.value if item.sub_category is not None else None,
+        "canonical_url": str(item.canonical_url) if item.canonical_url is not None else None,
+        "primary_source_name": item.primary_source_name,
+        "publication_datetime": item.date.isoformat(),
+        "sources": [
+            {"source_name": source.source_name, "url": str(source.url)} for source in item.sources
+        ],
+    }
+
+
+def _build_ingest_debug_payload(
+    *,
+    result: RunSnapshot,
+    raw_articles: list[RawArticle],
+    unseen_articles: list[RawArticle],
+    classified_articles: list[ClassifiedArticle],
+    unified_items: list[UnifiedItem],
+) -> dict[str, object]:
+    """Build a detailed ingest diagnostic log for state-repo inspection."""
+    relevant_articles = [
+        article for article in classified_articles if article.classification.relevant
+    ]
+    rejected_articles = [
+        article for article in classified_articles if not article.classification.relevant
+    ]
+    return {
+        "run_timestamp": result.run_timestamp.isoformat(),
+        "dataset_name": result.dataset_name.value,
+        "job_name": result.job_name.value,
+        "config_name": result.config_name,
+        "config_path": result.config_path,
+        "days_searched": result.days_searched,
+        "result_summary": result.result_summary,
+        "counts": {
+            "source_count": result.source_count,
+            "raw_article_count": result.raw_article_count,
+            "unseen_article_count": result.unseen_article_count,
+            "relevant_article_count": result.relevant_article_count,
+            "unified_item_count": result.unified_item_count,
+            "seen_count_before": result.seen_count_before,
+            "seen_count_after": result.seen_count_after,
+        },
+        "warnings": result.warnings,
+        "errors": result.errors,
+        "raw_articles": [_serialize_raw_article(article) for article in raw_articles],
+        "unseen_articles": [_serialize_raw_article(article) for article in unseen_articles],
+        "classified_articles": [
+            _serialize_classified_article(article) for article in classified_articles
+        ],
+        "relevant_articles": [_serialize_classified_article(article) for article in relevant_articles],
+        "rejected_articles": [_serialize_classified_article(article) for article in rejected_articles],
+        "unified_items": [_serialize_unified_item(item) for item in unified_items],
+    }
+
+
 async def run_news_ingest_job(
     config: Config,
     config_path: Path | None = None,
@@ -211,6 +299,9 @@ async def run_news_ingest_job(
         days=days,
         keywords=config.keywords,
     )
+    unseen_articles: list[RawArticle] = []
+    classified_articles: list[ClassifiedArticle] = []
+    unified_items: list[UnifiedItem] = []
     result.raw_article_count = len(all_articles)
     result.errors.extend(source_errors)
     if source_errors:
@@ -219,14 +310,34 @@ async def run_news_ingest_job(
     if not all_articles:
         logger.info("No articles found from any source")
         result.seen_count_after = seen_store.count
-        return result.finish("no articles found")
+        result.finish("no articles found")
+        result.set_debug_payload(
+            _build_ingest_debug_payload(
+                result=result,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
+                unified_items=unified_items,
+            )
+        )
+        return result
 
     unseen_articles = filter_seen(all_articles, seen_store)
     result.unseen_article_count = len(unseen_articles)
     if not unseen_articles:
         logger.info("All articles were already seen")
         result.seen_count_after = seen_store.count
-        return result.finish("all fetched articles were already seen")
+        result.finish("all fetched articles were already seen")
+        result.set_debug_payload(
+            _build_ingest_debug_payload(
+                result=result,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
+                unified_items=unified_items,
+            )
+        )
+        return result
 
     if len(unseen_articles) > config.max_articles:
         warning = (
@@ -237,12 +348,24 @@ async def run_news_ingest_job(
         logger.warning(warning)
         result.warnings.append(warning)
 
-    relevant_articles = await classify_articles(unseen_articles, classifier)
+    classified_articles = await classifier.classify_batch(unseen_articles)
+    relevant_articles = [
+        article for article in classified_articles if article.classification.relevant
+    ]
     result.relevant_article_count = len(relevant_articles)
     if not relevant_articles:
         logger.info("No relevant articles found")
         result.seen_count_after = seen_store.count
-        return result.finish("no relevant articles found")
+        result.set_debug_payload(
+            _build_ingest_debug_payload(
+                result=result.finish("no relevant articles found"),
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
+                unified_items=unified_items,
+            )
+        )
+        return result
 
     unified_items = deduplicate_articles(relevant_articles, deduplicator)
     result.unified_item_count = len(unified_items)
@@ -268,7 +391,17 @@ async def run_news_ingest_job(
 
     mark_seen(unified_items, seen_store)
     result.seen_count_after = seen_store.count
-    return result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
+    result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
+    result.set_debug_payload(
+        _build_ingest_debug_payload(
+            result=result,
+            raw_articles=all_articles,
+            unseen_articles=unseen_articles,
+            classified_articles=classified_articles,
+            unified_items=unified_items,
+        )
+    )
+    return result
 
 
 async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
@@ -474,6 +607,8 @@ def _run_job_from_config(
         output_errors = output_items(result.items, config)
         result.errors.extend(output_errors)
 
+    if result.debug_payload is not None:
+        write_run_debug_log(config.state_paths.logs_dir, result, result.debug_payload)
     write_run_snapshot(config.state_paths.runs_dir, result)
 
     if config.job_name != JobName.INGEST:

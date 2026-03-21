@@ -23,3 +23,13 @@ def write_run_snapshot(runs_dir: Path, snapshot: RunSnapshot) -> Path:
         json.dump(snapshot.model_dump(mode="json"), f, indent=2, ensure_ascii=False)
         f.write("\n")
     return path
+
+
+def write_run_debug_log(logs_dir: Path, snapshot: RunSnapshot, payload: dict[str, object]) -> Path:
+    """Write a detailed diagnostic artifact for a run."""
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    path = logs_dir / snapshot_filename(snapshot.run_timestamp)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return path

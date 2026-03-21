@@ -17,6 +17,7 @@ def test_resolve_state_paths_derives_namespaced_defaults() -> None:
     assert paths.namespace_dir == Path("data/news_items/ingest")
     assert paths.seen_path == Path("data/news_items/ingest/seen.json")
     assert paths.runs_dir == Path("data/news_items/ingest/runs")
+    assert paths.logs_dir == Path("data/news_items/ingest/logs")
     assert paths.publication_dir == Path("data/news_items/ingest/publication")
 
 
@@ -37,4 +38,5 @@ def test_resolve_state_paths_honors_explicit_overrides(tmp_path: Path) -> None:
     assert paths.namespace_dir == Path("data/events/backup")
     assert paths.seen_path == seen_path
     assert paths.runs_dir == runs_dir
+    assert paths.logs_dir == Path("data/events/backup/logs")
     assert paths.publication_dir == publication_dir

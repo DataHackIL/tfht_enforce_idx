@@ -7,7 +7,12 @@ from pydantic import HttpUrl
 
 from denbust.data_models import Category, SourceReference, SubCategory, UnifiedItem
 from denbust.models.common import DatasetName, JobName
-from denbust.store.run_snapshots import RunSnapshot, snapshot_filename, write_run_snapshot
+from denbust.store.run_snapshots import (
+    RunSnapshot,
+    snapshot_filename,
+    write_run_debug_log,
+    write_run_snapshot,
+)
 
 
 def build_item() -> UnifiedItem:
@@ -67,3 +72,23 @@ class TestRunSnapshots:
         assert '"output_formats": [' in content
         assert '"warnings": [' in content
         assert '"errors": [' in content
+
+    def test_write_run_debug_log_creates_directory_and_json(self, tmp_path: Path) -> None:
+        """Detailed run debug logs should be written under the configured logs directory."""
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            config_name="enforcement-news",
+        )
+
+        path = write_run_debug_log(
+            tmp_path / "logs",
+            snapshot,
+            {"rejected_articles": [{"title": "כתבה", "relevant": False}]},
+        )
+
+        assert path.exists()
+        content = path.read_text(encoding="utf-8")
+        assert '"rejected_articles": [' in content
+        assert '"relevant": false' in content
