@@ -185,7 +185,9 @@ class AnthropicDailyReviewer:
     def review(self, artifacts: ReviewArtifacts) -> ReviewResult:
         """Review the latest artifacts and return issue candidates."""
         prompt = REVIEW_PROMPT.format(
-            run_snapshot_json=json.dumps(artifacts.run_snapshot, ensure_ascii=False, sort_keys=True),
+            run_snapshot_json=json.dumps(
+                artifacts.run_snapshot, ensure_ascii=False, sort_keys=True
+            ),
             debug_summary_json=json.dumps(
                 artifacts.debug_summary, ensure_ascii=False, sort_keys=True
             ),
@@ -283,7 +285,11 @@ class GitHubIssueClient:
                         continue
                     url_part = section[0].strip()
                     rel_part = section[1].strip()
-                    if rel_part == 'rel="next"' and url_part.startswith("<") and url_part.endswith(">"):
+                    if (
+                        rel_part == 'rel="next"'
+                        and url_part.startswith("<")
+                        and url_part.endswith(">")
+                    ):
                         next_url = url_part[1:-1]
                         break
             url = next_url

@@ -272,11 +272,15 @@ class TestDailyReviewClients:
             def __init__(self, **_: object) -> None:
                 self.messages = FakeMessages("not-json")
 
-        monkeypatch.setattr("denbust.news_items.daily_review.anthropic.Anthropic", FakeClientBadJson)
+        monkeypatch.setattr(
+            "denbust.news_items.daily_review.anthropic.Anthropic", FakeClientBadJson
+        )
         reviewer = AnthropicDailyReviewer(api_key="test", model="model")
         assert reviewer.review(artifacts) == ReviewResult()
 
-    def test_github_issue_client_extracts_open_markers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_github_issue_client_extracts_open_markers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Open issue markers should be parsed from the issue body."""
 
         class FakeResponse:
@@ -640,7 +644,9 @@ def test_module_main_entrypoint_executes(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("GITHUB_TOKEN", "token")
 
-    module_path = Path(importlib.import_module("denbust.news_items.daily_review").__file__).resolve()
+    module_path = Path(
+        importlib.import_module("denbust.news_items.daily_review").__file__
+    ).resolve()
     namespace = {
         "__name__": "__main__",
         "__file__": str(module_path),
