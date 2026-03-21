@@ -309,7 +309,9 @@ def _build_problem_summary(
         for summary in source_summaries
         if bool(summary.get("returned_zero_results"))
     ]
-    classification_output_anomaly = bool(classifier_summary.get("classification_output_anomaly", False))
+    classification_output_anomaly = bool(
+        classifier_summary.get("classification_output_anomaly", False)
+    )
     classified_article_count = _summary_int(classifier_summary, "classified_article_count")
     unseen_article_count = _summary_int(classifier_summary, "unseen_article_count")
     rejected_article_count = _summary_int(classifier_summary, "rejected_article_count")
@@ -350,7 +352,9 @@ def _build_suspicions(
         suspicions.append("source_error_rate_high")
     if zero_result_sources:
         suspicions.append("sources_returned_zero_results")
-    classification_output_anomaly = bool(classifier_summary.get("classification_output_anomaly", False))
+    classification_output_anomaly = bool(
+        classifier_summary.get("classification_output_anomaly", False)
+    )
     classified_article_count = _summary_int(classifier_summary, "classified_article_count")
     unseen_article_count = _summary_int(classifier_summary, "unseen_article_count")
     rejected_article_count = _summary_int(classifier_summary, "rejected_article_count")
