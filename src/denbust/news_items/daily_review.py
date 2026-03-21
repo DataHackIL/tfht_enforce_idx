@@ -48,6 +48,9 @@ debug_log:
 {debug_log_json}
 """
 
+MAX_PROMPT_LIST_ITEMS = 10
+MAX_PROMPT_STRING_LENGTH = 500
+
 
 class ReviewArtifacts(BaseModel):
     """Resolved latest-ingest artifacts to review."""
@@ -76,6 +79,11 @@ class ReviewResult(BaseModel):
     issues: list[IssueCandidate] = Field(default_factory=list)
 
 
+ReviewArtifacts.model_rebuild()
+IssueCandidate.model_rebuild()
+ReviewResult.model_rebuild()
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     """Load a JSON file into a dict payload."""
     with path.open(encoding="utf-8") as f:
@@ -100,16 +108,32 @@ def normalize_fingerprint(raw: str, *, title: str) -> str:
 def extract_json_block(text: str) -> dict[str, Any]:
     """Parse a JSON object from a model response, with markdown-fence tolerance."""
     payload = text.strip()
-    if payload.startswith("```"):
-        lines = payload.splitlines()
-        if len(lines) >= 3 and lines[-1].strip() == "```":
-            payload = "\n".join(lines[1:-1]).strip()
-        else:
-            payload = "\n".join(lines[1:]).strip()
+    if payload.startswith(("```", "~~~")):
+        fenced_match = re.match(
+            r"^(?P<fence>`{3}|~{3})(?P<lang>\w+)?\s*\n?(?P<body>.*?)(?:\n?(?P=fence))?\s*$",
+            payload,
+            re.DOTALL,
+        )
+        if fenced_match:
+            payload = fenced_match.group("body").strip()
     data = json.loads(payload)
     if not isinstance(data, dict):
         raise ValueError("Review response must be a JSON object")
     return data
+
+
+def _compact_for_prompt(value: Any) -> Any:
+    """Trim large debug payloads down to a compact prompt-safe structure."""
+    if isinstance(value, dict):
+        return {str(key): _compact_for_prompt(subvalue) for key, subvalue in value.items()}
+    if isinstance(value, list):
+        compact_items = [_compact_for_prompt(item) for item in value[:MAX_PROMPT_LIST_ITEMS]]
+        if len(value) > MAX_PROMPT_LIST_ITEMS:
+            compact_items.append({"_truncated_count": len(value) - MAX_PROMPT_LIST_ITEMS})
+        return compact_items
+    if isinstance(value, str) and len(value) > MAX_PROMPT_STRING_LENGTH:
+        return value[:MAX_PROMPT_STRING_LENGTH].rstrip() + "... [truncated]"
+    return value
 
 
 def latest_daily_review_artifacts(
@@ -161,14 +185,15 @@ class AnthropicDailyReviewer:
     def review(self, artifacts: ReviewArtifacts) -> ReviewResult:
         """Review the latest artifacts and return issue candidates."""
         prompt = REVIEW_PROMPT.format(
-            run_snapshot_json=json.dumps(
-                artifacts.run_snapshot, ensure_ascii=False, indent=2, sort_keys=True
-            ),
+            run_snapshot_json=json.dumps(artifacts.run_snapshot, ensure_ascii=False, sort_keys=True),
             debug_summary_json=json.dumps(
-                artifacts.debug_summary, ensure_ascii=False, indent=2, sort_keys=True
+                artifacts.debug_summary, ensure_ascii=False, sort_keys=True
             ),
             debug_log_json=json.dumps(
-                artifacts.debug_log, ensure_ascii=False, indent=2, sort_keys=True
+                _compact_for_prompt(artifacts.debug_log),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
             ),
         )
         response = self._client.messages.create(
@@ -176,13 +201,18 @@ class AnthropicDailyReviewer:
             max_tokens=1400,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = ""
+        text_parts: list[str] = []
         if response.content:
-            first_block = response.content[0]
-            if isinstance(first_block, TextBlock):
-                text = first_block.text
-
-        payload = extract_json_block(text)
+            for block in response.content:
+                if isinstance(block, TextBlock):
+                    text_parts.append(block.text)
+        text = "\n".join(text_parts).strip()
+        if not text:
+            return ReviewResult()
+        try:
+            payload = extract_json_block(text)
+        except (json.JSONDecodeError, ValueError):
+            return ReviewResult()
         issues_payload = payload.get("issues", [])
         if not isinstance(issues_payload, list):
             return ReviewResult()
@@ -229,19 +259,35 @@ class GitHubIssueClient:
 
     def existing_open_fingerprints(self) -> set[str]:
         """Return fingerprints for already-open AI review issues."""
-        response = self._client.get(
-            f"https://api.github.com/repos/{self._repository}/issues",
-            params={"state": "open", "per_page": 100},
-        )
-        response.raise_for_status()
         fingerprints: set[str] = set()
-        for issue in response.json():
-            if not isinstance(issue, dict) or "pull_request" in issue:
-                continue
-            body = str(issue.get("body") or "")
-            match = re.search(r"<!-- denbust-review:([a-z0-9._-]+) -->", body)
-            if match:
-                fingerprints.add(match.group(1))
+        url: str | None = f"https://api.github.com/repos/{self._repository}/issues"
+        params: dict[str, Any] | None = {"state": "open", "per_page": 100}
+
+        while url:
+            response = self._client.get(url, params=params)
+            response.raise_for_status()
+            for issue in response.json():
+                if not isinstance(issue, dict) or "pull_request" in issue:
+                    continue
+                body = str(issue.get("body") or "")
+                match = re.search(r"<!-- denbust-review:([a-z0-9._-]+) -->", body)
+                if match:
+                    fingerprints.add(match.group(1))
+
+            link_header = response.headers.get("Link", "")
+            next_url: str | None = None
+            if link_header:
+                for part in link_header.split(","):
+                    section = part.strip().split(";")
+                    if len(section) < 2:
+                        continue
+                    url_part = section[0].strip()
+                    rel_part = section[1].strip()
+                    if rel_part == 'rel="next"' and url_part.startswith("<") and url_part.endswith(">"):
+                        next_url = url_part[1:-1]
+                        break
+            url = next_url
+            params = None
         return fingerprints
 
     def create_issue(self, candidate: IssueCandidate, artifacts: ReviewArtifacts) -> None:
@@ -320,7 +366,8 @@ def main() -> None:
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     github_token = os.getenv("GITHUB_TOKEN")
     workflow_name = os.getenv("DENBUST_REVIEW_WORKFLOW_NAME", "daily-state-run")
-    model = os.getenv("DENBUST_REVIEW_MODEL", "claude-sonnet-4-20250514")
+    raw_model = os.getenv("DENBUST_REVIEW_MODEL", "").strip()
+    model = raw_model or "claude-sonnet-4-20250514"
     raw_labels = os.getenv("DENBUST_REVIEW_ISSUE_LABELS", "")
     labels = [label.strip() for label in raw_labels.split(",") if label.strip()]
 

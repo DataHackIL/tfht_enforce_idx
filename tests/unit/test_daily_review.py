@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from denbust.news_items.daily_review import (
     IssueCandidate,
     ReviewArtifacts,
     ReviewResult,
+    _compact_for_prompt,
     _load_json,
     extract_json_block,
     issue_marker,
@@ -79,6 +81,11 @@ class TestDailyReviewHelpers:
         with pytest.raises(ValueError, match="Review response must be a JSON object"):
             extract_json_block('["not-an-object"]')
 
+    def test_extract_json_block_handles_inline_tilde_fence(self) -> None:
+        """Single-line tilde fences should still parse correctly."""
+        payload = extract_json_block('~~~json {"issues":[]}~~~')
+        assert payload == {"issues": []}
+
     def test_normalize_fingerprint_falls_back_to_title(self) -> None:
         """Blank fingerprints should be derived from the issue title."""
         assert (
@@ -113,6 +120,19 @@ class TestDailyReviewHelpers:
 
         with pytest.raises(FileNotFoundError, match="No complete news_items/ingest artifacts"):
             latest_daily_review_artifacts(state_root=tmp_path)
+
+    def test_compact_for_prompt_truncates_large_lists_and_strings(self) -> None:
+        """Large debug payloads should be compacted before prompting."""
+        compact = _compact_for_prompt(
+            {
+                "raw_articles": [{"title": f"title-{index}"} for index in range(12)],
+                "notes": "x" * 600,
+            }
+        )
+
+        assert len(compact["raw_articles"]) == 11
+        assert compact["raw_articles"][-1] == {"_truncated_count": 2}
+        assert str(compact["notes"]).endswith("... [truncated]")
 
 
 class TestDailyReviewClients:
@@ -219,27 +239,74 @@ class TestDailyReviewClients:
         reviewer = AnthropicDailyReviewer(api_key="test", model="model")
         assert reviewer.review(artifacts) == ReviewResult()
 
-    def test_github_issue_client_extracts_open_markers(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+        class FakeClientNoText:
+            def __init__(self, **_: object) -> None:
+                self.messages = FakeMessages("")
+
+        monkeypatch.setattr("denbust.news_items.daily_review.anthropic.Anthropic", FakeClientNoText)
+        reviewer = AnthropicDailyReviewer(api_key="test", model="model")
+        assert reviewer.review(artifacts) == ReviewResult()
+
+        class FakeNonTextBlock:
+            pass
+
+        class FakeResponseNoText:
+            def __init__(self) -> None:
+                self.content = [FakeNonTextBlock()]
+
+        class FakeMessagesNoText:
+            def create(self, **_: object) -> FakeResponseNoText:
+                return FakeResponseNoText()
+
+        class FakeClientNoTextBlocks:
+            def __init__(self, **_: object) -> None:
+                self.messages = FakeMessagesNoText()
+
+        monkeypatch.setattr(
+            "denbust.news_items.daily_review.anthropic.Anthropic", FakeClientNoTextBlocks
+        )
+        reviewer = AnthropicDailyReviewer(api_key="test", model="model")
+        assert reviewer.review(artifacts) == ReviewResult()
+
+        class FakeClientBadJson:
+            def __init__(self, **_: object) -> None:
+                self.messages = FakeMessages("not-json")
+
+        monkeypatch.setattr("denbust.news_items.daily_review.anthropic.Anthropic", FakeClientBadJson)
+        reviewer = AnthropicDailyReviewer(api_key="test", model="model")
+        assert reviewer.review(artifacts) == ReviewResult()
+
+    def test_github_issue_client_extracts_open_markers(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Open issue markers should be parsed from the issue body."""
 
         class FakeResponse:
+            def __init__(self, issues: list[dict[str, object]], link: str = "") -> None:
+                self._issues = issues
+                self.headers = {"Link": link} if link else {}
+
             def raise_for_status(self) -> None:
                 return None
 
             def json(self) -> list[dict[str, object]]:
-                return [
-                    {"body": "<!-- denbust-review:mako-zero-results -->\nbody"},
-                    {"pull_request": {"url": "x"}, "body": "<!-- denbust-review:pr -->"},
-                ]
+                return self._issues
 
         class FakeClient:
             def __init__(self, **_: object) -> None:
-                pass
+                self.calls = 0
 
             def get(self, *_: object, **__: object) -> FakeResponse:
-                return FakeResponse()
+                self.calls += 1
+                if self.calls == 1:
+                    return FakeResponse(
+                        [
+                            {"body": "<!-- denbust-review:mako-zero-results -->\nbody"},
+                            {"pull_request": {"url": "x"}, "body": "<!-- denbust-review:pr -->"},
+                        ],
+                        link='<https://api.github.com/repositories/1/issues?page=2>; rel="next"',
+                    )
+                return FakeResponse(
+                    [{"body": "<!-- denbust-review:haaretz-zero-results -->\nbody"}]
+                )
 
             def close(self) -> None:
                 return None
@@ -248,7 +315,10 @@ class TestDailyReviewClients:
 
         client = GitHubIssueClient(repository="DataHackIL/tfht_enforce_idx", token="token")
         try:
-            assert client.existing_open_fingerprints() == {"mako-zero-results"}
+            assert client.existing_open_fingerprints() == {
+                "mako-zero-results",
+                "haaretz-zero-results",
+            }
         finally:
             client.close()
 
@@ -511,3 +581,70 @@ def test_main_reads_env_and_prints_created_count(
     assert captured["model"] == "claude-test"
     assert captured["labels"] == ["ai-review", "triage"]
     assert "Daily review created 2 issue(s)." in capsys.readouterr().out
+
+
+def test_main_uses_default_model_when_env_blank(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Blank model env vars should fall back to the default model name."""
+    monkeypatch.setenv("DENBUST_STATE_ROOT", "/tmp/state-root")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "DataHackIL/tfht_enforce_idx")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("DENBUST_REVIEW_MODEL", "   ")
+    monkeypatch.delenv("DENBUST_REVIEW_ISSUE_LABELS", raising=False)
+
+    captured: dict[str, Any] = {}
+
+    def fake_review_latest_daily_run(**kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(
+        "denbust.news_items.daily_review.review_latest_daily_run",
+        fake_review_latest_daily_run,
+    )
+
+    main()
+
+    assert captured["model"] == "claude-sonnet-4-20250514"
+    assert "Daily review created 0 issue(s)." in capsys.readouterr().out
+
+
+def test_module_main_entrypoint_executes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Running the module as __main__ should invoke the entrypoint successfully."""
+    logs_dir = tmp_path / "news_items" / "ingest" / "logs"
+    runs_dir = tmp_path / "news_items" / "ingest" / "runs"
+    stem = "2026-03-21T04-00-00-000000Z"
+    _write_json(
+        logs_dir / f"{stem}.summary.json",
+        {"run_timestamp": "2026-03-21T04:00:00Z", "workflow": {"workflow_name": "daily-state-run"}},
+    )
+    _write_json(logs_dir / f"{stem}.json", {"raw_articles": []})
+    _write_json(runs_dir / f"{stem}.json", {"result_summary": "ok"})
+
+    class FakeMessages:
+        def create(self, **_: object) -> Any:
+            class FakeResponse:
+                content: list[Any] = []
+
+            return FakeResponse()
+
+    class FakeAnthropicClient:
+        def __init__(self, **_: object) -> None:
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr("anthropic.Anthropic", FakeAnthropicClient)
+    monkeypatch.setenv("DENBUST_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "DataHackIL/tfht_enforce_idx")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    module_path = Path(importlib.import_module("denbust.news_items.daily_review").__file__).resolve()
+    namespace = {
+        "__name__": "__main__",
+        "__file__": str(module_path),
+        "Any": Any,
+        "Path": Path,
+    }
+    exec(compile(module_path.read_text(encoding="utf-8"), str(module_path), "exec"), namespace)
