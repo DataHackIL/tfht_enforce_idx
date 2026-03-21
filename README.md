@@ -37,6 +37,7 @@ Planned future datasets:
 - Publishes release bundles to Kaggle and Hugging Face when configured
 - Uploads the latest release bundle to Google Drive and S3-compatible object storage when configured
 - Persists dataset/job-scoped seen state and per-run JSON snapshots
+- Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
 
 ## Quick Start
 
@@ -153,6 +154,7 @@ Bootstrap notes:
 
 - `seen.json` may be absent initially; it is created once a run marks at least one URL as seen
 - `runs/` and `publication/` directories are created automatically by the workflows when needed
+- `logs/` is created automatically once ingest debug artifacts are written
 - a small `README.md` in the state repo is fine but optional
 
 ## Architecture Direction
@@ -373,11 +375,28 @@ The Phase B integrations are intentionally split into:
 - backup is considered successful if the command completes; zero configured targets is treated as a warning, not a failure
 - if a configured publication or backup target is missing required credentials, that target currently fails the job rather than silently skipping
 
+## Daily AI Review Workflow
+
+The repository also includes a workflow that reviews the latest `daily-state-run` artifacts and can
+open GitHub issues when the latest ingest looks suspicious:
+
+- `news-items-daily-review.yml`
+
+It runs automatically after `daily-state-run` completes successfully, and it also supports
+`workflow_dispatch` for manual review. It reads the latest matching files from:
+
+- `news_items/ingest/runs/`
+- `news_items/ingest/logs/`
+
+The workflow uses Anthropic to turn those artifacts into candidate engineering issues, then creates
+only new issues by embedding a hidden fingerprint marker in each issue body.
+
 ## GitHub Actions secret/setup matrix
 
 | Workflow | Required secrets | Optional secrets |
 |---|---|---|
 | `daily-state-run.yml` / `weekly-state-run.yml` | `STATE_REPO_PAT`, `ANTHROPIC_API_KEY`, `DENBUST_SUPABASE_URL`, `DENBUST_SUPABASE_SERVICE_ROLE_KEY` | SMTP/email secrets if email output is enabled |
+| `news-items-daily-review.yml` | `STATE_REPO_PAT`, `ANTHROPIC_API_KEY` | `DENBUST_REVIEW_MODEL`, `DENBUST_REVIEW_ISSUE_LABELS` |
 | `news-items-release.yml` | `STATE_REPO_PAT`, `DENBUST_SUPABASE_URL`, `DENBUST_SUPABASE_SERVICE_ROLE_KEY` | `DENBUST_KAGGLE_DATASET`, `KAGGLE_USERNAME`, `KAGGLE_KEY`, `DENBUST_HUGGINGFACE_REPO_ID`, `HF_TOKEN` |
 | `news-items-backup.yml` | `STATE_REPO_PAT` | `DENBUST_DRIVE_FOLDER_ID`, `DENBUST_DRIVE_SERVICE_ACCOUNT_JSON`, `DENBUST_OBJECT_STORE_BUCKET`, `DENBUST_OBJECT_STORE_PREFIX`, `DENBUST_OBJECT_STORE_ENDPOINT_URL`, `DENBUST_OBJECT_STORE_ACCESS_KEY_ID`, `DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY` |
 
@@ -386,6 +405,7 @@ The release and backup workflows both support `workflow_dispatch` for manual run
 Recommended GitHub Environment mapping:
 
 - `news-items-ingest` for `daily-state-run.yml` and `weekly-state-run.yml`
+- `news-items-ingest` for `news-items-daily-review.yml`
 - `news-items-release` for `news-items-release.yml`
 - `news-items-backup` for `news-items-backup.yml`
 

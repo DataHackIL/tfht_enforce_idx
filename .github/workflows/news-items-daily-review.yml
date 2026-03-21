@@ -1,0 +1,66 @@
+name: news-items-daily-review
+
+on:
+  # Review the latest daily ingest artifacts after the daily ingest workflow completes.
+  workflow_run:
+    workflows: ["daily-state-run"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: news-items-daily-review
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.11"
+  STATE_REPO: DataHackIL/tfht_enforce_idx_state
+  DATASET_NAME: news_items
+  JOB_NAME: ingest
+  STATE_JOB_DIR: state_repo/news_items/ingest
+  DENBUST_REVIEW_WORKFLOW_NAME: daily-state-run
+
+jobs:
+  review-latest-daily-ingest:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: news-items-ingest
+
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@v6
+
+      - name: Checkout state repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.STATE_REPO }}
+          token: ${{ secrets.STATE_REPO_PAT }}
+          path: state_repo
+
+      - name: Set up denbust review job
+        uses: ./.github/actions/setup-denbust-state-job
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
+          install-playwright: "false"
+          state-job-dir: ${{ env.STATE_JOB_DIR }}
+
+      - name: Review latest daily ingest artifacts and open issues
+        # Required secrets:
+        # - STATE_REPO_PAT
+        # - ANTHROPIC_API_KEY
+        # Optional:
+        # - DENBUST_REVIEW_MODEL
+        # - DENBUST_REVIEW_ISSUE_LABELS
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          DENBUST_STATE_ROOT: state_repo
+          DENBUST_REVIEW_MODEL: ${{ secrets.DENBUST_REVIEW_MODEL }}
+          DENBUST_REVIEW_ISSUE_LABELS: ${{ secrets.DENBUST_REVIEW_ISSUE_LABELS }}
+        run: python -m denbust.news_items.daily_review
