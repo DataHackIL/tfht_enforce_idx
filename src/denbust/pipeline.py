@@ -296,9 +296,7 @@ def _build_problem_summary(
 ) -> dict[str, object]:
     """Build compact problem buckets for downstream automation."""
     source_errors = [
-        summary["source_name"]
-        for summary in source_summaries
-        if bool(summary.get("had_error"))
+        summary["source_name"] for summary in source_summaries if bool(summary.get("had_error"))
     ]
     zero_result_sources = [
         summary["source_name"]
@@ -308,7 +306,9 @@ def _build_problem_summary(
     return {
         "source_errors": source_errors,
         "zero_result_sources": zero_result_sources,
-        "all_unseen_rejected": bool(result.unseen_article_count and result.relevant_article_count == 0),
+        "all_unseen_rejected": bool(
+            result.unseen_article_count and result.relevant_article_count == 0
+        ),
         "no_relevant_items": result.relevant_article_count == 0,
         "classification_output_anomaly": bool(
             classifier_summary.get("classification_output_anomaly", False)
@@ -325,9 +325,7 @@ def _build_suspicions(
     """Build a stable list of suspicion signals for automated triage."""
     suspicions: list[str] = []
     source_errors = [
-        summary["source_name"]
-        for summary in source_summaries
-        if bool(summary.get("had_error"))
+        summary["source_name"] for summary in source_summaries if bool(summary.get("had_error"))
     ]
     zero_result_sources = [
         summary["source_name"]
@@ -495,12 +493,12 @@ async def run_news_ingest_job(
         result.seen_count_after = seen_store.count
         result.finish("no articles found")
         result.set_debug_payload(
-                _build_ingest_debug_payload(
-                    result=result,
-                    source_names=source_names,
-                    raw_articles=all_articles,
-                    unseen_articles=unseen_articles,
-                    classified_articles=classified_articles,
+            _build_ingest_debug_payload(
+                result=result,
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
                 unified_items=unified_items,
             )
         )
@@ -513,12 +511,12 @@ async def run_news_ingest_job(
         result.seen_count_after = seen_store.count
         result.finish("all fetched articles were already seen")
         result.set_debug_payload(
-                _build_ingest_debug_payload(
-                    result=result,
-                    source_names=source_names,
-                    raw_articles=all_articles,
-                    unseen_articles=unseen_articles,
-                    classified_articles=classified_articles,
+            _build_ingest_debug_payload(
+                result=result,
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
                 unified_items=unified_items,
             )
         )
@@ -542,12 +540,12 @@ async def run_news_ingest_job(
         logger.info("No relevant articles found")
         result.seen_count_after = seen_store.count
         result.set_debug_payload(
-                _build_ingest_debug_payload(
-                    result=result.finish("no relevant articles found"),
-                    source_names=source_names,
-                    raw_articles=all_articles,
-                    unseen_articles=unseen_articles,
-                    classified_articles=classified_articles,
+            _build_ingest_debug_payload(
+                result=result.finish("no relevant articles found"),
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
                 unified_items=unified_items,
             )
         )
@@ -579,12 +577,12 @@ async def run_news_ingest_job(
     result.seen_count_after = seen_store.count
     result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
     result.set_debug_payload(
-            _build_ingest_debug_payload(
-                result=result,
-                source_names=source_names,
-                raw_articles=all_articles,
-                unseen_articles=unseen_articles,
-                classified_articles=classified_articles,
+        _build_ingest_debug_payload(
+            result=result,
+            source_names=source_names,
+            raw_articles=all_articles,
+            unseen_articles=unseen_articles,
+            classified_articles=classified_articles,
             unified_items=unified_items,
         )
     )
