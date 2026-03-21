@@ -219,7 +219,9 @@ class TestDailyReviewClients:
         reviewer = AnthropicDailyReviewer(api_key="test", model="model")
         assert reviewer.review(artifacts) == ReviewResult()
 
-    def test_github_issue_client_extracts_open_markers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_github_issue_client_extracts_open_markers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Open issue markers should be parsed from the issue body."""
 
         class FakeResponse:
@@ -250,7 +252,9 @@ class TestDailyReviewClients:
         finally:
             client.close()
 
-    def test_github_issue_client_create_issue_includes_labels(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_github_issue_client_create_issue_includes_labels(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Configured labels should be passed through on issue creation."""
         captured: dict[str, Any] = {}
 
@@ -303,7 +307,9 @@ class TestDailyReviewClients:
         assert "<!-- denbust-review:new-problem -->" in captured["body"]
         assert captured["closed"] is True
 
-    def test_github_issue_client_create_issue_without_labels(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_github_issue_client_create_issue_without_labels(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Labels should be omitted when none are configured."""
         captured: dict[str, Any] = {}
 
