@@ -132,7 +132,7 @@ class IceScraper(Source):
             return []
 
         articles: list[RawArticle] = []
-        for item in results_article.select("ul > li"):
+        for item in self._select_result_items(results_article):
             article = self._parse_article_item(item, cutoff)
             if article:
                 articles.append(article)
@@ -145,11 +145,21 @@ class IceScraper(Source):
         if not heading:
             return None
 
-        results_article = heading.find_next("article")
-        if isinstance(results_article, Tag) and results_article.select("ul > li"):
-            return results_article
+        for selector in ("article", "section", "div", "ul"):
+            candidate = heading.find_next(selector)
+            if isinstance(candidate, Tag) and self._select_result_items(candidate):
+                return candidate
 
         return None
+
+    def _select_result_items(self, container: Tag) -> list[Tag]:
+        """Select plausible ICE result items from a search results container."""
+        for selector in ("ul > li", "li"):
+            items = [item for item in container.select(selector) if isinstance(item, Tag)]
+            if items:
+                return items
+
+        return []
 
     def _parse_article_item(self, item: Tag, cutoff: datetime) -> RawArticle | None:
         """Parse a single ICE search result item."""
@@ -235,7 +245,11 @@ class IceScraper(Source):
         if parsed.netloc not in {"ice.co.il", "www.ice.co.il"}:
             return False
 
-        return "/article/" in parsed.path
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        if not segments or not segments[-1].isdigit():
+            return False
+
+        return "article" in segments or "news" in segments
 
     def _normalize_article_url(self, url: str) -> str:
         """Strip tracking params from ICE article URLs."""

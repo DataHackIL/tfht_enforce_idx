@@ -1074,6 +1074,35 @@ class TestIceScraper:
         assert scraper._find_results_article(no_heading) is None
         assert scraper._find_results_article(no_items) is None
 
+    def test_find_results_article_accepts_non_article_results_container(self) -> None:
+        """Results lookup should tolerate ICE wrapping the list in a section/div container."""
+        scraper = self._create_scraper()
+        section_results = BeautifulSoup(
+            """
+            <html>
+              <body>
+                <h1>נמצאו 388 תוצאות חיפוש של זנות</h1>
+                <section class="search-results">
+                  <div class="results-wrapper">
+                    <ul>
+                      <li>
+                        <a href="/world/news/123456">פי דידי הורשע בשידול לזנות ובסחר בבני אדם</a>
+                        <span>3/3/2026 10:52</span>
+                      </li>
+                    </ul>
+                  </div>
+                </section>
+              </body>
+            </html>
+            """,
+            "lxml",
+        )
+
+        results = scraper._find_results_article(section_results)
+
+        assert results is not None
+        assert results.name == "section"
+
     def test_parse_article_item_returns_none_without_text_links(self) -> None:
         """Article parsing should skip matches whose candidate links have no visible text."""
         scraper = self._create_scraper()
@@ -1185,6 +1214,47 @@ class TestIceScraper:
 
         assert scraper._is_article_url("") is False
         assert scraper._is_article_url("https://example.com/law/news/article/1086606") is False
+        assert scraper._is_article_url("/media/item/777777") is False
+
+    def test_is_article_url_accepts_internal_news_paths_without_article_segment(self) -> None:
+        """ICE sometimes links search results to internal news pages without /article/ in the path."""
+        scraper = self._create_scraper()
+
+        assert scraper._is_article_url("/world/news/123456") is True
+
+    def test_parse_search_results_accepts_internal_news_paths_without_article_segment(self) -> None:
+        """Search results should not drop valid internal ICE news URLs that omit /article/."""
+        scraper = self._create_scraper()
+        html = """
+        <html>
+          <body>
+            <main>
+              <h1>נמצאו 388 תוצאות חיפוש של זנות</h1>
+              <section class="search-results">
+                <div class="results-wrapper">
+                  <ul>
+                    <li>
+                      <a href="/world/news/123456?utm_source=search">פי דידי הורשע בשידול לזנות ובסחר בבני אדם</a>
+                      <p>לאחר שהורשע בשידול לזנות ובסחר בבני אדם, עונשו קוצר.</p>
+                      <span>3/3/2026 10:52</span>
+                    </li>
+                  </ul>
+                </div>
+              </section>
+            </main>
+          </body>
+        </html>
+        """
+
+        articles = scraper._parse_search_results(
+            html,
+            datetime(2026, 3, 1, tzinfo=UTC),
+        )
+
+        assert len(articles) == 1
+        assert articles[0].title == "פי דידי הורשע בשידול לזנות ובסחר בבני אדם"
+        assert articles[0].snippet == "לאחר שהורשע בשידול לזנות ובסחר בבני אדם, עונשו קוצר."
+        assert str(articles[0].url) == "https://www.ice.co.il/world/news/123456"
 
     def test_normalize_article_url_strips_query_and_fragment(self) -> None:
         """ICE article URLs should be canonicalized before deduplication."""
