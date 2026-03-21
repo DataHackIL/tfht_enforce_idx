@@ -480,6 +480,42 @@ class TestRunPipelineAsync:
         assert rejected[0]["canonical_url"] == "https://example.com/rejected"
         assert rejected[0]["relevant"] is False
 
+    def test_machine_debug_helpers_do_not_flag_all_unseen_rejected_on_classification_anomaly(
+        self,
+    ) -> None:
+        """Incomplete classifier output should not emit the all-unseen-rejected signal."""
+        source_summaries = _build_source_summaries(
+            source_names=["mako"],
+            raw_articles=[],
+            errors=[],
+        )
+        classifier_summary = _build_classifier_summary(
+            unseen_articles=[build_raw_article("https://example.com/u1")],
+            classified_articles=[],
+        )
+        result = RunSnapshot(
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            unseen_article_count=1,
+            relevant_article_count=0,
+        )
+
+        problems = _build_problem_summary(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+        suspicions = _build_suspicions(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+
+        assert problems["classification_output_anomaly"] is True
+        assert problems["all_unseen_rejected"] is False
+        assert "all_unseen_rejected" not in suspicions
+        assert "classification_output_anomaly" in suspicions
+
     @pytest.mark.asyncio
     async def test_run_pipeline_async_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Successful runs should return unified items after marking them seen."""
@@ -665,6 +701,56 @@ class TestRunPipeline:
         assert '"rejected_articles": [' in content
         summary_content = summary_path.read_text(encoding="utf-8")
         assert '"suspicions": [' in summary_content
+
+    def test_run_job_from_config_best_effort_debug_write_still_persists_snapshot(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Debug artifact write failures should not prevent the normal run snapshot."""
+        config = Config(
+            dataset_name="news_items",
+            job_name="ingest",
+            store={"runs_dir": tmp_path / "runs", "state_root": tmp_path / "state"},
+            output=OutputConfig(formats=[OutputFormat.CLI]),
+        )
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            config_name=config.name,
+        ).finish("no relevant articles found")
+        snapshot.set_debug_payload({"schema_version": "news_items.ingest.debug.v1"})
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", AsyncMock(return_value=snapshot))
+        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+        mock_logger = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
+        monkeypatch.setattr(
+            "denbust.pipeline.write_run_debug_log",
+            MagicMock(side_effect=OSError("disk full")),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.write_run_debug_summary",
+            MagicMock(side_effect=TypeError("not serializable")),
+        )
+
+        result = _run_job_from_config(
+            config_path=Path("agents/news/github.yaml"),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+        )
+
+        assert result is snapshot
+        assert result.errors == [
+            "Failed to write run debug log: disk full",
+            "Failed to write run debug summary: not serializable",
+        ]
+        snapshot_path = config.state_paths.runs_dir / "2026-03-15T04-00-00-000000Z.json"
+        assert snapshot_path.exists()
+        warning_messages = [call.args[0] for call in mock_logger.warning.call_args_list]
+        assert "Failed to write run debug log: %s" in warning_messages
+        assert "Failed to write run debug summary: %s" in warning_messages
 
     def test_run_pipeline_exits_on_invalid_config(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]

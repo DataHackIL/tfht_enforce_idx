@@ -288,6 +288,12 @@ def _build_classifier_summary(
     }
 
 
+def _summary_int(payload: dict[str, object], key: str) -> int:
+    """Extract an integer summary value from a machine-summary payload."""
+    value = payload.get(key, 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 def _build_problem_summary(
     *,
     source_summaries: list[dict[str, object]],
@@ -303,16 +309,22 @@ def _build_problem_summary(
         for summary in source_summaries
         if bool(summary.get("returned_zero_results"))
     ]
+    classification_output_anomaly = bool(classifier_summary.get("classification_output_anomaly", False))
+    classified_article_count = _summary_int(classifier_summary, "classified_article_count")
+    unseen_article_count = _summary_int(classifier_summary, "unseen_article_count")
+    rejected_article_count = _summary_int(classifier_summary, "rejected_article_count")
+    all_unseen_rejected = (
+        not classification_output_anomaly
+        and classified_article_count == unseen_article_count
+        and rejected_article_count == unseen_article_count
+        and unseen_article_count > 0
+    )
     return {
         "source_errors": source_errors,
         "zero_result_sources": zero_result_sources,
-        "all_unseen_rejected": bool(
-            result.unseen_article_count and result.relevant_article_count == 0
-        ),
+        "all_unseen_rejected": all_unseen_rejected,
         "no_relevant_items": result.relevant_article_count == 0,
-        "classification_output_anomaly": bool(
-            classifier_summary.get("classification_output_anomaly", False)
-        ),
+        "classification_output_anomaly": classification_output_anomaly,
     }
 
 
@@ -338,7 +350,17 @@ def _build_suspicions(
         suspicions.append("source_error_rate_high")
     if zero_result_sources:
         suspicions.append("sources_returned_zero_results")
-    if result.unseen_article_count and result.relevant_article_count == 0:
+    classification_output_anomaly = bool(classifier_summary.get("classification_output_anomaly", False))
+    classified_article_count = _summary_int(classifier_summary, "classified_article_count")
+    unseen_article_count = _summary_int(classifier_summary, "unseen_article_count")
+    rejected_article_count = _summary_int(classifier_summary, "rejected_article_count")
+    all_unseen_rejected = (
+        not classification_output_anomaly
+        and classified_article_count == unseen_article_count
+        and rejected_article_count == unseen_article_count
+        and unseen_article_count > 0
+    )
+    if all_unseen_rejected:
         suspicions.append("all_unseen_rejected")
     if result.relevant_article_count == 0:
         suspicions.append("no_relevant_items")
@@ -793,8 +815,16 @@ def _run_job_from_config(
         result.errors.extend(output_errors)
 
     if result.debug_payload is not None:
-        write_run_debug_log(config.state_paths.logs_dir, result, result.debug_payload)
-        write_run_debug_summary(config.state_paths.logs_dir, result, result.debug_payload)
+        try:
+            write_run_debug_log(config.state_paths.logs_dir, result, result.debug_payload)
+        except Exception as exc:
+            logger.warning("Failed to write run debug log: %s", exc)
+            result.errors.append(f"Failed to write run debug log: {exc}")
+        try:
+            write_run_debug_summary(config.state_paths.logs_dir, result, result.debug_payload)
+        except Exception as exc:
+            logger.warning("Failed to write run debug summary: %s", exc)
+            result.errors.append(f"Failed to write run debug summary: {exc}")
     write_run_snapshot(config.state_paths.runs_dir, result)
 
     if config.job_name != JobName.INGEST:
