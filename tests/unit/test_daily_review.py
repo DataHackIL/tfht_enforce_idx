@@ -128,7 +128,9 @@ class TestDailyReviewHelpers:
                 "raw_articles": [{"title": f"title-{index}"} for index in range(12)],
                 "notes": "x" * 600,
                 "run_snapshot": {"items": [{"id": f"item-{index}"} for index in range(12)]},
-                "debug_summary": {"suspicions": [{"name": f"suspicion-{index}"} for index in range(12)]},
+                "debug_summary": {
+                    "suspicions": [{"name": f"suspicion-{index}"} for index in range(12)]
+                },
             }
         )
 
