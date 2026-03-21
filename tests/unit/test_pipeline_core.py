@@ -24,7 +24,12 @@ from denbust.models.common import DatasetName, JobName
 from denbust.models.policies import PrivacyRisk
 from denbust.ops.storage import LocalJsonOperationalStore
 from denbust.pipeline import (
+    _build_classifier_summary,
+    _build_problem_summary,
+    _build_source_summaries,
+    _build_suspicions,
     _run_job_from_config,
+    _source_name_from_error,
     classify_articles,
     create_sources,
     deduplicate_articles,
@@ -218,6 +223,52 @@ class TestFetchAndClassifyHelpers:
 
         assert len(relevant) == 1
         assert relevant[0].classification.relevant is True
+
+    def test_source_name_from_error_returns_none_without_separator(self) -> None:
+        """Malformed source errors should be ignored by source summaries."""
+        assert _source_name_from_error("timeout without source prefix") is None
+
+    def test_machine_debug_helpers_flag_source_errors_and_zero_results(self) -> None:
+        """Machine-oriented summaries should expose source errors and zero-result sources."""
+        source_summaries = _build_source_summaries(
+            source_names=["mako", "haaretz", "ice"],
+            raw_articles=[build_raw_article("https://example.com/one")],
+            errors=["mako: timeout", "plain warning without source prefix"],
+        )
+        classifier_summary = _build_classifier_summary(
+            unseen_articles=[build_raw_article("https://example.com/u1")],
+            classified_articles=[],
+        )
+        result = RunSnapshot(
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            unseen_article_count=1,
+            relevant_article_count=0,
+        )
+
+        problems = _build_problem_summary(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+        suspicions = _build_suspicions(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+
+        assert source_summaries[0]["source_name"] == "mako"
+        assert source_summaries[0]["had_error"] is True
+        assert source_summaries[1]["source_name"] == "haaretz"
+        assert source_summaries[1]["returned_zero_results"] is True
+        assert source_summaries[2]["source_name"] == "ice"
+        assert source_summaries[2]["returned_zero_results"] is True
+        assert problems["source_errors"] == ["mako"]
+        assert problems["zero_result_sources"] == ["haaretz", "ice"]
+        assert problems["classification_output_anomaly"] is True
+        assert "source_errors_present" in suspicions
+        assert "source_error_rate_high" in suspicions
+        assert "sources_returned_zero_results" in suspicions
 
     def test_mark_seen_collects_all_source_urls(self, tmp_path: Path) -> None:
         """mark_seen should persist every source URL from unified items."""
