@@ -186,10 +186,16 @@ class AnthropicDailyReviewer:
         """Review the latest artifacts and return issue candidates."""
         prompt = REVIEW_PROMPT.format(
             run_snapshot_json=json.dumps(
-                artifacts.run_snapshot, ensure_ascii=False, sort_keys=True
+                _compact_for_prompt(artifacts.run_snapshot),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
             ),
             debug_summary_json=json.dumps(
-                artifacts.debug_summary, ensure_ascii=False, sort_keys=True
+                _compact_for_prompt(artifacts.debug_summary),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
             ),
             debug_log_json=json.dumps(
                 _compact_for_prompt(artifacts.debug_log),
@@ -210,10 +216,12 @@ class AnthropicDailyReviewer:
                     text_parts.append(block.text)
         text = "\n".join(text_parts).strip()
         if not text:
+            print("Daily review returned no usable text blocks; treating as no issues.")
             return ReviewResult()
         try:
             payload = extract_json_block(text)
         except (json.JSONDecodeError, ValueError):
+            print("Daily review returned malformed JSON; treating as no issues.")
             return ReviewResult()
         issues_payload = payload.get("issues", [])
         if not isinstance(issues_payload, list):

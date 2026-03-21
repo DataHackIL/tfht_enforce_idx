@@ -127,12 +127,16 @@ class TestDailyReviewHelpers:
             {
                 "raw_articles": [{"title": f"title-{index}"} for index in range(12)],
                 "notes": "x" * 600,
+                "run_snapshot": {"items": [{"id": f"item-{index}"} for index in range(12)]},
+                "debug_summary": {"suspicions": [{"name": f"suspicion-{index}"} for index in range(12)]},
             }
         )
 
         assert len(compact["raw_articles"]) == 11
         assert compact["raw_articles"][-1] == {"_truncated_count": 2}
         assert str(compact["notes"]).endswith("... [truncated]")
+        assert len(compact["run_snapshot"]["items"]) == 11
+        assert len(compact["debug_summary"]["suspicions"]) == 11
 
 
 class TestDailyReviewClients:
@@ -189,7 +193,9 @@ class TestDailyReviewClients:
         )
 
     def test_anthropic_daily_reviewer_handles_non_list_and_malformed_issues(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Malformed issue payloads should be ignored rather than crashing review."""
 
@@ -246,6 +252,7 @@ class TestDailyReviewClients:
         monkeypatch.setattr("denbust.news_items.daily_review.anthropic.Anthropic", FakeClientNoText)
         reviewer = AnthropicDailyReviewer(api_key="test", model="model")
         assert reviewer.review(artifacts) == ReviewResult()
+        assert "no usable text blocks" in capsys.readouterr().out
 
         class FakeNonTextBlock:
             pass
@@ -277,6 +284,7 @@ class TestDailyReviewClients:
         )
         reviewer = AnthropicDailyReviewer(api_key="test", model="model")
         assert reviewer.review(artifacts) == ReviewResult()
+        assert "malformed JSON" in capsys.readouterr().out
 
     def test_github_issue_client_extracts_open_markers(
         self, monkeypatch: pytest.MonkeyPatch

@@ -18,8 +18,6 @@ permissions:
 env:
   DEFAULT_PYTHON_VERSION: "3.11"
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
-  DATASET_NAME: news_items
-  JOB_NAME: ingest
   STATE_JOB_DIR: state_repo/news_items/ingest
   DENBUST_REVIEW_WORKFLOW_NAME: daily-state-run
 
@@ -35,6 +33,9 @@ jobs:
     steps:
       - name: Checkout code repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
 
       - name: Checkout state repo
         uses: actions/checkout@v6
