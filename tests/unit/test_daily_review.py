@@ -81,7 +81,9 @@ class TestDailyReviewHelpers:
 class TestDailyReviewClients:
     """Tests for the Anthropic and GitHub review clients."""
 
-    def test_anthropic_daily_reviewer_parses_valid_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_anthropic_daily_reviewer_parses_valid_json(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Reviewer output should normalize fingerprints and drop malformed issues."""
 
         class FakeTextBlock:
@@ -129,7 +131,9 @@ class TestDailyReviewClients:
             ]
         )
 
-    def test_github_issue_client_extracts_open_markers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_github_issue_client_extracts_open_markers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Open issue markers should be parsed from the issue body."""
 
         class FakeResponse:
