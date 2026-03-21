@@ -86,6 +86,9 @@ jobs:
           if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
             git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs"
           fi
+          if [[ -d "${{ env.STATE_JOB_DIR }}/logs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/logs"
+          fi
           if [[ -d "${{ env.STATE_JOB_DIR }}/publication" ]]; then
             git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication"
           fi

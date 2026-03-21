@@ -24,7 +24,12 @@ from denbust.models.common import DatasetName, JobName
 from denbust.models.policies import PrivacyRisk
 from denbust.ops.storage import LocalJsonOperationalStore
 from denbust.pipeline import (
+    _build_classifier_summary,
+    _build_problem_summary,
+    _build_source_summaries,
+    _build_suspicions,
     _run_job_from_config,
+    _source_name_from_error,
     classify_articles,
     create_sources,
     deduplicate_articles,
@@ -219,6 +224,52 @@ class TestFetchAndClassifyHelpers:
         assert len(relevant) == 1
         assert relevant[0].classification.relevant is True
 
+    def test_source_name_from_error_returns_none_without_separator(self) -> None:
+        """Malformed source errors should be ignored by source summaries."""
+        assert _source_name_from_error("timeout without source prefix") is None
+
+    def test_machine_debug_helpers_flag_source_errors_and_zero_results(self) -> None:
+        """Machine-oriented summaries should expose source errors and zero-result sources."""
+        source_summaries = _build_source_summaries(
+            source_names=["mako", "haaretz", "ice"],
+            raw_articles=[build_raw_article("https://example.com/one")],
+            errors=["mako: timeout", "plain warning without source prefix"],
+        )
+        classifier_summary = _build_classifier_summary(
+            unseen_articles=[build_raw_article("https://example.com/u1")],
+            classified_articles=[],
+        )
+        result = RunSnapshot(
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            unseen_article_count=1,
+            relevant_article_count=0,
+        )
+
+        problems = _build_problem_summary(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+        suspicions = _build_suspicions(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+
+        assert source_summaries[0]["source_name"] == "mako"
+        assert source_summaries[0]["had_error"] is True
+        assert source_summaries[1]["source_name"] == "haaretz"
+        assert source_summaries[1]["returned_zero_results"] is True
+        assert source_summaries[2]["source_name"] == "ice"
+        assert source_summaries[2]["returned_zero_results"] is True
+        assert problems["source_errors"] == ["mako"]
+        assert problems["zero_result_sources"] == ["haaretz", "ice"]
+        assert problems["classification_output_anomaly"] is True
+        assert "source_errors_present" in suspicions
+        assert "source_error_rate_high" in suspicions
+        assert "sources_returned_zero_results" in suspicions
+
     def test_mark_seen_collects_all_source_urls(self, tmp_path: Path) -> None:
         """mark_seen should persist every source URL from unified items."""
         from denbust.store.seen import SeenStore
@@ -365,7 +416,9 @@ class TestRunPipelineAsync:
         mock_logger = MagicMock()
         monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
-        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(return_value=[])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
         seen_store = MagicMock(count=2)
         monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
@@ -374,7 +427,6 @@ class TestRunPipelineAsync:
             AsyncMock(return_value=(articles, [])),
         )
         monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _seen_store: articles)
-        monkeypatch.setattr("denbust.pipeline.classify_articles", AsyncMock(return_value=[]))
 
         result = await run_pipeline_async(Config(max_articles=1), days=3)
 
@@ -383,6 +435,86 @@ class TestRunPipelineAsync:
         assert result.unseen_article_count == 2
         assert result.relevant_article_count == 0
         mock_logger.warning.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_async_records_debug_payload_for_rejected_articles(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ingest runs should retain rejected unseen items in the debug payload."""
+
+        def fake_create_deduplicator(*, threshold: float) -> MagicMock:
+            del threshold
+            return MagicMock()
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        unseen_article = build_raw_article("https://example.com/rejected")
+        seen_store = MagicMock(count=4)
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[build_classified_article("https://example.com/rejected", relevant=False)]
+        )
+        source = type("SourceStub", (), {"name": "test"})()
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [source])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([unseen_article], [])),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _seen_store: articles)
+
+        result = await run_pipeline_async(Config(max_articles=5), days=3)
+
+        assert result.result_summary == "no relevant articles found"
+        assert result.debug_payload is not None
+        assert result.debug_payload["schema_version"] == "news_items.ingest.debug.v1"
+        assert result.debug_payload["counts"]["unseen_article_count"] == 1
+        assert result.debug_payload["classifier_summary"]["rejected_article_count"] == 1
+        assert result.debug_payload["problems"]["all_unseen_rejected"] is True
+        assert "all_unseen_rejected" in result.debug_payload["suspicions"]
+        assert result.debug_payload["source_summaries"][0]["source_name"] == "test"
+        assert result.debug_payload["source_summaries"][0]["raw_article_count"] == 1
+        rejected = result.debug_payload["rejected_articles"]
+        assert len(rejected) == 1
+        assert rejected[0]["canonical_url"] == "https://example.com/rejected"
+        assert rejected[0]["relevant"] is False
+
+    def test_machine_debug_helpers_do_not_flag_all_unseen_rejected_on_classification_anomaly(
+        self,
+    ) -> None:
+        """Incomplete classifier output should not emit the all-unseen-rejected signal."""
+        source_summaries = _build_source_summaries(
+            source_names=["mako"],
+            raw_articles=[],
+            errors=[],
+        )
+        classifier_summary = _build_classifier_summary(
+            unseen_articles=[build_raw_article("https://example.com/u1")],
+            classified_articles=[],
+        )
+        result = RunSnapshot(
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            unseen_article_count=1,
+            relevant_article_count=0,
+        )
+
+        problems = _build_problem_summary(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+        suspicions = _build_suspicions(
+            source_summaries=source_summaries,
+            classifier_summary=classifier_summary,
+            result=result,
+        )
+
+        assert problems["classification_output_anomaly"] is True
+        assert problems["all_unseen_rejected"] is False
+        assert "all_unseen_rejected" not in suspicions
+        assert "classification_output_anomaly" in suspicions
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -418,10 +550,7 @@ class TestRunPipelineAsync:
             "denbust.pipeline.filter_seen",
             lambda articles, _current_seen_store: articles,
         )
-        monkeypatch.setattr(
-            "denbust.pipeline.classify_articles",
-            AsyncMock(return_value=classified),
-        )
+        classifier.classify_batch = AsyncMock(return_value=classified)
         monkeypatch.setattr("denbust.pipeline.deduplicate_articles", lambda _articles, _d: unified)
         monkeypatch.setattr("denbust.pipeline.mark_seen", mark_seen_mock)
 
@@ -465,7 +594,9 @@ class TestRunPipelineAsync:
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
-        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(return_value=[build_classified_article()])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
         monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
         monkeypatch.setattr(
@@ -473,10 +604,6 @@ class TestRunPipelineAsync:
             AsyncMock(return_value=([raw_article], [])),
         )
         monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
-        monkeypatch.setattr(
-            "denbust.pipeline.classify_articles",
-            AsyncMock(return_value=[build_classified_article()]),
-        )
         monkeypatch.setattr(
             "denbust.pipeline.deduplicate_articles",
             lambda _articles, _deduplicator: [unified_item],
@@ -517,6 +644,113 @@ class TestRunPipeline:
 
         assert exc_info.value.code == 1
         assert f"Error: Config file not found: {missing}" in capsys.readouterr().out
+
+    def test_run_job_from_config_writes_ingest_debug_log(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """CLI job runs should persist ingest debug logs under the namespaced logs directory."""
+        config = Config(
+            dataset_name="news_items",
+            job_name="ingest",
+            store={"runs_dir": tmp_path / "runs", "state_root": tmp_path / "state"},
+            output=OutputConfig(formats=[OutputFormat.CLI]),
+        )
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            config_name=config.name,
+        ).finish("no relevant articles found")
+        snapshot.set_debug_payload(
+            {
+                "schema_version": "news_items.ingest.debug.v1",
+                "run_timestamp": "2026-03-15T04:00:00Z",
+                "dataset_name": "news_items",
+                "job_name": "ingest",
+                "config_name": config.name,
+                "result_summary": "no relevant articles found",
+                "counts": {"unseen_article_count": 1},
+                "workflow": {},
+                "source_summaries": [],
+                "classifier_summary": {"rejected_article_count": 1},
+                "problems": {"all_unseen_rejected": True},
+                "suspicions": ["all_unseen_rejected"],
+                "warnings": [],
+                "errors": [],
+                "rejected_articles": [{"title": "כתבה", "relevant": False}],
+            }
+        )
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", AsyncMock(return_value=snapshot))
+        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+
+        result = _run_job_from_config(
+            config_path=Path("agents/news/github.yaml"),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+        )
+
+        assert result is snapshot
+        debug_path = config.state_paths.logs_dir / "2026-03-15T04-00-00-000000Z.json"
+        summary_path = config.state_paths.logs_dir / "2026-03-15T04-00-00-000000Z.summary.json"
+        assert debug_path.exists()
+        assert summary_path.exists()
+        content = debug_path.read_text(encoding="utf-8")
+        assert '"rejected_articles": [' in content
+        summary_content = summary_path.read_text(encoding="utf-8")
+        assert '"suspicions": [' in summary_content
+
+    def test_run_job_from_config_best_effort_debug_write_still_persists_snapshot(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Debug artifact write failures should not prevent the normal run snapshot."""
+        config = Config(
+            dataset_name="news_items",
+            job_name="ingest",
+            store={"runs_dir": tmp_path / "runs", "state_root": tmp_path / "state"},
+            output=OutputConfig(formats=[OutputFormat.CLI]),
+        )
+        snapshot = RunSnapshot(
+            run_timestamp=datetime(2026, 3, 15, 4, 0, 0, tzinfo=UTC),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+            config_name=config.name,
+        ).finish("no relevant articles found")
+        snapshot.set_debug_payload({"schema_version": "news_items.ingest.debug.v1"})
+
+        monkeypatch.setattr("denbust.pipeline.setup_logging", MagicMock())
+        monkeypatch.setattr("denbust.pipeline.load_config", MagicMock(return_value=config))
+        monkeypatch.setattr("denbust.pipeline.run_job_async", AsyncMock(return_value=snapshot))
+        monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
+        mock_logger = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
+        monkeypatch.setattr(
+            "denbust.pipeline.write_run_debug_log",
+            MagicMock(side_effect=OSError("disk full")),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.write_run_debug_summary",
+            MagicMock(side_effect=TypeError("not serializable")),
+        )
+
+        result = _run_job_from_config(
+            config_path=Path("agents/news/github.yaml"),
+            dataset_name=DatasetName.NEWS_ITEMS,
+            job_name=JobName.INGEST,
+        )
+
+        assert result is snapshot
+        assert result.errors == [
+            "Failed to write run debug log: disk full",
+            "Failed to write run debug summary: not serializable",
+        ]
+        snapshot_path = config.state_paths.runs_dir / "2026-03-15T04-00-00-000000Z.json"
+        assert snapshot_path.exists()
+        warning_messages = [call.args[0] for call in mock_logger.warning.call_args_list]
+        assert "Failed to write run debug log: %s" in warning_messages
+        assert "Failed to write run debug summary: %s" in warning_messages
 
     def test_run_pipeline_exits_on_invalid_config(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
