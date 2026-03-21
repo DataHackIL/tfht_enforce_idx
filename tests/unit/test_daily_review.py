@@ -326,6 +326,48 @@ class TestDailyReviewClients:
         finally:
             client.close()
 
+    def test_github_issue_client_ignores_malformed_link_header_parts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pagination should tolerate malformed link-header segments and still follow next."""
+
+        class FakeResponse:
+            def __init__(self, issues: list[dict[str, object]], link: str = "") -> None:
+                self._issues = issues
+                self.headers = {"Link": link} if link else {}
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> list[dict[str, object]]:
+                return self._issues
+
+        class FakeClient:
+            def __init__(self, **_: object) -> None:
+                self.calls = 0
+
+            def get(self, *_: object, **__: object) -> FakeResponse:
+                self.calls += 1
+                if self.calls == 1:
+                    return FakeResponse(
+                        [{"body": ""}],
+                        link='malformed-link-entry, <https://api.github.com/repositories/1/issues?page=3>; rel="next"',
+                    )
+                return FakeResponse(
+                    [{"body": "<!-- denbust-review:page-three-problem -->\nbody"}]
+                )
+
+            def close(self) -> None:
+                return None
+
+        monkeypatch.setattr("denbust.news_items.daily_review.httpx.Client", FakeClient)
+
+        client = GitHubIssueClient(repository="DataHackIL/tfht_enforce_idx", token="token")
+        try:
+            assert client.existing_open_fingerprints() == {"page-three-problem"}
+        finally:
+            client.close()
+
     def test_github_issue_client_create_issue_includes_labels(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
