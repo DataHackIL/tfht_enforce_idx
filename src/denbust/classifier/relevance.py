@@ -17,26 +17,35 @@ from denbust.data_models import (
 
 logger = logging.getLogger(__name__)
 
-# Classification prompt (Hebrew-aware)
-CLASSIFICATION_PROMPT = """You classify Hebrew news articles for relevance to anti-prostitution enforcement in Israel.
+# System prompt that primes the model with a broad, inclusive framing
+CLASSIFICATION_SYSTEM_PROMPT = (
+    "You are a classifier for Hebrew news articles. "
+    "Your job is to identify articles relevant to prostitution, brothels, human trafficking, "
+    "pimping, and law-enforcement actions against these activities in Israel. "
+    "Be inclusive: mark an article as relevant whenever any of these topics appears as a "
+    "significant part of the story, even if no arrest or enforcement action has occurred."
+)
 
-Given a news headline and snippet, determine:
-1. Is this relevant to: brothels, prostitution, pimping, human trafficking, or enforcement?
-2. Category: brothel | prostitution | pimping | trafficking | enforcement | not_relevant
-3. Sub-category (if relevant):
-   - brothel: closure | opening
-   - prostitution: arrest | fine
-   - pimping: arrest | sentence
-   - trafficking: arrest | rescue | sentence
-   - enforcement: operation | other
-4. Confidence: high | medium | low
+# Classification user prompt (Hebrew-aware)
+CLASSIFICATION_PROMPT = """Decide whether the Hebrew news article below is relevant to any of these topics in Israel:
+- Brothels / בתי בושת
+- Prostitution / זנות
+- Pimping / סרסורות
+- Human trafficking / סחר בבני אדם
+- Police or legal enforcement against the above
+
+If relevant, also assign:
+- category: brothel | prostitution | pimping | trafficking | enforcement
+- sub_category: closure | opening | arrest | fine | sentence | rescue | operation | other
+- confidence: high | medium | low
 
 Article:
 כותרת: {title}
 תקציר: {snippet}
 
-Respond with JSON only, no explanation:
-{{"relevant": true/false, "category": "...", "sub_category": "...", "confidence": "..."}}"""
+Respond with JSON only, no explanation.
+If relevant: {{"relevant": true, "category": "...", "sub_category": "...", "confidence": "..."}}
+If not relevant: {{"relevant": false, "category": "not_relevant", "sub_category": null, "confidence": "high"}}"""
 
 
 class Classifier:
@@ -74,6 +83,7 @@ class Classifier:
             response = self._client.messages.create(
                 model=self._model,
                 max_tokens=256,
+                system=CLASSIFICATION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
             )
 

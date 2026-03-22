@@ -9,7 +9,12 @@ import pytest
 from anthropic.types import TextBlock
 from pydantic import HttpUrl
 
-from denbust.classifier.relevance import Classifier, create_classifier
+from denbust.classifier.relevance import (
+    CLASSIFICATION_PROMPT,
+    CLASSIFICATION_SYSTEM_PROMPT,
+    Classifier,
+    create_classifier,
+)
 from denbust.data_models import Category, RawArticle, SubCategory
 
 
@@ -210,3 +215,131 @@ class TestClassifierRuntime:
 
         assert isinstance(classifier, Classifier)
         assert classifier._model == "custom-model"
+
+
+class TestClassificationPromptContent:
+    """Tests verifying the prompt and system prompt content matches the issue requirements."""
+
+    def test_system_prompt_is_non_empty(self) -> None:
+        """System prompt must not be empty."""
+        assert CLASSIFICATION_SYSTEM_PROMPT.strip()
+
+    def test_system_prompt_is_inclusive_not_enforcement_only(self) -> None:
+        """System prompt must not restrict relevance to enforcement actions only."""
+        # The old framing 'anti-prostitution enforcement' was too narrow; the new
+        # system prompt must make relevance inclusive of all covered topics.
+        assert (
+            "even if no arrest or enforcement action has occurred" in CLASSIFICATION_SYSTEM_PROMPT
+        )
+
+    def test_prompt_contains_hebrew_brothel_term(self) -> None:
+        """Prompt must include Hebrew term for brothels (בתי בושת)."""
+        assert "בתי בושת" in CLASSIFICATION_PROMPT
+
+    def test_prompt_contains_hebrew_prostitution_term(self) -> None:
+        """Prompt must include Hebrew term for prostitution (זנות)."""
+        assert "זנות" in CLASSIFICATION_PROMPT
+
+    def test_prompt_contains_hebrew_trafficking_term(self) -> None:
+        """Prompt must include Hebrew term for human trafficking (סחר בבני אדם)."""
+        assert "סחר בבני אדם" in CLASSIFICATION_PROMPT
+
+    def test_prompt_contains_hebrew_pimping_term(self) -> None:
+        """Prompt must include Hebrew term for pimping (סרסורות)."""
+        assert "סרסורות" in CLASSIFICATION_PROMPT
+
+    def test_prompt_lists_all_categories(self) -> None:
+        """Prompt must enumerate all valid categories."""
+        for category in ("brothel", "prostitution", "pimping", "trafficking", "enforcement"):
+            assert category in CLASSIFICATION_PROMPT
+
+
+class TestClassifyPassesSystemPrompt:
+    """Tests that classify() passes the system prompt to the Anthropic API."""
+
+    @pytest.mark.asyncio
+    async def test_classify_passes_system_prompt(self) -> None:
+        """classify() must include CLASSIFICATION_SYSTEM_PROMPT in the API call."""
+        classifier = Classifier(api_key="test-key")
+        mock_create = MagicMock(
+            return_value=MagicMock(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text='{"relevant": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
+                    )
+                ]
+            )
+        )
+        classifier._client.messages = MagicMock(create=mock_create)
+        article = RawArticle(
+            url=HttpUrl("https://example.com/trafficking"),
+            title="הוא הבטיח להן הארה, והפך אותן לקורבנות אונס וסחר בבני אדם",
+            snippet="כתבה על קורבנות סחר בבני אדם",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="haaretz",
+        )
+
+        await classifier.classify(article)
+
+        call_kwargs = mock_create.call_args.kwargs
+        assert "system" in call_kwargs
+        assert call_kwargs["system"] == CLASSIFICATION_SYSTEM_PROMPT
+
+    @pytest.mark.asyncio
+    async def test_classify_trafficking_article_returns_relevant(self) -> None:
+        """A trafficking article (no enforcement) should be classified as relevant."""
+        classifier = Classifier(api_key="test-key")
+        classifier._client.messages = MagicMock(
+            create=MagicMock(
+                return_value=MagicMock(
+                    content=[
+                        TextBlock(
+                            type="text",
+                            text='{"relevant": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
+                        )
+                    ]
+                )
+            )
+        )
+        article = RawArticle(
+            url=HttpUrl("https://example.com/trafficking"),
+            title="ישראלי שידל לזנות קטינה בת 13 מוונצואלה",
+            snippet="דיווח על ישראלי שניסה לגייס קטינה לזנות",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="mako",
+        )
+
+        result = await classifier.classify(article)
+
+        assert result.relevant is True
+        assert result.category == Category.TRAFFICKING
+
+    @pytest.mark.asyncio
+    async def test_classify_brothel_article_returns_relevant(self) -> None:
+        """A brothel discovery article should be classified as relevant."""
+        classifier = Classifier(api_key="test-key")
+        classifier._client.messages = MagicMock(
+            create=MagicMock(
+                return_value=MagicMock(
+                    content=[
+                        TextBlock(
+                            type="text",
+                            text='{"relevant": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}',
+                        )
+                    ]
+                )
+            )
+        )
+        article = RawArticle(
+            url=HttpUrl("https://example.com/brothel"),
+            title="בית בושת אותר בתוך מקלט ציבורי",
+            snippet="כוחות הביטחון איתרו בית בושת שפעל בתוך מקלט ציבורי",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="walla",
+        )
+
+        result = await classifier.classify(article)
+
+        assert result.relevant is True
+        assert result.category == Category.BROTHEL
