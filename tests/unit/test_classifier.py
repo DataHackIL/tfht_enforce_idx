@@ -10,6 +10,7 @@ from anthropic.types import TextBlock
 from pydantic import HttpUrl
 
 from denbust.classifier.relevance import (
+    ALLOWED_SUBCATEGORIES,
     CLASSIFICATION_PROMPT,
     CLASSIFICATION_SYSTEM_PROMPT,
     Classifier,
@@ -88,6 +89,19 @@ class TestClassifierParsing:
         assert result.category == Category.BROTHEL
         assert result.sub_category is None
 
+    def test_parse_invalid_subcategory_for_category_clears_subcategory(self) -> None:
+        """Known subcategories that do not match the category should be ignored."""
+        classifier = Classifier(api_key="test-key")
+
+        response = (
+            '{"relevant": true, "category": "trafficking", '
+            '"sub_category": "fine", "confidence": "high"}'
+        )
+        result = classifier._parse_response(response)
+
+        assert result.category == Category.TRAFFICKING
+        assert result.sub_category is None
+
     def test_parse_all_categories(self) -> None:
         """Test parsing all valid categories."""
         classifier = Classifier(api_key="test-key")
@@ -98,13 +112,17 @@ class TestClassifierParsing:
             assert result.category == category
 
     def test_parse_all_subcategories(self) -> None:
-        """Test parsing all valid subcategories."""
+        """Test parsing valid subcategories for each category."""
         classifier = Classifier(api_key="test-key")
 
-        for sub_category in SubCategory:
-            response = f'{{"relevant": true, "category": "enforcement", "sub_category": "{sub_category.value}", "confidence": "high"}}'
-            result = classifier._parse_response(response)
-            assert result.sub_category == sub_category
+        for category, subcategories in ALLOWED_SUBCATEGORIES.items():
+            for sub_category in subcategories:
+                response = (
+                    f'{{"relevant": true, "category": "{category.value}", '
+                    f'"sub_category": "{sub_category.value}", "confidence": "high"}}'
+                )
+                result = classifier._parse_response(response)
+                assert result.sub_category == sub_category
 
     def test_parse_invalid_confidence_defaults_to_medium(self) -> None:
         """Unknown confidence strings should be normalized."""
@@ -228,9 +246,7 @@ class TestClassificationPromptContent:
         """System prompt must not restrict relevance to enforcement actions only."""
         # The old framing 'anti-prostitution enforcement' was too narrow; the new
         # system prompt must make relevance inclusive of all covered topics.
-        assert (
-            "even if no arrest or enforcement action has occurred" in CLASSIFICATION_SYSTEM_PROMPT
-        )
+        assert "even if no arrest or enforcement action occurred" in CLASSIFICATION_SYSTEM_PROMPT
 
     def test_prompt_contains_hebrew_brothel_term(self) -> None:
         """Prompt must include Hebrew term for brothels (בתי בושת)."""
@@ -252,6 +268,13 @@ class TestClassificationPromptContent:
         """Prompt must enumerate all valid categories."""
         for category in ("brothel", "prostitution", "pimping", "trafficking", "enforcement"):
             assert category in CLASSIFICATION_PROMPT
+
+    def test_prompt_contains_category_subcategory_table(self) -> None:
+        """Prompt must spell out the valid category/sub_category mappings."""
+        for category, subcategories in ALLOWED_SUBCATEGORIES.items():
+            assert f"- {category.value} -> " in CLASSIFICATION_PROMPT
+            for subcategory in subcategories:
+                assert subcategory.value in CLASSIFICATION_PROMPT
 
 
 class TestClassifyPassesSystemPrompt:

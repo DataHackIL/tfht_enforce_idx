@@ -19,12 +19,24 @@ logger = logging.getLogger(__name__)
 
 # System prompt that primes the model with a broad, inclusive framing
 CLASSIFICATION_SYSTEM_PROMPT = (
-    "You are a classifier for Hebrew news articles. "
-    "Your job is to identify articles relevant to prostitution, brothels, human trafficking, "
-    "pimping, and law-enforcement actions against these activities in Israel. "
-    "Be inclusive: mark an article as relevant whenever any of these topics appears as a "
-    "significant part of the story, even if no arrest or enforcement action has occurred."
+    "You are a classifier for Hebrew news articles in Israel. "
+    "Mark an article as relevant whenever prostitution, brothels, pimping, "
+    "human trafficking, or enforcement against these activities is a significant "
+    "part of the story, even if no arrest or enforcement action occurred. "
+    "Return only JSON and choose only valid category/sub_category combinations."
 )
+
+ALLOWED_SUBCATEGORIES: dict[Category, set[SubCategory]] = {
+    Category.BROTHEL: {SubCategory.CLOSURE, SubCategory.OPENING},
+    Category.PROSTITUTION: {SubCategory.ARREST, SubCategory.FINE},
+    Category.PIMPING: {SubCategory.ARREST, SubCategory.SENTENCE},
+    Category.TRAFFICKING: {
+        SubCategory.ARREST,
+        SubCategory.RESCUE,
+        SubCategory.SENTENCE,
+    },
+    Category.ENFORCEMENT: {SubCategory.OPERATION, SubCategory.OTHER},
+}
 
 # Classification user prompt (Hebrew-aware)
 CLASSIFICATION_PROMPT = """Decide whether the Hebrew news article below is relevant to any of these topics in Israel:
@@ -34,9 +46,19 @@ CLASSIFICATION_PROMPT = """Decide whether the Hebrew news article below is relev
 - Human trafficking / סחר בבני אדם
 - Police or legal enforcement against the above
 
-If relevant, also assign:
-- category: brothel | prostitution | pimping | trafficking | enforcement
-- sub_category: closure | opening | arrest | fine | sentence | rescue | operation | other
+If the article is relevant, choose exactly one category and one valid sub_category from this table:
+
+- brothel -> closure | opening
+- prostitution -> arrest | fine
+- pimping -> arrest | sentence
+- trafficking -> arrest | rescue | sentence
+- enforcement -> operation | other
+
+Rules:
+- Do not choose a sub_category that is not listed for the chosen category.
+- If the article is not relevant, use category="not_relevant" and sub_category=null.
+- Be inclusive: articles about the covered topics are relevant even when no arrest or raid occurred.
+- Prefer the main topic of the article, not a minor passing mention.
 - confidence: high | medium | low
 
 Article:
@@ -154,6 +176,15 @@ class Classifier:
             if sub_category_str:
                 with contextlib.suppress(ValueError):
                     sub_category = SubCategory(sub_category_str)
+            if sub_category is not None:
+                allowed_subcategories = ALLOWED_SUBCATEGORIES.get(category, set())
+                if sub_category not in allowed_subcategories:
+                    logger.warning(
+                        "Invalid category/sub_category pair from classifier: %s / %s",
+                        category,
+                        sub_category,
+                    )
+                    sub_category = None
 
             # Parse confidence
             confidence = data.get("confidence", "medium")
