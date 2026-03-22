@@ -17,26 +17,57 @@ from denbust.data_models import (
 
 logger = logging.getLogger(__name__)
 
-# Classification prompt (Hebrew-aware)
-CLASSIFICATION_PROMPT = """You classify Hebrew news articles for relevance to anti-prostitution enforcement in Israel.
+# System prompt that primes the model with a broad, inclusive framing
+CLASSIFICATION_SYSTEM_PROMPT = (
+    "You are a classifier for Hebrew news articles in Israel. "
+    "Mark an article as relevant whenever prostitution, brothels, pimping, "
+    "human trafficking, or enforcement against these activities is a significant "
+    "part of the story, even if no arrest or enforcement action occurred. "
+    "Return only JSON and choose only valid category/sub_category combinations."
+)
 
-Given a news headline and snippet, determine:
-1. Is this relevant to: brothels, prostitution, pimping, human trafficking, or enforcement?
-2. Category: brothel | prostitution | pimping | trafficking | enforcement | not_relevant
-3. Sub-category (if relevant):
-   - brothel: closure | opening
-   - prostitution: arrest | fine
-   - pimping: arrest | sentence
-   - trafficking: arrest | rescue | sentence
-   - enforcement: operation | other
-4. Confidence: high | medium | low
+ALLOWED_SUBCATEGORIES: dict[Category, set[SubCategory]] = {
+    Category.BROTHEL: {SubCategory.CLOSURE, SubCategory.OPENING},
+    Category.PROSTITUTION: {SubCategory.ARREST, SubCategory.FINE},
+    Category.PIMPING: {SubCategory.ARREST, SubCategory.SENTENCE},
+    Category.TRAFFICKING: {
+        SubCategory.ARREST,
+        SubCategory.RESCUE,
+        SubCategory.SENTENCE,
+    },
+    Category.ENFORCEMENT: {SubCategory.OPERATION, SubCategory.OTHER},
+}
+
+# Classification user prompt (Hebrew-aware)
+CLASSIFICATION_PROMPT = """Decide whether the Hebrew news article below is relevant to any of these topics in Israel:
+- Brothels / בתי בושת
+- Prostitution / זנות
+- Pimping / סרסורות
+- Human trafficking / סחר בבני אדם
+- Police or legal enforcement against the above
+
+If the article is relevant, choose exactly one category and one valid sub_category from this table:
+
+- brothel -> closure | opening
+- prostitution -> arrest | fine
+- pimping -> arrest | sentence
+- trafficking -> arrest | rescue | sentence
+- enforcement -> operation | other
+
+Rules:
+- Do not choose a sub_category that is not listed for the chosen category.
+- If the article is not relevant, use category="not_relevant" and sub_category=null.
+- Be inclusive: articles about the covered topics are relevant even when no arrest or raid occurred.
+- Prefer the main topic of the article, not a minor passing mention.
+- confidence: high | medium | low
 
 Article:
 כותרת: {title}
 תקציר: {snippet}
 
-Respond with JSON only, no explanation:
-{{"relevant": true/false, "category": "...", "sub_category": "...", "confidence": "..."}}"""
+Respond with JSON only, no explanation.
+If relevant: {{"relevant": true, "category": "...", "sub_category": "...", "confidence": "..."}}
+If not relevant: {{"relevant": false, "category": "not_relevant", "sub_category": null, "confidence": "high"}}"""
 
 
 class Classifier:
@@ -74,6 +105,7 @@ class Classifier:
             response = self._client.messages.create(
                 model=self._model,
                 max_tokens=256,
+                system=CLASSIFICATION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
             )
 
@@ -144,6 +176,15 @@ class Classifier:
             if sub_category_str:
                 with contextlib.suppress(ValueError):
                     sub_category = SubCategory(sub_category_str)
+            if sub_category is not None:
+                allowed_subcategories = ALLOWED_SUBCATEGORIES.get(category, set())
+                if sub_category not in allowed_subcategories:
+                    logger.warning(
+                        "Invalid category/sub_category pair from classifier: %s / %s",
+                        category,
+                        sub_category,
+                    )
+                    sub_category = None
 
             # Parse confidence
             confidence = data.get("confidence", "medium")
