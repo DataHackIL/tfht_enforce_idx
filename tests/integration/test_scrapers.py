@@ -24,11 +24,58 @@ from denbust.sources.walla import WallaArchiveEntry, WallaScraper, create_walla_
 # Load fixture files
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 TEST_LOOKBACK_DAYS = 5000
+HEBREW_MONTH_NAMES = {
+    1: "ינואר",
+    2: "פברואר",
+    3: "מרץ",
+    4: "אפריל",
+    5: "מאי",
+    6: "יוני",
+    7: "יולי",
+    8: "אוגוסט",
+    9: "ספטמבר",
+    10: "אוקטובר",
+    11: "נובמבר",
+    12: "דצמבר",
+}
 
 
 def load_fixture(path: str) -> str:
     """Load a fixture file."""
     return (FIXTURES_DIR / path).read_text(encoding="utf-8")
+
+
+def relative_test_datetime(days_ago: int, *, hour: int = 12, minute: int = 0) -> datetime:
+    """Build a stable recent datetime for moving-window tests."""
+    return (datetime.now(UTC) - timedelta(days=days_ago)).replace(
+        hour=hour,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+
+
+def format_haaretz_date(value: datetime) -> str:
+    """Format a date in the Hebrew style used by Haaretz search results."""
+    return f"{value.day} ב{HEBREW_MONTH_NAMES[value.month]} {value.year}"
+
+
+def format_walla_pub_date(value: datetime) -> str:
+    """Format a date in the Walla archive footer style."""
+    return f"עודכן: {value.hour:02d}:{value.minute:02d} {value.day:02d}/{value.month:02d}/{value.year}"
+
+
+def load_recent_walla_archive_fixture() -> str:
+    """Load the Walla archive fixture with dates shifted into the recent window."""
+    recent_primary = relative_test_datetime(12, hour=13, minute=18)
+    recent_secondary = relative_test_datetime(10, hour=8, minute=42)
+    recent_non_match = relative_test_datetime(8, hour=12, minute=58)
+    return (
+        load_fixture("html/walla_archive_page.html")
+        .replace("עודכן: 13:18 12/03/2026", format_walla_pub_date(recent_primary))
+        .replace("עודכן: 08:42 06/03/2026", format_walla_pub_date(recent_secondary))
+        .replace("עודכן: 12:58 16/03/2026", format_walla_pub_date(recent_non_match))
+    )
 
 
 class TestMakoScraper:
@@ -1801,24 +1848,26 @@ class TestHaaretzScraper:
     ) -> None:
         """Haaretz fetch should paginate numbered search pages until matches run out."""
         scraper = self._create_scraper()
+        recent_first_result = format_haaretz_date(relative_test_datetime(10))
+        recent_second_result = format_haaretz_date(relative_test_datetime(9))
         page_one = """
         <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
           <article>
             <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
             <div>המשטרה עצרה חשוד בסרסרות.</div>
-            <time>15 במרץ 2026</time>
+            <time>__FIRST_DATE__</time>
           </article>
         </div></body></html>
-        """
+        """.replace("__FIRST_DATE__", recent_first_result)
         page_two = """
         <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
           <article>
             <h3><a href="/blogs/veredlee/2026-03-14/ty-article/def">איך לסגור בית בושת</a></h3>
             <div>כך תסייעו במיגור הזנות.</div>
-            <time>14 במרץ 2026</time>
+            <time>__SECOND_DATE__</time>
           </article>
         </div></body></html>
-        """
+        """.replace("__SECOND_DATE__", recent_second_result)
 
         async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
             del page
@@ -1872,15 +1921,16 @@ class TestHaaretzScraper:
     ) -> None:
         """Cleanup failures should be logged after successful article collection."""
         scraper = self._create_scraper()
+        recent_result_date = format_haaretz_date(relative_test_datetime(10))
         page_html = """
         <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
           <article>
             <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
             <div>המשטרה עצרה חשוד בסרסרות.</div>
-            <time>15 במרץ 2026</time>
+            <time>__RESULT_DATE__</time>
           </article>
         </div></body></html>
-        """
+        """.replace("__RESULT_DATE__", recent_result_date)
         mock_logger = MagicMock()
 
         async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
@@ -1980,15 +2030,16 @@ class TestHaaretzScraper:
     ) -> None:
         """Repeated Haaretz hits from different keywords should collapse to one article."""
         scraper = self._create_scraper()
+        recent_result_date = format_haaretz_date(relative_test_datetime(10))
         page_html = """
         <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
           <article>
             <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
             <div>המשטרה עצרה חשוד בסרסרות.</div>
-            <time>15 במרץ 2026</time>
+            <time>__RESULT_DATE__</time>
           </article>
         </div></body></html>
-        """
+        """.replace("__RESULT_DATE__", recent_result_date)
 
         async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
             del page, keyword
@@ -2012,15 +2063,16 @@ class TestHaaretzScraper:
     ) -> None:
         """A later failing keyword should not discard earlier Haaretz results."""
         scraper = self._create_scraper()
+        recent_result_date = format_haaretz_date(relative_test_datetime(10))
         page_html = """
         <html><body><div><h2>מציג תוצאות בנושא: <strong>בית בושת</strong></h2>
           <article>
             <h3><a href="/news/law/2026-03-15/ty-article/abc">פשיטה על בית בושת</a></h3>
             <div>המשטרה עצרה חשוד בסרסרות.</div>
-            <time>15 במרץ 2026</time>
+            <time>__RESULT_DATE__</time>
           </article>
         </div></body></html>
-        """
+        """.replace("__RESULT_DATE__", recent_result_date)
 
         async def fake_fetch(page: object, keyword: str, page_number: int) -> str | None:
             del page
@@ -2388,6 +2440,7 @@ class TestWallaScraper:
     ) -> None:
         """Walla fetch should paginate archive pages until keyword matches are found."""
         scraper = self._create_scraper()
+        first_page_date = format_walla_pub_date(relative_test_datetime(7, hour=12, minute=58))
         page_one = """
         <html><body>
           <ul>
@@ -2397,7 +2450,7 @@ class TestWallaScraper:
                   <div class="content">
                     <h3>חשד לרצח: גבר כבן 30 נורה למוות ברכבו בטירה</h3>
                     <p>המשטרה פתחה בחקירה.</p>
-                    <footer><div class="pub-date">עודכן: 12:58 16/03/2026</div></footer>
+                    <footer><div class="pub-date">__FIRST_PAGE_DATE__</div></footer>
                   </div>
                 </article>
               </a>
@@ -2405,8 +2458,8 @@ class TestWallaScraper:
           </ul>
           <nav><a href="https://news.walla.co.il/archive/1?year=2026&month=3&page=2">2</a></nav>
         </body></html>
-        """
-        page_two = load_fixture("html/walla_archive_page.html")
+        """.replace("__FIRST_PAGE_DATE__", first_page_date)
+        page_two = load_recent_walla_archive_fixture()
 
         async def fake_fetch_archive_page(
             category_id: int, year: int, month: int, page_number: int
@@ -2492,6 +2545,8 @@ class TestWallaScraper:
     ) -> None:
         """Entries older than the cutoff should be skipped without discarding newer matches."""
         scraper = self._create_scraper()
+        recent_match_date = format_walla_pub_date(relative_test_datetime(12, hour=13, minute=18))
+        old_result_date = format_walla_pub_date(relative_test_datetime(60, hour=11, minute=0))
         mixed_page = """
         <html><body>
           <ul>
@@ -2501,7 +2556,7 @@ class TestWallaScraper:
                   <div class="content">
                     <h3>בית בושת אותר בתוך מקלט ציבורי</h3>
                     <p>תלונה למוקד העירוני.</p>
-                    <footer><div class="pub-date">עודכן: 13:18 12/03/2026</div></footer>
+                    <footer><div class="pub-date">__RECENT_MATCH_DATE__</div></footer>
                   </div>
                 </article>
               </a>
@@ -2512,14 +2567,16 @@ class TestWallaScraper:
                   <div class="content">
                     <h3>בית בושת ישן</h3>
                     <p>כתבה ישנה.</p>
-                    <footer><div class="pub-date">עודכן: 11:00 01/01/2026</div></footer>
+                    <footer><div class="pub-date">__OLD_RESULT_DATE__</div></footer>
                   </div>
                 </article>
               </a>
             </li>
           </ul>
         </body></html>
-        """
+        """.replace("__RECENT_MATCH_DATE__", recent_match_date).replace(
+            "__OLD_RESULT_DATE__", old_result_date
+        )
 
         async def fake_fetch_archive_page(
             category_id: int, year: int, month: int, page_number: int
@@ -2583,7 +2640,7 @@ class TestWallaScraper:
     ) -> None:
         """Repeated archive hits from multiple categories should collapse to one article."""
         scraper = self._create_scraper()
-        html_content = load_fixture("html/walla_archive_page.html")
+        html_content = load_recent_walla_archive_fixture()
 
         async def fake_fetch_archive_page(
             category_id: int, year: int, month: int, page_number: int
@@ -2606,7 +2663,7 @@ class TestWallaScraper:
     ) -> None:
         """HTTP failures on later pages should keep already collected Walla articles."""
         scraper = self._create_scraper()
-        html_content = load_fixture("html/walla_archive_page.html")
+        html_content = load_recent_walla_archive_fixture()
 
         async def fake_fetch_archive_page(
             category_id: int, year: int, month: int, page_number: int
