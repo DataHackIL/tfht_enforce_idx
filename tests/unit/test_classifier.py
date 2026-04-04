@@ -307,6 +307,7 @@ class TestClassifierRuntime:
         assert classifier._system_prompt == "system override"
         assert classifier._user_prompt_template == "Title: {title}\nSnippet: {snippet}"
 
+
 class TestClassificationPromptContent:
     """Tests verifying the prompt and system prompt content matches the issue requirements."""
 

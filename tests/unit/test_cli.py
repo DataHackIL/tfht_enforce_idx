@@ -160,7 +160,9 @@ class TestCli:
 
             return Result()
 
-        monkeypatch.setattr("denbust.validation.run_validation_collect", fake_run_validation_collect)
+        monkeypatch.setattr(
+            "denbust.validation.run_validation_collect", fake_run_validation_collect
+        )
 
         result = runner.invoke(app, ["validation-collect"])
 
@@ -242,6 +244,8 @@ class TestCli:
         result = runner.invoke(app, ["validation-evaluate"])
 
         assert result.exit_code == 0
-        assert captured["validation_set_path"] == Path("validation/news_items/classifier_validation.csv")
+        assert captured["validation_set_path"] == Path(
+            "validation/news_items/classifier_validation.csv"
+        )
         assert captured["variants_path"] == Path("agents/validation/classifier_variants.yaml")
         assert captured["output_path"] is None

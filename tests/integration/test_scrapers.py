@@ -62,7 +62,9 @@ def format_haaretz_date(value: datetime) -> str:
 
 def format_walla_pub_date(value: datetime) -> str:
     """Format a date in the Walla archive footer style."""
-    return f"עודכן: {value.hour:02d}:{value.minute:02d} {value.day:02d}/{value.month:02d}/{value.year}"
+    return (
+        f"עודכן: {value.hour:02d}:{value.minute:02d} {value.day:02d}/{value.month:02d}/{value.year}"
+    )
 
 
 def load_recent_walla_archive_fixture() -> str:

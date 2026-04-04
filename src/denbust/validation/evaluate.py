@@ -179,9 +179,7 @@ async def evaluate_classifier_variants(
     for variant in matrix.variants:
         model = variant.model or default_model
         system_prompt = (
-            variant.system_prompt
-            if variant.system_prompt is not None
-            else default_system_prompt
+            variant.system_prompt if variant.system_prompt is not None else default_system_prompt
         )
         user_prompt_template = (
             variant.user_prompt_template
@@ -205,9 +203,7 @@ async def evaluate_classifier_variants(
             )
             for item in classified_articles
         ]
-        rankings.append(
-            _score_predictions(labels, predictions, variant=variant, model=model)
-        )
+        rankings.append(_score_predictions(labels, predictions, variant=variant, model=model))
 
     sorted_rankings = _sort_rankings(rankings)
     report_path = output_path or default_evaluation_output_path(Config(), collected_at)
@@ -259,12 +255,12 @@ def render_rankings_table(metrics: list[VariantMetrics]) -> str:
         for index, metric in enumerate(metrics, start=1)
     ]
     widths = [
-        max(len(header), *(len(row[column]) for row in rows)) for column, header in enumerate(headers)
+        max(len(header), *(len(row[column]) for row in rows))
+        for column, header in enumerate(headers)
     ]
     header_line = "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers))
     row_lines = [
-        "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row))
-        for row in rows
+        "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row)) for row in rows
     ]
     return "\n".join([header_line, *row_lines])
 
