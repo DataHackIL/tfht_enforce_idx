@@ -177,7 +177,7 @@ README.md
 ## How to read the repo
 
 ### `src/denbust/cli.py`
-Main CLI entrypoint.  
+Main CLI entrypoint.
 Start here to understand the exposed commands:
 
 - `denbust scan`
@@ -189,11 +189,11 @@ Start here to understand the exposed commands:
 This is the fastest way to understand how the repository is meant to be operated.
 
 ### `src/denbust/pipeline.py`
-Core orchestration entrypoint.  
+Core orchestration entrypoint.
 This is where config, dataset/job dispatch, state handling, output, and run snapshots come together.
 
 ### `src/denbust/config.py`
-Central config models and loading behavior.  
+Central config models and loading behavior.
 Important for understanding:
 - local vs GitHub config
 - operational store selection
@@ -239,11 +239,11 @@ Current source modules include:
 This is where source-specific fetching logic lives.
 
 ### `src/denbust/classifier/`
-LLM-assisted classification logic.  
+LLM-assisted classification logic.
 Currently centered on relevance/category classification over fetched candidate items.
 
 ### `src/denbust/dedup/`
-Story similarity and deduplication helpers.  
+Story similarity and deduplication helpers.
 Important for collapsing multiple source articles into unified items.
 
 ### `src/denbust/ops/`
