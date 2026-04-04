@@ -334,9 +334,13 @@ class TestValidationCollection:
 
             return Result()
 
-        monkeypatch.setattr("denbust.validation.collect.setup_logging", lambda: calls.setdefault("setup", True))
+        monkeypatch.setattr(
+            "denbust.validation.collect.setup_logging", lambda: calls.setdefault("setup", True)
+        )
         monkeypatch.setattr("denbust.validation.collect.load_config", lambda _path: config)
-        monkeypatch.setattr("denbust.validation.collect.collect_validation_draft", fake_collect_validation_draft)
+        monkeypatch.setattr(
+            "denbust.validation.collect.collect_validation_draft", fake_collect_validation_draft
+        )
 
         result = run_validation_collect(config_path=Path("agents/news/local.yaml"), per_source=3)
 
@@ -377,10 +381,22 @@ class TestValidationCommon:
         timestamp = datetime(2026, 4, 4, 10, 30, tzinfo=UTC)
 
         assert validation_state_dir(config) == tmp_path / "validation" / config.dataset_name.value
-        assert validation_drafts_dir(config) == tmp_path / "validation" / config.dataset_name.value / "drafts"
-        assert validation_reports_dir(config) == tmp_path / "validation" / config.dataset_name.value / "reports"
-        assert default_collect_output_path(config, timestamp).name == "classifier_draft_2026-04-04T10-30-00Z.csv"
-        assert default_evaluation_output_path(config, timestamp).name == "classifier_variant_eval_2026-04-04T10-30-00Z.json"
+        assert (
+            validation_drafts_dir(config)
+            == tmp_path / "validation" / config.dataset_name.value / "drafts"
+        )
+        assert (
+            validation_reports_dir(config)
+            == tmp_path / "validation" / config.dataset_name.value / "reports"
+        )
+        assert (
+            default_collect_output_path(config, timestamp).name
+            == "classifier_draft_2026-04-04T10-30-00Z.csv"
+        )
+        assert (
+            default_evaluation_output_path(config, timestamp).name
+            == "classifier_variant_eval_2026-04-04T10-30-00Z.json"
+        )
 
     def test_parse_bool_and_datetime_cover_edge_cases(self) -> None:
         """Boolean and datetime parsing should handle invalid booleans and naive timestamps."""
@@ -398,14 +414,20 @@ class TestValidationCommon:
     ) -> None:
         """CSV helpers should tolerate missing files and prefer explicit canonical URLs."""
         assert read_csv_rows(tmp_path / "missing.csv") == []
-        assert canonicalize_csv_url(
-            "https://news.walla.co.il/item/3818937?utm_source=archive",
-            "",
-        ) == "https://news.walla.co.il/item/3818937"
-        assert canonicalize_csv_url(
-            "https://example.com/original",
-            " https://news.walla.co.il/item/3818937?utm_source=archive ",
-        ) == "https://news.walla.co.il/item/3818937"
+        assert (
+            canonicalize_csv_url(
+                "https://news.walla.co.il/item/3818937?utm_source=archive",
+                "",
+            )
+            == "https://news.walla.co.il/item/3818937"
+        )
+        assert (
+            canonicalize_csv_url(
+                "https://example.com/original",
+                " https://news.walla.co.il/item/3818937?utm_source=archive ",
+            )
+            == "https://news.walla.co.il/item/3818937"
+        )
 
 
 class TestValidationFinalize:
@@ -908,7 +930,9 @@ class TestValidationEvaluate:
         assert metrics.tn == 0
         assert metrics.overall_exact_match == 0.5
 
-    def test_run_validation_evaluate_delegates(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_run_validation_evaluate_delegates(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """The evaluate wrapper should set up logging and delegate through asyncio.run."""
         calls: dict[str, object] = {}
 
