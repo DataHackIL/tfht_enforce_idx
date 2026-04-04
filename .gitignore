@@ -209,6 +209,9 @@ __marimo__/
 # Local agent overrides
 LOCAL_AGENTS.md
 
+# Claude Code
+.claude/
+
 .DS_Store
 
 data/local/
