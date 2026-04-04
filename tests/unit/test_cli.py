@@ -194,7 +194,9 @@ class TestCli:
 
             return Result()
 
-        monkeypatch.setattr("denbust.validation.run_validation_collect", fake_run_validation_collect)
+        monkeypatch.setattr(
+            "denbust.validation.run_validation_collect", fake_run_validation_collect
+        )
 
         result = runner.invoke(app, ["validation-collect"])
 
