@@ -246,6 +246,26 @@ class TestCli:
         assert captured["input_path"] == Path("draft.csv")
         assert captured["validation_set_path"] == Path("validation.csv")
 
+    def test_validation_commands_use_canonical_default_constants(self) -> None:
+        """CLI defaults should reuse the shared tracked validation asset paths."""
+        from denbust.validation import common as validation_common
+
+        validation_finalize_command = next(
+            command for command in app.registered_commands if command.name == "validation-finalize"
+        )
+        validation_evaluate_command = next(
+            command for command in app.registered_commands if command.name == "validation-evaluate"
+        )
+
+        assert validation_finalize_command.callback.__defaults__ == (
+            validation_common.DEFAULT_VALIDATION_SET_PATH,
+        )
+        assert validation_evaluate_command.callback.__defaults__ == (
+            validation_common.DEFAULT_VALIDATION_SET_PATH,
+            validation_common.DEFAULT_VARIANT_MATRIX_PATH,
+            None,
+        )
+
     def test_validation_evaluate_uses_default_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """validation-evaluate should default to the tracked assets."""
         captured: dict[str, object] = {}

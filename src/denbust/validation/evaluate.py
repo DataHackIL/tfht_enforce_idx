@@ -103,10 +103,11 @@ def _score_predictions(
 
         if true_relevant:
             relevant_rows += 1
-            if predicted_category == true_category:
-                category_matches += 1
-            if predicted_sub_category == true_sub_category:
-                subcategory_matches += 1
+            if predicted_relevant:
+                if predicted_category == true_category:
+                    category_matches += 1
+                if predicted_sub_category == true_sub_category:
+                    subcategory_matches += 1
 
         if (
             predicted_relevant == true_relevant

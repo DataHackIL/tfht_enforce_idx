@@ -6,15 +6,13 @@ from typing import Annotated
 import typer
 
 from denbust.models.common import DatasetName, JobName
+from denbust.validation.common import DEFAULT_VALIDATION_SET_PATH, DEFAULT_VARIANT_MATRIX_PATH
 
 app = typer.Typer(
     name="denbust",
     help="Monitor enforcement of anti-brothel laws in Israel.",
     no_args_is_help=True,
 )
-
-DEFAULT_VALIDATION_SET_PATH = Path("validation/news_items/classifier_validation.csv")
-DEFAULT_VARIANT_MATRIX_PATH = Path("agents/validation/classifier_variants.yaml")
 
 
 @app.command()
@@ -135,7 +133,7 @@ def validation_collect(
 
 @app.command("validation-finalize")
 def validation_finalize(
-    input: Annotated[
+    input_path: Annotated[
         Path,
         typer.Option("--input", "-i", help="Path to a reviewed draft CSV"),
     ],
@@ -148,7 +146,7 @@ def validation_finalize(
     from denbust.validation import run_validation_finalize
 
     result = run_validation_finalize(
-        input_path=input,
+        input_path=input_path,
         validation_set_path=validation_set,
     )
     typer.echo(

@@ -909,6 +909,23 @@ class TestValidationEvaluate:
         assert metrics.category_accuracy_relevant_only == 1.0
         assert metrics.subcategory_accuracy_relevant_only == 1.0
 
+    def test_score_predictions_requires_predicted_relevance_for_category_credit(self) -> None:
+        """Category and sub-category accuracy should not award credit to irrelevant predictions."""
+        metrics = _score_predictions(
+            labels=[
+                (True, "brothel", "closure"),
+            ],
+            predictions=[
+                (False, "brothel", "closure"),
+            ],
+            variant=ClassifierVariantSpec(name="baseline"),
+            model="claude-sonnet-4-20250514",
+        )
+
+        assert metrics.relevance_f1 == 0.0
+        assert metrics.category_accuracy_relevant_only == 0.0
+        assert metrics.subcategory_accuracy_relevant_only == 0.0
+
     def test_score_predictions_counts_false_positives(self) -> None:
         """Scoring should count false positives and exact matches correctly."""
         metrics = _score_predictions(
