@@ -520,8 +520,14 @@ class TestRunPipelineAsync:
     async def test_run_pipeline_async_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Successful runs should return unified items after marking them seen."""
 
-        def fake_create_classifier(*, api_key: str, model: str) -> MagicMock:
-            del api_key, model
+        def fake_create_classifier(
+            *,
+            api_key: str,
+            model: str,
+            system_prompt: str | None = None,
+            user_prompt_template: str | None = None,
+        ) -> MagicMock:
+            del api_key, model, system_prompt, user_prompt_template
             return classifier
 
         def fake_create_deduplicator(*, threshold: float) -> MagicMock:

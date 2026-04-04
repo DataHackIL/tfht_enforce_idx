@@ -167,6 +167,67 @@ class TestClassifierRuntime:
         assert result.category == Category.BROTHEL
 
     @pytest.mark.asyncio
+    async def test_classify_uses_user_prompt_override(self) -> None:
+        """Custom user prompt templates should be formatted into the API request."""
+        classifier = Classifier(
+            api_key="test-key",
+            user_prompt_template="Headline={title}; Summary={snippet}",
+        )
+        messages = MagicMock()
+        messages.create = MagicMock(
+            return_value=MagicMock(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text='{"relevant": false, "category": "not_relevant", "confidence": "high"}',
+                    )
+                ]
+            )
+        )
+        classifier._client.messages = messages
+        article = RawArticle(
+            url=HttpUrl("https://example.com/override"),
+            title="Headline",
+            snippet="Snippet",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="test",
+        )
+
+        await classifier.classify(article)
+
+        call_kwargs = messages.create.call_args.kwargs
+        assert call_kwargs["messages"][0]["content"] == "Headline=Headline; Summary=Snippet"
+
+    @pytest.mark.asyncio
+    async def test_classify_uses_default_system_prompt(self) -> None:
+        """Default classification should send the built-in system prompt."""
+        classifier = Classifier(api_key="test-key")
+        messages = MagicMock()
+        messages.create = MagicMock(
+            return_value=MagicMock(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text='{"relevant": false, "category": "not_relevant", "confidence": "high"}',
+                    )
+                ]
+            )
+        )
+        classifier._client.messages = messages
+        article = RawArticle(
+            url=HttpUrl("https://example.com/default"),
+            title="Headline",
+            snippet="Snippet",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="test",
+        )
+
+        await classifier.classify(article)
+
+        call_kwargs = messages.create.call_args.kwargs
+        assert call_kwargs["system"] == CLASSIFICATION_SYSTEM_PROMPT
+
+    @pytest.mark.asyncio
     async def test_classify_returns_not_relevant_on_api_error(self) -> None:
         """Anthropic API failures should degrade safely."""
         classifier = Classifier(api_key="test-key")
@@ -233,6 +294,18 @@ class TestClassifierRuntime:
 
         assert isinstance(classifier, Classifier)
         assert classifier._model == "custom-model"
+
+    def test_create_classifier_uses_prompt_overrides(self) -> None:
+        """Factory should pass through prompt overrides."""
+        classifier = create_classifier(
+            api_key="test-key",
+            model="custom-model",
+            system_prompt="system override",
+            user_prompt_template="Title: {title}\nSnippet: {snippet}",
+        )
+
+        assert classifier._system_prompt == "system override"
+        assert classifier._user_prompt_template == "Title: {title}\nSnippet: {snippet}"
 
 
 class TestClassificationPromptContent:
