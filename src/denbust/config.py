@@ -32,6 +32,8 @@ class ClassifierConfig(BaseModel):
 
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-20250514"
+    system_prompt: str | None = None
+    user_prompt_template: str | None = None
 
 
 class DedupConfig(BaseModel):
