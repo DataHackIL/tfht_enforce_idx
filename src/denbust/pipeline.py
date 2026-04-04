@@ -201,6 +201,8 @@ async def run_news_ingest_job(
     classifier = create_classifier(
         api_key=config.anthropic_api_key,
         model=config.classifier.model,
+        system_prompt=config.classifier.system_prompt,
+        user_prompt_template=config.classifier.user_prompt_template,
     )
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
     seen_store = create_seen_store(config.state_paths.seen_path)

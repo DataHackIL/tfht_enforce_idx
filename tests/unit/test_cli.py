@@ -133,3 +133,115 @@ class TestCli:
         runpy.run_module("denbust.cli", run_name="__main__")
 
         assert calls == [True]
+
+    def test_validation_collect_uses_local_news_config_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """validation-collect should default to the tracked local config."""
+        captured: dict[str, object] = {}
+
+        def fake_run_validation_collect(
+            *,
+            config_path: Path,
+            days_override: int | None = None,
+            per_source: int = 10,
+            output_path: Path | None = None,
+        ) -> object:
+            captured["config_path"] = config_path
+            captured["days_override"] = days_override
+            captured["per_source"] = per_source
+            captured["output_path"] = output_path
+
+            class Result:
+                total_rows = 0
+                output_path = Path("draft.csv")
+                per_source_counts: dict[str, int] = {}
+                errors: list[str] = []
+
+            return Result()
+
+        monkeypatch.setattr("denbust.validation.run_validation_collect", fake_run_validation_collect)
+
+        result = runner.invoke(app, ["validation-collect"])
+
+        assert result.exit_code == 0
+        assert captured["config_path"] == Path("agents/news/local.yaml")
+        assert captured["days_override"] is None
+        assert captured["per_source"] == 10
+        assert captured["output_path"] is None
+
+    def test_validation_finalize_forwards_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """validation-finalize should forward its input and validation set paths."""
+        captured: dict[str, object] = {}
+
+        def fake_run_validation_finalize(
+            *,
+            input_path: Path,
+            validation_set_path: Path,
+        ) -> object:
+            captured["input_path"] = input_path
+            captured["validation_set_path"] = validation_set_path
+
+            class Result:
+                added_rows = 1
+                validation_set_path = Path("validation.csv")
+                skipped_duplicates = 0
+                total_rows = 1
+
+            return Result()
+
+        monkeypatch.setattr(
+            "denbust.validation.run_validation_finalize",
+            fake_run_validation_finalize,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "validation-finalize",
+                "--input",
+                "draft.csv",
+                "--validation-set",
+                "validation.csv",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured["input_path"] == Path("draft.csv")
+        assert captured["validation_set_path"] == Path("validation.csv")
+
+    def test_validation_evaluate_uses_default_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """validation-evaluate should default to the tracked assets."""
+        captured: dict[str, object] = {}
+
+        def fake_run_validation_evaluate(
+            *,
+            validation_set_path: Path,
+            variants_path: Path,
+            output_path: Path | None = None,
+        ) -> object:
+            captured["validation_set_path"] = validation_set_path
+            captured["variants_path"] = variants_path
+            captured["output_path"] = output_path
+
+            class Result:
+                output_path = Path("report.json")
+                rankings: list[object] = []
+
+            return Result()
+
+        monkeypatch.setattr(
+            "denbust.validation.run_validation_evaluate",
+            fake_run_validation_evaluate,
+        )
+        monkeypatch.setattr(
+            "denbust.validation.evaluate.render_rankings_table",
+            lambda _rankings: "",
+        )
+
+        result = runner.invoke(app, ["validation-evaluate"])
+
+        assert result.exit_code == 0
+        assert captured["validation_set_path"] == Path("validation/news_items/classifier_validation.csv")
+        assert captured["variants_path"] == Path("agents/validation/classifier_variants.yaml")
+        assert captured["output_path"] is None

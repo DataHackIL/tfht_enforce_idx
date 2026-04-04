@@ -13,6 +13,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+DEFAULT_VALIDATION_SET_PATH = Path("validation/news_items/classifier_validation.csv")
+DEFAULT_VARIANT_MATRIX_PATH = Path("agents/validation/classifier_variants.yaml")
+
 
 @app.command()
 def scan(
@@ -92,6 +95,95 @@ def backup(
 
     config_path = config or Path("agents/backup/news_items.yaml")
     run_backup(config_path=config_path, dataset_name=dataset)
+
+
+@app.command("validation-collect")
+def validation_collect(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+    days: Annotated[
+        int | None,
+        typer.Option("--days", "-d", help="Days back to search (defaults to 7)"),
+    ] = None,
+    per_source: Annotated[
+        int,
+        typer.Option("--per-source", help="Maximum candidate rows to collect per source"),
+    ] = 10,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Explicit draft CSV output path"),
+    ] = None,
+) -> None:
+    """Collect a local draft CSV for human review and annotation."""
+    from denbust.validation import run_validation_collect
+
+    config_path = config or Path("agents/news/local.yaml")
+    result = run_validation_collect(
+        config_path=config_path,
+        days_override=days,
+        per_source=per_source,
+        output_path=output,
+    )
+    typer.echo(f"Wrote {result.total_rows} draft rows to {result.output_path}")
+    for source_name, count in sorted(result.per_source_counts.items()):
+        typer.echo(f"{source_name}: {count}")
+    for error in result.errors:
+        typer.echo(f"error: {error}", err=True)
+
+
+@app.command("validation-finalize")
+def validation_finalize(
+    input: Annotated[
+        Path,
+        typer.Option("--input", "-i", help="Path to a reviewed draft CSV"),
+    ],
+    validation_set: Annotated[
+        Path,
+        typer.Option("--validation-set", help="Path to the tracked validation CSV"),
+    ] = DEFAULT_VALIDATION_SET_PATH,
+) -> None:
+    """Merge reviewed draft rows into the tracked permanent validation set."""
+    from denbust.validation import run_validation_finalize
+
+    result = run_validation_finalize(
+        input_path=input,
+        validation_set_path=validation_set,
+    )
+    typer.echo(
+        "Added "
+        f"{result.added_rows} rows to {result.validation_set_path} "
+        f"({result.skipped_duplicates} duplicate(s) skipped, {result.total_rows} total)."
+    )
+
+
+@app.command("validation-evaluate")
+def validation_evaluate(
+    validation_set: Annotated[
+        Path,
+        typer.Option("--validation-set", help="Path to the tracked validation CSV"),
+    ] = DEFAULT_VALIDATION_SET_PATH,
+    variants: Annotated[
+        Path,
+        typer.Option("--variants", help="Path to the classifier variant matrix YAML"),
+    ] = DEFAULT_VARIANT_MATRIX_PATH,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Explicit JSON report output path"),
+    ] = None,
+) -> None:
+    """Evaluate classifier variants against the permanent validation set."""
+    from denbust.validation import run_validation_evaluate
+    from denbust.validation.evaluate import render_rankings_table
+
+    result = run_validation_evaluate(
+        validation_set_path=validation_set,
+        variants_path=variants,
+        output_path=output,
+    )
+    typer.echo(render_rankings_table(result.rankings))
+    typer.echo(f"Saved JSON report to {result.output_path}")
 
 
 @app.command()

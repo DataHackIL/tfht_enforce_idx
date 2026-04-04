@@ -1,0 +1,6 @@
+defaults:
+  model: claude-sonnet-4-20250514
+
+variants:
+  - name: baseline
+    description: Current production classifier settings.

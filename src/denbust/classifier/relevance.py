@@ -46,15 +46,21 @@ class Classifier:
         self,
         api_key: str,
         model: str = "claude-sonnet-4-20250514",
+        system_prompt: str | None = None,
+        user_prompt_template: str | None = None,
     ) -> None:
         """Initialize classifier.
 
         Args:
             api_key: Anthropic API key.
             model: Model to use for classification.
+            system_prompt: Optional Anthropic system prompt override.
+            user_prompt_template: Optional user prompt template override.
         """
         self._client = anthropic.Anthropic(api_key=api_key)
         self._model = model
+        self._system_prompt = system_prompt
+        self._user_prompt_template = user_prompt_template or CLASSIFICATION_PROMPT
 
     async def classify(self, article: RawArticle) -> ClassificationResult:
         """Classify a single article.
@@ -65,17 +71,25 @@ class Classifier:
         Returns:
             Classification result.
         """
-        prompt = CLASSIFICATION_PROMPT.format(
+        prompt = self._user_prompt_template.format(
             title=article.title,
             snippet=article.snippet[:300],  # Limit snippet for token efficiency
         )
 
         try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=256,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            if self._system_prompt is None:
+                response = self._client.messages.create(
+                    model=self._model,
+                    max_tokens=256,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            else:
+                response = self._client.messages.create(
+                    model=self._model,
+                    max_tokens=256,
+                    system=self._system_prompt,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
             # Extract text from response
             text = ""
@@ -167,14 +181,26 @@ class Classifier:
             )
 
 
-def create_classifier(api_key: str, model: str = "claude-sonnet-4-20250514") -> Classifier:
+def create_classifier(
+    api_key: str,
+    model: str = "claude-sonnet-4-20250514",
+    system_prompt: str | None = None,
+    user_prompt_template: str | None = None,
+) -> Classifier:
     """Create a classifier instance.
 
     Args:
         api_key: Anthropic API key.
         model: Model to use.
+        system_prompt: Optional Anthropic system prompt override.
+        user_prompt_template: Optional user prompt template override.
 
     Returns:
         Classifier instance.
     """
-    return Classifier(api_key=api_key, model=model)
+    return Classifier(
+        api_key=api_key,
+        model=model,
+        system_prompt=system_prompt,
+        user_prompt_template=user_prompt_template,
+    )
