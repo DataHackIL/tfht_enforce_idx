@@ -172,6 +172,38 @@ class TestCli:
         assert captured["per_source"] == 10
         assert captured["output_path"] is None
 
+    def test_validation_collect_reports_source_counts_and_errors(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """validation-collect should print per-source counts and surfaced errors."""
+
+        def fake_run_validation_collect(
+            *,
+            config_path: Path,
+            days_override: int | None = None,
+            per_source: int = 10,
+            output_path: Path | None = None,
+        ) -> object:
+            del config_path, days_override, per_source, output_path
+
+            class Result:
+                total_rows = 3
+                output_path = Path("draft.csv")
+                per_source_counts = {"mako": 1, "ynet": 2}
+                errors = ["walla: boom"]
+
+            return Result()
+
+        monkeypatch.setattr("denbust.validation.run_validation_collect", fake_run_validation_collect)
+
+        result = runner.invoke(app, ["validation-collect"])
+
+        assert result.exit_code == 0
+        assert "Wrote 3 draft rows to draft.csv" in result.stdout
+        assert "mako: 1" in result.stdout
+        assert "ynet: 2" in result.stdout
+        assert "error: walla: boom" in result.stderr
+
     def test_validation_finalize_forwards_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """validation-finalize should forward its input and validation set paths."""
         captured: dict[str, object] = {}
