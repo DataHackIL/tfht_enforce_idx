@@ -1037,8 +1037,8 @@ class TestIceScraper:
         assert str(articles[0].url) == "https://www.ice.co.il/local-news/news/article/1099242"
         assert all(article.source_name == "ice" for article in articles)
 
-    def test_parse_article_item_skips_missing_or_invalid_dates(self) -> None:
-        """ICE items without a parseable date should be ignored safely."""
+    def test_parse_article_item_treats_unparseable_date_as_recent(self) -> None:
+        """ICE items with an unparseable date should be treated as recent, not dropped."""
         scraper = self._create_scraper()
         cutoff = datetime.now(UTC) - timedelta(days=TEST_LOOKBACK_DAYS)
         item = BeautifulSoup(
@@ -1047,6 +1047,26 @@ class TestIceScraper:
               <a href="/law/news/article/1086606">בית בושת אותר בתוך מקלט ציבורי</a>
               <a href="/law/news/article/1086606">עיריית בת ים פתחה בחקירה</a>
               <span>תאריך לא תקין</span>
+            </li>
+            """,
+            "lxml",
+        ).li
+
+        assert item is not None
+        result = scraper._parse_article_item(item, cutoff)
+        assert result is not None
+        assert result.title == "בית בושת אותר בתוך מקלט ציבורי"
+
+    def test_parse_article_item_drops_articles_older_than_cutoff(self) -> None:
+        """ICE items with a valid date before the cutoff window should be dropped."""
+        scraper = self._create_scraper()
+        cutoff = datetime(2026, 3, 20, tzinfo=UTC)
+        item = BeautifulSoup(
+            """
+            <li>
+              <a href="/law/news/article/1086606">בית בושת אותר בתוך מקלט ציבורי</a>
+              <a href="/law/news/article/1086606">עיריית בת ים פתחה בחקירה</a>
+              <span>12/03/2026 07:46</span>
             </li>
             """,
             "lxml",
@@ -3067,8 +3087,8 @@ class TestRSSSource:
         assert source._parse_entry(entry, cutoff, ["בית בושת"]) is None
 
     def test_parse_date_uses_struct_time_fallback(self) -> None:
-        """Parsed struct_time fields should be converted when strings are absent."""
-        from time import mktime
+        """Parsed struct_time fields should be interpreted as UTC via calendar.timegm."""
+        import calendar
 
         source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
         parsed_time = (2026, 2, 15, 10, 0, 0, 0, 46, 0)
@@ -3076,7 +3096,7 @@ class TestRSSSource:
 
         parsed = source._parse_date(entry)
 
-        expected = datetime.fromtimestamp(mktime(parsed_time), tz=UTC)
+        expected = datetime.fromtimestamp(calendar.timegm(parsed_time), tz=UTC)
         assert parsed == expected
 
     def test_parse_date_invalid_values_return_none(self) -> None:

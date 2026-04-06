@@ -1,5 +1,6 @@
 """RSS feed fetcher for news sources."""
 
+import calendar
 import logging
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -165,9 +166,9 @@ class RSSSource(Source):
             parsed_field = f"{field}_parsed"
             if parsed_field in entry and entry[parsed_field]:
                 try:
-                    from time import mktime
-
-                    return datetime.fromtimestamp(mktime(entry[parsed_field]), tz=UTC)
+                    return datetime.fromtimestamp(
+                        calendar.timegm(entry[parsed_field]), tz=UTC
+                    )
                 except (ValueError, TypeError, OverflowError):
                     pass
 
