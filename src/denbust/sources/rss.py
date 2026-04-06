@@ -166,9 +166,7 @@ class RSSSource(Source):
             parsed_field = f"{field}_parsed"
             if parsed_field in entry and entry[parsed_field]:
                 try:
-                    return datetime.fromtimestamp(
-                        calendar.timegm(entry[parsed_field]), tz=UTC
-                    )
+                    return datetime.fromtimestamp(calendar.timegm(entry[parsed_field]), tz=UTC)
                 except (ValueError, TypeError, OverflowError):
                     pass
 
