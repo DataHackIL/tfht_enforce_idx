@@ -351,6 +351,35 @@ class TestCli:
         assert payload["config_path"] == "agents/news.yaml"
         assert payload["days"] == 21
 
+    def test_diagnose_sources_writes_output_file(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """diagnose-sources should write JSON to the requested output path."""
+        report = source_health.SourceDiagnosticReport(
+            config_path="agents/news.yaml",
+            days=21,
+            sample_keywords=["זנות"],
+            artifact_analysis_enabled=True,
+            live_probe_enabled=True,
+            results=[],
+        )
+        output_path = tmp_path / "diagnostics.json"
+
+        def fake_run_source_diagnostics(**_kwargs: object) -> object:
+            return report
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_source_diagnostics",
+            fake_run_source_diagnostics,
+        )
+        monkeypatch.setattr(
+            "denbust.diagnostics.render_source_diagnostic_report",
+            lambda report: f"rendered:{type(report).__name__}",
+        )
+
+        result = runner.invoke(app, ["diagnose-sources", "--output", str(output_path)])
+
+        assert result.exit_code == 0
+        assert json.loads(output_path.read_text(encoding="utf-8"))["config_path"] == "agents/news.yaml"
+
     def test_diagnose_sources_rejects_conflicting_mode_flags(self) -> None:
         """diagnose-sources should reject mutually exclusive mode flags."""
         result = runner.invoke(app, ["diagnose-sources", "--artifacts-only", "--live-only"])
