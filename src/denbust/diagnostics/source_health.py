@@ -226,11 +226,32 @@ def render_source_diagnostic_report(report: SourceDiagnosticReport) -> str:
 def _load_latest_debug_summary(config: Config) -> tuple[Path | None, dict[str, Any] | None]:
     candidates = sorted(config.state_paths.logs_dir.glob("*.summary.json"), reverse=True)
     for path in candidates:
-        with path.open(encoding="utf-8") as handle:
-            payload = json.load(handle)
+        try:
+            with path.open(encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            continue
         if isinstance(payload, dict):
             return path, payload
     return None, None
+
+
+def _coerce_optional_int(value: Any) -> tuple[int | None, bool]:
+    if value is None:
+        return None, False
+    if isinstance(value, bool):
+        return None, True
+    if isinstance(value, int):
+        return value, False
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None, True
+        try:
+            return int(stripped), False
+        except ValueError:
+            return None, True
+    return None, True
 
 
 def _build_artifact_check(
@@ -265,7 +286,9 @@ def _build_artifact_check(
 
     had_error = bool(source_summary.get("had_error"))
     returned_zero_results = bool(source_summary.get("returned_zero_results"))
-    raw_article_count = int(source_summary.get("raw_article_count", 0))
+    raw_article_count, raw_article_count_invalid = _coerce_optional_int(
+        source_summary.get("raw_article_count")
+    )
     if had_error:
         status = DiagnosticStatus.WARN
         summary = "Latest artifact recorded a source error"
@@ -274,21 +297,28 @@ def _build_artifact_check(
         summary = "Latest artifact recorded zero results for this source"
     else:
         status = DiagnosticStatus.OK
-        summary = f"Latest artifact recorded {raw_article_count} raw articles"
+        summary = f"Latest artifact recorded {raw_article_count or 0} raw articles"
+
+    details = {
+        "path": str(latest_summary_path),
+        "run_timestamp": latest_summary_payload.get("run_timestamp"),
+        "source_summary": source_summary,
+        "problems": latest_summary_payload.get("problems", {}),
+        "suspicions": latest_summary_payload.get("suspicions", []),
+        "warnings": latest_summary_payload.get("warnings", []),
+        "errors": latest_summary_payload.get("errors", []),
+    }
+    if raw_article_count_invalid:
+        details["raw_article_count_warning"] = (
+            "Artifact raw_article_count was not an integer-compatible value"
+        )
+        details["raw_article_count_value"] = source_summary.get("raw_article_count")
 
     return ProbeCheck(
         name="latest_artifact",
         status=status,
         summary=summary,
-        details={
-            "path": str(latest_summary_path),
-            "run_timestamp": latest_summary_payload.get("run_timestamp"),
-            "source_summary": source_summary,
-            "problems": latest_summary_payload.get("problems", {}),
-            "suspicions": latest_summary_payload.get("suspicions", []),
-            "warnings": latest_summary_payload.get("warnings", []),
-            "errors": latest_summary_payload.get("errors", []),
-        },
+        details=details,
     )
 
 
@@ -371,7 +401,7 @@ async def _probe_ynet(
         if rss_probe._parse_entry(entry, cutoff, sample_keywords) is not None:
             keyword_match_count += 1
 
-    expected_redirect = _is_unexpected_redirect(fetch_result.final_url, feed_url)
+    unexpected_redirect = _is_unexpected_redirect(fetch_result.final_url, feed_url)
     details = {
         "requested_url": feed_url,
         "final_url": fetch_result.final_url,
@@ -386,7 +416,7 @@ async def _probe_ynet(
         "keyword_match_count": keyword_match_count,
     }
 
-    if expected_redirect:
+    if unexpected_redirect:
         return _live_result(
             source_name="ynet",
             status=DiagnosticStatus.WARN,
@@ -495,7 +525,7 @@ async def _probe_maariv(
         "keyword_match_count": len(keyword_matches),
     }
 
-    if _is_unexpected_redirect(fetch_result.final_url, maariv_source.MAARIV_BASE_URL):
+    if _is_unexpected_redirect(fetch_result.final_url, maariv_source.MAARIV_LAW_URL):
         return _live_result(
             source_name="maariv",
             status=DiagnosticStatus.WARN,
@@ -595,7 +625,7 @@ async def _probe_ice(
             continue
 
         saw_successful_page = True
-        if _is_unexpected_redirect(fetch_result.final_url, ice_source.ICE_BASE_URL):
+        if _is_unexpected_redirect(fetch_result.final_url, page_url):
             unexpected_redirect = True
 
         soup = BeautifulSoup(fetch_result.text, "lxml")
@@ -817,6 +847,15 @@ def _live_result(
 
 
 def _is_unexpected_redirect(final_url: str, expected_url: str) -> bool:
-    expected = urlsplit(expected_url)
-    final = urlsplit(final_url)
-    return bool(final.netloc) and final.netloc != expected.netloc
+    expected = _normalized_redirect_target(expected_url)
+    final = _normalized_redirect_target(final_url)
+    return bool(final[1]) and final != expected
+
+
+def _normalized_redirect_target(url: str) -> tuple[str, str, str]:
+    parts = urlsplit(url)
+    return (
+        parts.scheme.lower(),
+        parts.netloc.lower(),
+        parts.path or "/",
+    )

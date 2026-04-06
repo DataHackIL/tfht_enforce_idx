@@ -391,6 +391,24 @@ class TestCli:
         assert result.exit_code != 0
         assert "Choose at most one" in result.stderr
 
+    def test_diagnose_sources_surfaces_invalid_source_selection_as_bad_parameter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """diagnose-sources should convert runner validation errors into CLI parameter errors."""
+
+        def fake_run_source_diagnostics(**_kwargs: object) -> object:
+            raise ValueError("Unknown or disabled sources: ghost")
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_source_diagnostics",
+            fake_run_source_diagnostics,
+        )
+
+        result = runner.invoke(app, ["diagnose-sources", "--source", "ghost"])
+
+        assert result.exit_code != 0
+        assert "Unknown or disabled sources: ghost" in result.stderr
+
     def test_validation_evaluate_uses_default_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """validation-evaluate should default to the tracked assets."""
         captured: dict[str, object] = {}

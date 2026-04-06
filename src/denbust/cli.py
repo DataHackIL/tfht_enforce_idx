@@ -108,14 +108,17 @@ def diagnose_sources(
         raise typer.BadParameter("Choose at most one of --artifacts-only and --live-only")
 
     config_path = config or Path("agents/news.yaml")
-    report = run_source_diagnostics(
-        config_path=config_path,
-        source_names=source,
-        days_override=days,
-        include_artifacts=not live_only,
-        include_live=not artifacts_only,
-        sample_keywords=sample_keyword,
-    )
+    try:
+        report = run_source_diagnostics(
+            config_path=config_path,
+            source_names=source,
+            days_override=days,
+            include_artifacts=not live_only,
+            include_live=not artifacts_only,
+            sample_keywords=sample_keyword,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
     if output is not None:
         output.write_text(report.model_dump_json(indent=2), encoding="utf-8")

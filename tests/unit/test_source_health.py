@@ -84,6 +84,29 @@ def test_build_artifact_check_marks_zero_result_source_as_warn(tmp_path: Path) -
     assert "zero results" in check.summary
 
 
+def test_load_latest_debug_summary_skips_invalid_json_files(tmp_path: Path) -> None:
+    config = _config_with_state_root(tmp_path)
+    logs_dir = config.state_paths.logs_dir
+    valid_summary_path = _write_summary(
+        logs_dir,
+        "2026-04-01T00-00-00-000000Z",
+        {
+            "run_timestamp": "2026-04-01T00:00:00Z",
+            "source_summaries": [],
+        },
+    )
+    newer_invalid_path = logs_dir / "2026-04-02T00-00-00-000000Z.summary.json"
+    newer_invalid_path.write_text("{not json", encoding="utf-8")
+
+    latest_path, payload = source_health._load_latest_debug_summary(config)
+
+    assert latest_path == valid_summary_path
+    assert payload == {
+        "run_timestamp": "2026-04-01T00:00:00Z",
+        "source_summaries": [],
+    }
+
+
 def test_build_artifact_check_returns_skip_when_summary_missing() -> None:
     check = source_health._build_artifact_check(
         source_name="ynet",
@@ -147,6 +170,32 @@ def test_build_artifact_check_marks_ok_when_articles_present(tmp_path: Path) -> 
 
     assert check.status == DiagnosticStatus.OK
     assert "4 raw articles" in check.summary
+
+
+def test_build_artifact_check_preserves_invalid_raw_article_count_details(tmp_path: Path) -> None:
+    summary_path = tmp_path / "latest.summary.json"
+    check = source_health._build_artifact_check(
+        source_name="ynet",
+        latest_summary_path=summary_path,
+        latest_summary_payload={
+            "source_summaries": [
+                {
+                    "source_name": "ynet",
+                    "raw_article_count": "unknown",
+                    "had_error": False,
+                    "returned_zero_results": False,
+                }
+            ]
+        },
+    )
+
+    assert check.status == DiagnosticStatus.OK
+    assert "0 raw articles" in check.summary
+    assert (
+        check.details["raw_article_count_warning"]
+        == "Artifact raw_article_count was not an integer-compatible value"
+    )
+    assert check.details["raw_article_count_value"] == "unknown"
 
 
 def test_render_source_diagnostic_report_includes_findings_and_empty_case() -> None:
@@ -244,8 +293,12 @@ def test_is_unexpected_redirect() -> None:
         "https://other.example.com/feed",
         "https://www.ynet.co.il/Integration/StoryRss2.xml",
     )
-    assert not source_health._is_unexpected_redirect(
+    assert source_health._is_unexpected_redirect(
         "https://www.ynet.co.il/other",
+        "https://www.ynet.co.il/Integration/StoryRss2.xml",
+    )
+    assert not source_health._is_unexpected_redirect(
+        "https://www.ynet.co.il/Integration/StoryRss2.xml",
         "https://www.ynet.co.il/Integration/StoryRss2.xml",
     )
 
