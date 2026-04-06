@@ -194,6 +194,7 @@ This is where config, dataset/job dispatch, state handling, output, and run snap
 
 ### `src/denbust/config.py`
 Central config models and loading behavior.  
+
 Important for understanding:
 - local vs GitHub config
 - operational store selection
@@ -239,11 +240,11 @@ Current source modules include:
 This is where source-specific fetching logic lives.
 
 ### `src/denbust/classifier/`
-LLM-assisted classification logic.  
+LLM-assisted classification logic.
 Currently centered on relevance/category classification over fetched candidate items.
 
 ### `src/denbust/dedup/`
-Story similarity and deduplication helpers.  
+Story similarity and deduplication helpers.
 Important for collapsing multiple source articles into unified items.
 
 ### `src/denbust/ops/`
