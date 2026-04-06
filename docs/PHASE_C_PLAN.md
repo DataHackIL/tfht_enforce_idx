@@ -222,10 +222,13 @@ If no → `category=not_relevant`, skip stage 2.
 
 **Stage 2 — Closed-set subcategory**
 Send the article with the full Hebrew subcategory list (IDs + labels). Ask: "Which single category and subcategory best describes this enforcement-related content?"
-Validate the response against the YAML-loaded taxonomy. If validation fails, fall back to the parent category with `subcategory=null`.
+Validate the response against the YAML-loaded taxonomy. If validation fails, fall back to the parent category with `subcategory=None`.
+
+`None` is the canonical Python representation for a missing subcategory; serializers/exporters may map that to their own null/empty representation, but the in-memory classifier result should use `None` consistently.
 
 **`index_relevant` derivation:**
 After classification, set `index_relevant = typology.is_index_relevant(category, subcategory)`. This is a lookup, not an LLM call.
+For the fallback case above, `typology.is_index_relevant(category, None)` must return `False`.
 
 ### Changes to `classifier/relevance.py`
 
@@ -294,7 +297,7 @@ The **Typology.xlsx** contains one "negative example" per category (articles tha
 A CLI-invocable script (or `denbust` sub-command) that:
 
 1. Reads `TFHT Enforcement Index - Manual Tracking.xlsx`, Sheet 3 (מדד האכיפה).
-2. For each row: infers `category` + `subcategory` from the event description (or accepts a mapping CSV produced by Eden alongside the sheet — see C-5).
+2. For each row: infers `category` + `subcategory` from the event description using the repeatable mapping in `taxonomy/event_type_mapping.yaml` (see C-5).
 3. Resolves the source URL to a canonical form.
 4. Writes one row per event to a draft validation CSV (`validation/news_items/validation_import_draft.csv`) in `DRAFT_COLUMNS` format with `draft_source=manual_tracking` and `review_status=reviewed` (since Eden manually compiled them).
 5. Invokes the existing `dataset.py` merge logic to incorporate reviewed rows into `validation/news_items/classifier_validation.csv`.
@@ -303,7 +306,7 @@ A CLI-invocable script (or `denbust` sub-command) that:
 
 ### Negative examples
 
-Import the negative example URLs from `Typology.xlsx` (one per category, marked as "should not enter the index") as rows with `relevant=false`, `category=phenomenon_coverage` or `women_testimonies` etc., `index_relevant=false`, `review_status=reviewed`, `draft_source=typology_sheet`.
+Import the negative example URLs from `Typology.xlsx` (one per category, marked as "should not enter the index") as rows with `relevant=false`, `category=pimping_prostitution`, `subcategory=phenomenon_coverage` or `subcategory=women_testimonies` (as appropriate for each example), `index_relevant=false`, `review_status=reviewed`, `draft_source=typology_sheet`.
 
 ### Initial seeded validation set (expected size)
 
