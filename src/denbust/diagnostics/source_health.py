@@ -321,7 +321,9 @@ async def _probe_source(
                 )
             ],
         )
-    return await _probe_via_fallback_fetch(source=source, days=days, sample_keywords=sample_keywords)
+    return await _probe_via_fallback_fetch(
+        source=source, days=days, sample_keywords=sample_keywords
+    )
 
 
 async def _probe_ynet(
@@ -477,7 +479,9 @@ async def _probe_maariv(
         if article is not None
     ]
     keyword_matches = [
-        article for article in parsed_articles if scraper._matches_keywords(article, sample_keywords)
+        article
+        for article in parsed_articles
+        if scraper._matches_keywords(article, sample_keywords)
     ]
     details = {
         "requested_url": maariv_source.MAARIV_LAW_URL,
@@ -643,7 +647,8 @@ async def _probe_ice(
             source_name="ice",
             status=DiagnosticStatus.FAIL,
             bucket=FailureBucket.HTTP_FETCH_FAILED,
-            checks=checks or [
+            checks=checks
+            or [
                 ProbeCheck(
                     name="live_probe",
                     status=DiagnosticStatus.FAIL,

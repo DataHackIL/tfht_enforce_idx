@@ -127,7 +127,13 @@ async def test_probe_ynet_distinguishes_stale_feed(monkeypatch: pytest.MonkeyPat
     def fake_parse(text: str) -> object:
         del text
         return SimpleNamespace(
-            entries=[{"link": "https://example.com/1", "title": "old", "published": "Mon, 01 Jan 2024 00:00:00 GMT"}],
+            entries=[
+                {
+                    "link": "https://example.com/1",
+                    "title": "old",
+                    "published": "Mon, 01 Jan 2024 00:00:00 GMT",
+                }
+            ],
             bozo=False,
             bozo_exception=None,
         )
@@ -165,7 +171,12 @@ async def test_probe_ynet_distinguishes_keyword_zeroing(
         del text
         return SimpleNamespace(
             entries=[
-                {"link": "https://example.com/1", "title": "חדשות כלליות", "summary": "ללא התאמה", "published": recent}
+                {
+                    "link": "https://example.com/1",
+                    "title": "חדשות כלליות",
+                    "summary": "ללא התאמה",
+                    "published": recent,
+                }
             ],
             bozo=False,
             bozo_exception=None,
@@ -404,7 +415,9 @@ store:
     monkeypatch.setattr(
         source_health,
         "create_sources",
-        lambda config: [_FakeSource(source_cfg.name, 1) for source_cfg in config.sources if source_cfg.enabled],
+        lambda config: [
+            _FakeSource(source_cfg.name, 1) for source_cfg in config.sources if source_cfg.enabled
+        ],
     )
 
     report = source_health.run_source_diagnostics(
@@ -415,4 +428,3 @@ store:
     )
 
     assert [result.source_name for result in report.results] == ["ice"]
-
