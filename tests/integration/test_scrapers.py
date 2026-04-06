@@ -1056,6 +1056,8 @@ class TestIceScraper:
         result = scraper._parse_article_item(item, cutoff)
         assert result is not None
         assert result.title == "בית בושת אותר בתוך מקלט ציבורי"
+        assert result.date.tzinfo == UTC
+        assert result.date >= cutoff
 
     def test_parse_article_item_drops_articles_older_than_cutoff(self) -> None:
         """ICE items with a valid date before the cutoff window should be dropped."""

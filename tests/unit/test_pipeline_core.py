@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from pydantic import HttpUrl
@@ -324,9 +324,9 @@ class TestFetchAndClassifyHelpers:
         result = filter_seen([article], store)
 
         assert result == []
-        debug_messages = [str(call) for call in mock_logger.debug.call_args_list]
-        assert any("reason=seen" in msg for msg in debug_messages)
-        assert any(canonical in msg for msg in debug_messages)
+        assert mock_logger.debug.call_args_list == [
+            call("skip url=%s reason=seen source=%s", canonical, article.source_name)
+        ]
 
     def test_filter_seen_does_not_log_skip_for_unseen_articles(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -343,8 +343,7 @@ class TestFetchAndClassifyHelpers:
         result = filter_seen([article], store)
 
         assert result == [article]
-        debug_messages = [str(call) for call in mock_logger.debug.call_args_list]
-        assert not any("reason=seen" in msg for msg in debug_messages)
+        assert mock_logger.debug.call_args_list == []
 
     def test_deduplicate_articles_logs_result_count(self) -> None:
         """deduplicate_articles should return the deduplicator result unchanged."""
