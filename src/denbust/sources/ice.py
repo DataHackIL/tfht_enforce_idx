@@ -184,7 +184,11 @@ class IceScraper(Source):
                 snippet = snippet_elem.get_text(" ", strip=True)
 
         date = self._parse_date(item.get_text(" ", strip=True))
-        if not date or date < cutoff:
+        if date is None:
+            logger.debug("ice date parse failed, treating as recent: url=%s", url)
+            date = datetime.now(UTC)
+        elif date < cutoff:
+            logger.debug("skip ice article reason=date_before_cutoff url=%s", url)
             return None
 
         return RawArticle(

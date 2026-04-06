@@ -117,11 +117,17 @@ async def fetch_all_sources(
 
 def filter_seen(articles: list[RawArticle], seen_store: SeenStore) -> list[RawArticle]:
     """Filter out already-seen articles."""
-    unseen = [
-        article
-        for article in articles
-        if not seen_store.is_seen(canonicalize_news_url(str(article.url)))
-    ]
+    unseen: list[RawArticle] = []
+    for article in articles:
+        canonical = canonicalize_news_url(str(article.url))
+        if seen_store.is_seen(canonical):
+            logger.debug(
+                "skip url=%s reason=seen source=%s",
+                canonical,
+                article.source_name,
+            )
+        else:
+            unseen.append(article)
     logger.info("Filtered to %s unseen articles (was %s)", len(unseen), len(articles))
     return unseen
 

@@ -194,6 +194,7 @@ This is where config, dataset/job dispatch, state handling, output, and run snap
 
 ### `src/denbust/config.py`
 Central config models and loading behavior.
+
 Important for understanding:
 - local vs GitHub config
 - operational store selection

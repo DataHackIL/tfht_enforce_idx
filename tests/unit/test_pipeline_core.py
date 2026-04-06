@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from pydantic import HttpUrl
@@ -294,16 +294,56 @@ class TestFetchAndClassifyHelpers:
 
     def test_filter_seen_filters_logged_urls(self, tmp_path: Path) -> None:
         """filter_seen should drop URLs already present in the seen store."""
+        from denbust.news_items.normalize import canonicalize_news_url
         from denbust.store.seen import SeenStore
 
         store = SeenStore(tmp_path / "seen.json")
         seen = build_raw_article("https://example.com/seen")
         unseen = build_raw_article("https://example.com/unseen")
-        store.mark_seen([str(seen.url)])
+        store.mark_seen([canonicalize_news_url(str(seen.url))])
 
         filtered = filter_seen([seen, unseen], store)
 
         assert filtered == [unseen]
+
+    def test_filter_seen_emits_debug_log_with_reason_code_for_seen_url(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """filter_seen must emit a DEBUG log with reason=seen for every dropped article."""
+        from denbust.news_items.normalize import canonicalize_news_url
+        from denbust.store.seen import SeenStore
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
+
+        store = SeenStore(tmp_path / "seen.json")
+        article = build_raw_article("https://example.com/news/1")
+        canonical = canonicalize_news_url(str(article.url))
+        store.mark_seen([canonical])
+
+        result = filter_seen([article], store)
+
+        assert result == []
+        assert mock_logger.debug.call_args_list == [
+            call("skip url=%s reason=seen source=%s", canonical, article.source_name)
+        ]
+
+    def test_filter_seen_does_not_log_skip_for_unseen_articles(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """filter_seen must not emit reason=seen for articles not in the seen store."""
+        from denbust.store.seen import SeenStore
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
+
+        store = SeenStore(tmp_path / "seen.json")
+        article = build_raw_article("https://example.com/fresh/1")
+
+        result = filter_seen([article], store)
+
+        assert result == [article]
+        assert mock_logger.debug.call_args_list == []
 
     def test_deduplicate_articles_logs_result_count(self) -> None:
         """deduplicate_articles should return the deduplicator result unchanged."""
