@@ -351,7 +351,9 @@ class TestCli:
         assert payload["config_path"] == "agents/news.yaml"
         assert payload["days"] == 21
 
-    def test_diagnose_sources_writes_output_file(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_diagnose_sources_writes_output_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """diagnose-sources should write JSON to the requested output path."""
         report = source_health.SourceDiagnosticReport(
             config_path="agents/news.yaml",
@@ -378,7 +380,9 @@ class TestCli:
         result = runner.invoke(app, ["diagnose-sources", "--output", str(output_path)])
 
         assert result.exit_code == 0
-        assert json.loads(output_path.read_text(encoding="utf-8"))["config_path"] == "agents/news.yaml"
+        assert (
+            json.loads(output_path.read_text(encoding="utf-8"))["config_path"] == "agents/news.yaml"
+        )
 
     def test_diagnose_sources_rejects_conflicting_mode_flags(self) -> None:
         """diagnose-sources should reject mutually exclusive mode flags."""

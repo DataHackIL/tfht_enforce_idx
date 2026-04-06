@@ -371,7 +371,14 @@ async def test_probe_ynet_distinguishes_unexpected_redirect(
     def fake_parse(text: str) -> object:
         del text
         return SimpleNamespace(
-            entries=[{"link": "https://example.com/1", "title": "זנות", "summary": "זנות", "published": recent}],
+            entries=[
+                {
+                    "link": "https://example.com/1",
+                    "title": "זנות",
+                    "summary": "זנות",
+                    "published": recent,
+                }
+            ],
             bozo=True,
             bozo_exception=ValueError("bad xml"),
         )
@@ -408,7 +415,12 @@ async def test_probe_ynet_reports_success(monkeypatch: pytest.MonkeyPatch) -> No
         del text
         return SimpleNamespace(
             entries=[
-                {"link": "https://example.com/1", "title": "זנות", "summary": "זנות", "published": recent}
+                {
+                    "link": "https://example.com/1",
+                    "title": "זנות",
+                    "summary": "זנות",
+                    "published": recent,
+                }
             ],
             bozo=False,
             bozo_exception=None,
@@ -873,6 +885,7 @@ store:
         )
 
     monkeypatch.setattr(source_health, "_probe_source", fake_probe_source)
+
     def fake_create_sources(_config: Config) -> list[Source]:
         return [_FakeSource("ynet", 1)]
 
@@ -938,7 +951,9 @@ async def test_probe_source_dispatches_named_sources(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_probe_source_uses_fallback_for_unknown_source(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_probe_source_uses_fallback_for_unknown_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def fake_fallback(**_kwargs: object) -> SourceDiagnosticResult:
         return SourceDiagnosticResult(
             source_name="walla",
@@ -982,9 +997,8 @@ async def test_probe_maariv_distinguishes_parse_zeroed_results_directly(
         )
 
     monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
-    def fake_parse_article_item(
-        _self: object, _item: object, _cutoff: datetime
-    ) -> None:
+
+    def fake_parse_article_item(_self: object, _item: object, _cutoff: datetime) -> None:
         return None
 
     monkeypatch.setattr(
