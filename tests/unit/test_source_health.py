@@ -1293,6 +1293,21 @@ def test_probe_rss_entry_matches_uses_ynet_source_specific_relaxed_keywords() ->
         ["זנות"],
         source_name="ynet",
     )
+
+
+def test_probe_rss_entry_matches_uses_ynet_source_specific_relaxed_keywords() -> None:
+    cutoff = datetime(2024, 1, 1, tzinfo=UTC)
+
+    assert source_health._probe_rss_entry_matches(
+        {
+            "link": "https://www.ynet.co.il/news/article/r111111",
+            "title": "חשד לבית בושת בבני ברק: המשטרה עצרה חשודים",
+            "description": "<p>המשטרה עצרה חשודים בדירה ששימשה לפי החשד לבית בושת.</p>",
+            "published": "Mon, 01 Jan 2099 00:00:00 GMT",
+        },
+        cutoff,
+        ["זנות"],
+    )
     assert not source_health._probe_rss_entry_matches(
         {
             "link": "https://example.com/article",
