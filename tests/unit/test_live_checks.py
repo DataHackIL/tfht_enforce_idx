@@ -474,7 +474,9 @@ class TestLiveChecks:
                 assert target_url == "https://example.com/raw"
                 return FakeResponse()
 
-        monkeypatch.setattr("denbust.live_checks.runner.httpx.AsyncClient", lambda **_: FakeClient())
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.httpx.AsyncClient", lambda **_: FakeClient()
+        )
 
         captured = await _capture_live_source_payload(
             target_url="https://example.com/raw",
@@ -503,7 +505,9 @@ class TestLiveChecks:
             artifact_capture_url="https://example.com/raw",
         )
 
-        result = await __import__("denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"])._execute_live_source_article_case(  # type: ignore[attr-defined]
+        result = await __import__(
+            "denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"]
+        )._execute_live_source_article_case(  # type: ignore[attr-defined]
             case,
             classifier=FakeClassifier(_build_matching_classification()),
             sources_by_name={"walla": FakeSource("walla", [article])},
@@ -520,7 +524,9 @@ class TestLiveChecks:
         self,
         tmp_path: Path,
     ) -> None:
-        runner = __import__("denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"])
+        runner = __import__(
+            "denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"]
+        )
         case = LiveSourceArticleCaseConfig(
             id="missing-source",
             type="live_source_article",
