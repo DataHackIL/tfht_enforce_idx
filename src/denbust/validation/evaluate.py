@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -136,8 +137,8 @@ def _load_validation_examples(path: Path) -> tuple[list[RawArticle], list[Valida
 
 
 def _score_predictions(
-    labels: list[ValidationLabel | tuple[bool, bool, str, str]],
-    predictions: list[ValidationLabel | tuple[bool, bool, str, str]],
+    labels: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
+    predictions: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
     *,
     variant: ClassifierVariantSpec,
     model: str,

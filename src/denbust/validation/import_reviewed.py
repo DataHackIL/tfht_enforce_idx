@@ -115,7 +115,7 @@ def _infer_taxonomy_leaf(
 
 
 def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], list[str]]:
-    from openpyxl import load_workbook
+    from openpyxl import load_workbook  # type: ignore[import-untyped]
 
     taxonomy = default_taxonomy()
     workbook = load_workbook(input_path, data_only=True)
@@ -124,8 +124,8 @@ def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], l
     sheet = workbook["מדד האכיפה"]
 
     year = None
-    for row in range(1, 5):
-        for cell in sheet[row]:
+    for row_number in range(1, 5):
+        for cell in sheet[row_number]:
             if isinstance(cell.value, int) and cell.value > 2000:
                 year = cell.value
                 break
@@ -233,8 +233,8 @@ def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], l
             )
 
     deduped: dict[tuple[str, str], ValidationDraftRow] = {}
-    for row in rows:
-        deduped[(row.source_name, row.canonical_url)] = row
+    for draft_row in rows:
+        deduped[(draft_row.source_name, draft_row.canonical_url)] = draft_row
     skipped_duplicates = len(rows) - len(deduped)
     if skipped_duplicates:
         warnings.append(f"Skipped {skipped_duplicates} duplicate row(s) by source/canonical_url")
