@@ -2920,6 +2920,20 @@ class TestMaarivScraper:
 
         assert len(articles) == 1
 
+    def test_effective_maariv_keywords_deduplicates_and_skips_blank_values(self) -> None:
+        """Maariv keyword supplements should not duplicate or preserve blank values."""
+        keywords = MaarivScraper.__module__
+        del keywords
+        from denbust.sources.maariv import effective_maariv_keywords
+
+        values = effective_maariv_keywords(["זנות", "  ", "זנות", "חשד לבית בושת"])
+
+        assert "" not in values
+        assert "  " not in values
+        assert len(values) == len({value.casefold() for value in values})
+        assert "זנות" in values
+        assert "חשד לבית בושת" in values
+
     def test_parse_article_item_rejects_non_article_links(self) -> None:
         """Generic links that are not article URLs should be ignored."""
         scraper = MaarivScraper()
@@ -3303,6 +3317,16 @@ class TestRSSSource:
 
         assert len(articles) == 1
         assert articles[0].title.startswith("חשד לבית בושת")
+
+    def test_effective_keywords_for_generic_rss_source_deduplicates_and_skips_blank_values(
+        self,
+    ) -> None:
+        """Generic RSS keyword helpers should skip blank inputs and deduplicate values."""
+        from denbust.sources.rss import effective_keywords_for_source
+
+        values = effective_keywords_for_source("generic-rss", ["זנות", " ", "זנות"])
+
+        assert values == ["זנות"]
 
     @respx.mock
     @pytest.mark.asyncio
