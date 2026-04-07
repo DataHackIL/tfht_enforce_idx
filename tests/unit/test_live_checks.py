@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -13,8 +14,20 @@ from pydantic import HttpUrl
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.data_models import Category, ClassificationResult, RawArticle, SubCategory
 from denbust.live_checks.runner import (
+    ActualClassification,
+    CaseResult,
+    ExpectedClassification,
     LiveSourceArticleCaseConfig,
+    _capture_live_source_payload,
+    _compare_expected,
+    _find_repo_root,
+    _load_fixture_article,
+    _normalize_fixture_datetime,
+    _render_case_markdown,
+    _resolve_repo_path,
+    _to_actual_classification,
     load_live_check_scenario,
+    render_live_check_markdown,
     run_live_check_scenario_sync,
 )
 
@@ -339,3 +352,251 @@ class TestLiveChecks:
     def test_gitignore_includes_live_checks_directory(self) -> None:
         gitignore = Path(".gitignore").read_text(encoding="utf-8")
         assert ".live_checks/" in gitignore
+
+    def test_helper_paths_and_datetime_normalization(self, tmp_path: Path) -> None:
+        repo_root = _init_repo(tmp_path)
+        nested = repo_root / "agents" / "live_checks"
+        nested.mkdir(parents=True)
+
+        assert _find_repo_root(nested) == repo_root
+        assert _resolve_repo_path(repo_root, "agents/live_checks/test.yaml") == (
+            repo_root / "agents" / "live_checks" / "test.yaml"
+        )
+
+        absolute = tmp_path / "absolute.yaml"
+        assert _resolve_repo_path(repo_root, str(absolute)) == absolute
+
+        naive = _normalize_fixture_datetime("2026-04-07T12:00:00")
+        assert naive.tzinfo == UTC
+        aware = _normalize_fixture_datetime("2026-04-07T15:00:00+03:00")
+        assert aware == datetime(2026, 4, 7, 12, 0, tzinfo=UTC)
+
+    def test_find_repo_root_raises_when_missing(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            _find_repo_root(tmp_path)
+
+    def test_load_fixture_article_without_expected_classification(self, tmp_path: Path) -> None:
+        fixture = tmp_path / "case.json"
+        _write_fixture(
+            fixture,
+            {
+                "url": "https://example.com/no-expected",
+                "title": "כותרת",
+                "snippet": "תקציר",
+                "date": "2026-04-07T12:00:00",
+                "source_name": "test",
+            },
+        )
+
+        article, expected, payload = _load_fixture_article(fixture)
+
+        assert article.source_name == "test"
+        assert article.date.tzinfo == UTC
+        assert expected is None
+        assert payload["title"] == "כותרת"
+
+    def test_compare_expected_and_render_markdown_cover_mismatch_branches(self) -> None:
+        expected = ExpectedClassification(
+            relevant=True,
+            enforcement_related=True,
+            category="brothel",
+            sub_category="closure",
+        )
+        actual = ActualClassification(
+            relevant=False,
+            enforcement_related=False,
+            category="prostitution",
+            sub_category=None,
+            confidence="low",
+        )
+
+        passed, notes = _compare_expected(expected, actual)
+
+        assert passed is False
+        assert len(notes) == 4
+
+        case = CaseResult(
+            case_id="case-1",
+            case_type="fixture_article",
+            passed=False,
+            source_name="walla",
+            url="https://example.com/article",
+            title="כותרת",
+            snippet="תקציר",
+            expected=expected,
+            actual=actual,
+            notes=notes,
+            artifact_paths=["/tmp/artifact.json"],
+            error="boom",
+        )
+        markdown = _render_case_markdown(case)
+        assert "- Error: boom" in markdown
+        assert "- Note: relevant expected True but got False" in markdown
+        assert "- Artifact: /tmp/artifact.json" in markdown
+
+        report = SimpleNamespace(
+            scenario_name="scenario",
+            runtime_config_path="agents/news/local.yaml",
+            model_name="mock-model",
+            output_dir="/tmp/out",
+            started_at=datetime(2026, 4, 7, 12, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 4, 7, 12, 1, tzinfo=UTC),
+            errors=["top-level error"],
+            case_results=[case],
+            overall_status="failed",
+        )
+        rendered = render_live_check_markdown(report)
+        assert "- Errors:" in rendered
+        assert "top-level error" in rendered
+
+    @pytest.mark.asyncio
+    async def test_capture_live_source_payload_and_live_source_url_selection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        artifact_path = tmp_path / "captured.html"
+
+        class FakeResponse:
+            text = "<html>ok</html>"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class FakeClient:
+            async def __aenter__(self) -> FakeClient:
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            async def get(self, target_url: str) -> FakeResponse:
+                assert target_url == "https://example.com/raw"
+                return FakeResponse()
+
+        monkeypatch.setattr("denbust.live_checks.runner.httpx.AsyncClient", lambda **_: FakeClient())
+
+        captured = await _capture_live_source_payload(
+            target_url="https://example.com/raw",
+            artifact_path=artifact_path,
+        )
+        assert Path(captured).read_text(encoding="utf-8") == "<html>ok</html>"
+
+        article = RawArticle(
+            url=HttpUrl("https://example.com/article?x=1"),
+            title="פשיטה על בית בושת",
+            snippet="המשטרה פשטה",
+            date=datetime(2026, 4, 7, tzinfo=UTC),
+            source_name="walla",
+        )
+        case = LiveSourceArticleCaseConfig(
+            id="live-url",
+            type="live_source_article",
+            source_name="walla",
+            expected=ExpectedClassification(
+                relevant=True,
+                enforcement_related=True,
+                category="brothel",
+                sub_category="closure",
+            ),
+            match_url="https://example.com/article?x=1",
+            artifact_capture_url="https://example.com/raw",
+        )
+
+        result = await __import__("denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"])._execute_live_source_article_case(  # type: ignore[attr-defined]
+            case,
+            classifier=FakeClassifier(_build_matching_classification()),
+            sources_by_name={"walla": FakeSource("walla", [article])},
+            artifacts_dir=tmp_path,
+            runtime_config=Config(keywords=["זנות"]),
+        )
+
+        assert result.passed is True
+        assert len(result.artifact_paths) == 2
+        assert any(path.endswith(".html") for path in result.artifact_paths)
+
+    @pytest.mark.asyncio
+    async def test_live_source_case_failure_branches(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = __import__("denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"])
+        case = LiveSourceArticleCaseConfig(
+            id="missing-source",
+            type="live_source_article",
+            source_name="walla",
+            expected=ExpectedClassification(
+                relevant=True,
+                enforcement_related=True,
+                category="brothel",
+                sub_category="closure",
+            ),
+            match_title_contains="בית בושת",
+            notes="case note",
+        )
+
+        missing_source = await runner._execute_live_source_article_case(
+            case,
+            classifier=FakeClassifier(_build_matching_classification()),
+            sources_by_name={},
+            artifacts_dir=tmp_path,
+            runtime_config=Config(keywords=["זנות"]),
+        )
+        assert missing_source.passed is False
+        assert missing_source.error == "Unknown or disabled source: walla"
+
+        no_match = await runner._execute_live_source_article_case(
+            case,
+            classifier=FakeClassifier(_build_matching_classification()),
+            sources_by_name={
+                "walla": FakeSource(
+                    "walla",
+                    [
+                        RawArticle(
+                            url=HttpUrl("https://example.com/other"),
+                            title="לא קשור",
+                            snippet="תקציר",
+                            date=datetime(2026, 4, 7, tzinfo=UTC),
+                            source_name="walla",
+                        )
+                    ],
+                )
+            },
+            artifacts_dir=tmp_path,
+            runtime_config=Config(keywords=["זנות"]),
+        )
+        assert no_match.passed is False
+        assert no_match.error == "No live source article matched the configured selector"
+        assert len(no_match.artifact_paths) == 1
+
+    def test_run_live_check_scenario_handles_runtime_config_load_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        repo_root = _init_repo(tmp_path)
+        scenario_path = repo_root / "agents" / "live_checks" / "broken-config.yaml"
+        _write_scenario(
+            scenario_path,
+            {
+                "name": "broken-config",
+                "runtime_config": "agents/news/local.yaml",
+                "cases": [],
+            },
+        )
+
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.load_config",
+            lambda _path: (_ for _ in ()).throw(ValueError("bad config")),
+        )
+
+        report = run_live_check_scenario_sync(scenario_path)
+
+        assert report.overall_status == "failed"
+        assert report.errors == ["Failed to load runtime config: bad config"]
+        assert (Path(report.output_dir) / "report.json").exists()
+
+    def test_to_actual_classification_exposes_string_values(self) -> None:
+        actual = _to_actual_classification(_build_matching_classification())
+        assert actual.category == "brothel"
+        assert actual.sub_category == "closure"
