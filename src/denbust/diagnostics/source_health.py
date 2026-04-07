@@ -941,5 +941,7 @@ def _probe_rss_entry_matches(entry: Any, cutoff: datetime, sample_keywords: list
     if not isinstance(snippet, str):
         snippet = ""
 
-    haystack = f"{title.strip()} {BeautifulSoup(snippet, 'lxml').get_text(' ', strip=True)}".casefold()
+    haystack = (
+        f"{title.strip()} {BeautifulSoup(snippet, 'lxml').get_text(' ', strip=True)}".casefold()
+    )
     return any(keyword.casefold() in haystack for keyword in sample_keywords)

@@ -1173,9 +1173,7 @@ def test_select_sample_keywords_falls_back_to_defaults_for_blank_inputs() -> Non
 
 def test_entry_value_supports_mappings_and_attributes() -> None:
     assert source_health._entry_value({"title": "dict-title"}, "title") == "dict-title"
-    assert (
-        source_health._entry_value(SimpleNamespace(title="attr-title"), "title") == "attr-title"
-    )
+    assert source_health._entry_value(SimpleNamespace(title="attr-title"), "title") == "attr-title"
 
 
 def test_probe_rss_entry_date_handles_string_and_struct_time() -> None:

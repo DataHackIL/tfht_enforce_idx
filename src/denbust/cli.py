@@ -16,6 +16,7 @@ class DiagnosticOutputFormat(StrEnum):
     TEXT = "text"
     JSON = "json"
 
+
 app = typer.Typer(
     name="denbust",
     help="Monitor enforcement of anti-brothel laws in Israel.",
