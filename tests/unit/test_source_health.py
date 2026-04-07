@@ -198,6 +198,21 @@ def test_build_artifact_check_preserves_invalid_raw_article_count_details(tmp_pa
     assert check.details["raw_article_count_value"] == "unknown"
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, (None, False)),
+        (True, (None, True)),
+        ("", (None, True)),
+        (object(), (None, True)),
+    ],
+)
+def test_coerce_optional_int_handles_edge_cases(
+    value: object, expected: tuple[int | None, bool]
+) -> None:
+    assert source_health._coerce_optional_int(value) == expected
+
+
 def test_render_source_diagnostic_report_includes_findings_and_empty_case() -> None:
     report = SourceDiagnosticReport(
         config_path="agents/news.yaml",
@@ -324,8 +339,10 @@ async def test_probe_ynet_distinguishes_feed_fetch_failure(
 
 @pytest.mark.asyncio
 async def test_probe_ynet_distinguishes_stale_feed(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -365,8 +382,10 @@ async def test_probe_ynet_distinguishes_stale_feed(monkeypatch: pytest.MonkeyPat
 async def test_probe_ynet_distinguishes_keyword_zeroing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -411,8 +430,10 @@ async def test_probe_ynet_distinguishes_unexpected_redirect(
 ) -> None:
     recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url="https://example.com/redirected",
@@ -454,8 +475,10 @@ async def test_probe_ynet_distinguishes_unexpected_redirect(
 async def test_probe_ynet_reports_success(monkeypatch: pytest.MonkeyPatch) -> None:
     recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
 
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -627,8 +650,10 @@ async def test_probe_maariv_reports_success(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_probe_ice_distinguishes_missing_results_container(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -658,8 +683,10 @@ async def test_probe_ice_distinguishes_parse_zeroed_results(
     </html>
     """
 
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -694,8 +721,10 @@ async def test_probe_ice_reports_successful_page(monkeypatch: pytest.MonkeyPatch
     </html>
     """
 
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -714,8 +743,10 @@ async def test_probe_ice_reports_successful_page(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_probe_ice_handles_all_fetch_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del url, user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del url, user_agent, client
         raise httpx.ConnectError("boom")
 
     monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
@@ -734,8 +765,10 @@ async def test_probe_ice_handles_unexpected_redirect(monkeypatch: pytest.MonkeyP
     </ul></article></body></html>
     """
 
-    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
-        del user_agent
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
         return _FetchResult(
             requested_url=url,
             final_url="https://example.com/redirect",
@@ -848,6 +881,7 @@ async def test_probe_source_dispatch_and_missing_source() -> None:
         sample_keywords=["זנות"],
     )
     assert missing.failure_bucket == FailureBucket.LIVE_PROBE_EXCEPTION
+    assert missing.probe_mode is None
 
 
 @pytest.mark.asyncio
@@ -956,6 +990,62 @@ store:
         source_health.run_source_diagnostics(
             config_path=config_path,
             source_names=["missing"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_source_diagnostics_async_uses_default_keywords_when_selection_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_root = tmp_path / "state"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"""
+days: 21
+keywords: []
+sources:
+  - name: ynet
+    type: rss
+    url: https://www.ynet.co.il/Integration/StoryRss2.xml
+    enabled: true
+store:
+  state_root: {state_root}
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    captured_keywords: list[str] = []
+
+    async def fake_probe_source(**kwargs: object) -> SourceDiagnosticResult:
+        captured_keywords.extend(kwargs["sample_keywords"])
+        return SourceDiagnosticResult(
+            source_name=str(kwargs["source_name"]),
+            status=DiagnosticStatus.OK,
+            live_status=DiagnosticStatus.OK,
+            checks=[],
+        )
+
+    monkeypatch.setattr(source_health, "_probe_source", fake_probe_source)
+    monkeypatch.setattr(source_health, "create_sources", lambda _config: [_FakeSource("ynet", 1)])
+
+    report = await source_health.run_source_diagnostics_async(
+        config_path=config_path,
+        include_artifacts=False,
+        include_live=True,
+        sample_keywords=[],
+    )
+
+    assert report.sample_keywords == source_health.DEFAULT_KEYWORDS[:3]
+    assert captured_keywords == source_health.DEFAULT_KEYWORDS[:3]
+
+
+@pytest.mark.asyncio
+async def test_run_source_diagnostics_rejects_running_loop() -> None:
+    with pytest.raises(RuntimeError, match="use run_source_diagnostics_async\\(\\) instead"):
+        source_health.run_source_diagnostics(
+            config_path=Path("agents/news.yaml"),
+            include_artifacts=False,
+            include_live=False,
         )
 
 
@@ -1070,6 +1160,67 @@ def test_merge_status_returns_skip_for_empty_input() -> None:
     assert source_health._merge_status() == DiagnosticStatus.SKIP
 
 
+def test_select_sample_keywords_falls_back_to_defaults_for_blank_inputs() -> None:
+    assert (
+        source_health._select_sample_keywords(["", "   "], None)
+        == source_health.DEFAULT_KEYWORDS[:3]
+    )
+    assert (
+        source_health._select_sample_keywords(["זנות"], ["", "   "])
+        == source_health.DEFAULT_KEYWORDS[:3]
+    )
+
+
+def test_entry_value_supports_mappings_and_attributes() -> None:
+    assert source_health._entry_value({"title": "dict-title"}, "title") == "dict-title"
+    assert (
+        source_health._entry_value(SimpleNamespace(title="attr-title"), "title") == "attr-title"
+    )
+
+
+def test_probe_rss_entry_date_handles_string_and_struct_time() -> None:
+    assert source_health._probe_rss_entry_date(
+        {"published": "Mon, 01 Jan 2024 00:00:00 GMT"}
+    ) == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
+
+    parsed_entry = {
+        "published_parsed": (2024, 1, 2, 3, 4, 5, 0, 0, 0),
+    }
+    assert source_health._probe_rss_entry_date(parsed_entry) == datetime(
+        2024, 1, 2, 3, 4, 5, tzinfo=UTC
+    )
+
+
+def test_probe_rss_entry_date_returns_none_for_invalid_values() -> None:
+    assert source_health._probe_rss_entry_date({"published": "not-a-date"}) is None
+    assert source_health._probe_rss_entry_date({"updated_parsed": object()}) is None
+
+
+def test_probe_rss_entry_matches_handles_missing_fields_and_description_fallback() -> None:
+    cutoff = datetime(2024, 1, 1, tzinfo=UTC)
+    assert not source_health._probe_rss_entry_matches({}, cutoff, ["זנות"])
+
+    assert source_health._probe_rss_entry_matches(
+        {
+            "link": "https://example.com/article",
+            "title": "בית בושת",
+            "description": "<p>זנות</p>",
+        },
+        cutoff,
+        ["זנות"],
+    )
+    assert not source_health._probe_rss_entry_matches(
+        {
+            "link": "https://example.com/article",
+            "title": "בית בושת",
+            "summary": object(),
+            "description": object(),
+        },
+        cutoff,
+        ["זנות"],
+    )
+
+
 @pytest.mark.asyncio
 async def test_fetch_text_uses_response_metadata(respx_mock: object) -> None:
     route = respx_mock.get("https://example.com/feed").mock(
@@ -1086,3 +1237,28 @@ async def test_fetch_text_uses_response_metadata(respx_mock: object) -> None:
     assert result.status_code == 200
     assert result.content_type == "application/rss+xml"
     assert result.text == "payload"
+
+
+@pytest.mark.asyncio
+async def test_fetch_text_reuses_supplied_client(respx_mock: object) -> None:
+    route = respx_mock.get("https://example.com/shared").mock(
+        return_value=httpx.Response(
+            200,
+            text="shared-payload",
+            headers={"content-type": "text/html"},
+        )
+    )
+
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "shared-ua"},
+        follow_redirects=True,
+    ) as client:
+        result = await source_health._fetch_text(
+            "https://example.com/shared",
+            user_agent="ignored",
+            client=client,
+        )
+
+    assert route.called
+    assert result.text == "shared-payload"
+    assert result.content_type == "text/html"

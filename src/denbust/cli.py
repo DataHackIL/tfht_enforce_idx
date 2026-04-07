@@ -1,13 +1,20 @@
 """CLI entry point for denbust."""
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from denbust.diagnostics.source_health import DiagnosticOutputFormat
 from denbust.models.common import DatasetName, JobName
 from denbust.validation.common import DEFAULT_VALIDATION_SET_PATH, DEFAULT_VARIANT_MATRIX_PATH
+
+
+class DiagnosticOutputFormat(StrEnum):
+    """Supported CLI output formats for diagnostics commands."""
+
+    TEXT = "text"
+    JSON = "json"
 
 app = typer.Typer(
     name="denbust",

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import json
 from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -18,7 +20,7 @@ from pydantic import BaseModel, Field
 import denbust.sources.ice as ice_source
 import denbust.sources.maariv as maariv_source
 import denbust.sources.rss as rss_source
-from denbust.config import Config, SourceConfig, load_config
+from denbust.config import DEFAULT_KEYWORDS, Config, SourceConfig, load_config
 from denbust.pipeline import create_sources
 from denbust.sources.base import Source
 
@@ -106,8 +108,17 @@ def run_source_diagnostics(
     sample_keywords: list[str] | None = None,
 ) -> SourceDiagnosticReport:
     """Run source diagnostics synchronously for CLI use."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            "run_source_diagnostics() cannot be used from a running event loop; "
+            "use run_source_diagnostics_async() instead"
+        )
     return asyncio.run(
-        _run_source_diagnostics(
+        run_source_diagnostics_async(
             config_path=config_path,
             source_names=source_names,
             days_override=days_override,
@@ -118,7 +129,7 @@ def run_source_diagnostics(
     )
 
 
-async def _run_source_diagnostics(
+async def run_source_diagnostics_async(
     *,
     config_path: Path,
     source_names: list[str] | None = None,
@@ -129,7 +140,7 @@ async def _run_source_diagnostics(
 ) -> SourceDiagnosticReport:
     config = load_config(config_path)
     days = days_override if days_override is not None else config.days
-    selected_keywords = sample_keywords or config.keywords[:3]
+    selected_keywords = _select_sample_keywords(config.keywords, sample_keywords)
     enabled_source_configs = [source_cfg for source_cfg in config.sources if source_cfg.enabled]
     enabled_source_names = [source_cfg.name for source_cfg in enabled_source_configs]
 
@@ -342,7 +353,6 @@ async def _probe_source(
             status=DiagnosticStatus.FAIL,
             live_status=DiagnosticStatus.FAIL,
             failure_bucket=FailureBucket.LIVE_PROBE_EXCEPTION,
-            probe_mode="fallback_fetch",
             checks=[
                 ProbeCheck(
                     name="live_probe",
@@ -364,7 +374,6 @@ async def _probe_ynet(
 ) -> SourceDiagnosticResult:
     cutoff = datetime.now(UTC) - timedelta(days=days)
     feed_url = source_cfg.url or ""
-    rss_probe = rss_source.RSSSource(source_name="ynet", feed_url=feed_url)
 
     try:
         fetch_result = await _fetch_text(feed_url, user_agent=rss_source.USER_AGENT)
@@ -393,12 +402,12 @@ async def _probe_ynet(
     recent_entry_count = 0
     keyword_match_count = 0
     for entry in entries:
-        date = rss_probe._parse_date(entry)
+        date = _probe_rss_entry_date(entry)
         if date is not None:
             parseable_date_count += 1
             if date >= cutoff:
                 recent_entry_count += 1
-        if rss_probe._parse_entry(entry, cutoff, sample_keywords) is not None:
+        if _probe_rss_entry_matches(entry, cutoff, sample_keywords):
             keyword_match_count += 1
 
     unexpected_redirect = _is_unexpected_redirect(fetch_result.final_url, feed_url)
@@ -609,68 +618,77 @@ async def _probe_ice(
     parsed_article_total = 0
     unexpected_redirect = False
 
-    for keyword in sample_keywords:
-        page_url = scraper._build_search_url(keyword, page_number=1)
-        try:
-            fetch_result = await _fetch_text(page_url, user_agent=ice_source.USER_AGENT)
-        except Exception as exc:
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        headers={"User-Agent": ice_source.USER_AGENT},
+        follow_redirects=True,
+    ) as client:
+        for keyword in sample_keywords:
+            page_url = scraper._build_search_url(keyword, page_number=1)
+            try:
+                fetch_result = await _fetch_text(
+                    page_url,
+                    user_agent=ice_source.USER_AGENT,
+                    client=client,
+                )
+            except Exception as exc:
+                checks.append(
+                    ProbeCheck(
+                        name=f"search:{keyword}",
+                        status=DiagnosticStatus.FAIL,
+                        summary=f"Search fetch failed: {exc}",
+                        details={"url": page_url},
+                    )
+                )
+                continue
+
+            saw_successful_page = True
+            if _is_unexpected_redirect(fetch_result.final_url, page_url):
+                unexpected_redirect = True
+
+            soup = BeautifulSoup(fetch_result.text, "lxml")
+            results_article = scraper._find_results_article(soup)
+            candidates = results_article.select("ul > li") if results_article is not None else []
+            if results_article is not None:
+                saw_results_container = True
+
+            unparseable_date_count = 0
+            parsed_article_count = 0
+            for candidate in candidates:
+                if scraper._parse_date(candidate.get_text(" ", strip=True)) is None:
+                    unparseable_date_count += 1
+                if scraper._parse_article_item(candidate, cutoff) is not None:
+                    parsed_article_count += 1
+
+            parsed_article_total += parsed_article_count
+            if results_article is None:
+                status = DiagnosticStatus.FAIL
+                summary = "Search page did not expose the expected ICE results container"
+            elif parsed_article_count == 0:
+                status = DiagnosticStatus.WARN
+                summary = "Search page contains candidates but parsing returned zero articles"
+            else:
+                status = DiagnosticStatus.OK
+                summary = "Search page returned parsed articles"
+
             checks.append(
                 ProbeCheck(
                     name=f"search:{keyword}",
-                    status=DiagnosticStatus.FAIL,
-                    summary=f"Search fetch failed: {exc}",
-                    details={"url": page_url},
+                    status=status,
+                    summary=summary,
+                    details={
+                        "requested_url": page_url,
+                        "final_url": fetch_result.final_url,
+                        "status_code": fetch_result.status_code,
+                        "content_type": fetch_result.content_type,
+                        "payload_length": len(fetch_result.text),
+                        "candidate_count": len(candidates),
+                        "parsed_article_count": parsed_article_count,
+                        "unparseable_date_count": unparseable_date_count,
+                        "has_results_container": results_article is not None,
+                    },
                 )
             )
-            continue
-
-        saw_successful_page = True
-        if _is_unexpected_redirect(fetch_result.final_url, page_url):
-            unexpected_redirect = True
-
-        soup = BeautifulSoup(fetch_result.text, "lxml")
-        results_article = scraper._find_results_article(soup)
-        candidates = results_article.select("ul > li") if results_article is not None else []
-        if results_article is not None:
-            saw_results_container = True
-
-        unparseable_date_count = 0
-        parsed_article_count = 0
-        for candidate in candidates:
-            if scraper._parse_date(candidate.get_text(" ", strip=True)) is None:
-                unparseable_date_count += 1
-            if scraper._parse_article_item(candidate, cutoff) is not None:
-                parsed_article_count += 1
-
-        parsed_article_total += parsed_article_count
-        if results_article is None:
-            status = DiagnosticStatus.FAIL
-            summary = "Search page did not expose the expected ICE results container"
-        elif parsed_article_count == 0:
-            status = DiagnosticStatus.WARN
-            summary = "Search page contains candidates but parsing returned zero articles"
-        else:
-            status = DiagnosticStatus.OK
-            summary = "Search page returned parsed articles"
-
-        checks.append(
-            ProbeCheck(
-                name=f"search:{keyword}",
-                status=status,
-                summary=summary,
-                details={
-                    "requested_url": page_url,
-                    "final_url": fetch_result.final_url,
-                    "status_code": fetch_result.status_code,
-                    "content_type": fetch_result.content_type,
-                    "payload_length": len(fetch_result.text),
-                    "candidate_count": len(candidates),
-                    "parsed_article_count": parsed_article_count,
-                    "unparseable_date_count": unparseable_date_count,
-                    "has_results_container": results_article is not None,
-                },
-            )
-        )
 
     if not saw_successful_page:
         return _live_result(
@@ -788,21 +806,29 @@ async def _probe_via_fallback_fetch(
     )
 
 
-async def _fetch_text(url: str, *, user_agent: str) -> _FetchResult:
-    async with httpx.AsyncClient(
-        timeout=30.0,
-        headers={"User-Agent": user_agent},
-        follow_redirects=True,
-    ) as client:
+async def _fetch_text(
+    url: str,
+    *,
+    user_agent: str,
+    client: httpx.AsyncClient | None = None,
+) -> _FetchResult:
+    if client is None:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={"User-Agent": user_agent},
+            follow_redirects=True,
+        ) as temporary_client:
+            response = await temporary_client.get(url)
+    else:
         response = await client.get(url)
-        response.raise_for_status()
-        return _FetchResult(
-            requested_url=url,
-            final_url=str(response.url),
-            status_code=response.status_code,
-            content_type=response.headers.get("content-type", ""),
-            text=response.text,
-        )
+    response.raise_for_status()
+    return _FetchResult(
+        requested_url=url,
+        final_url=str(response.url),
+        status_code=response.status_code,
+        content_type=response.headers.get("content-type", ""),
+        text=response.text,
+    )
 
 
 def _merge_status(*statuses: DiagnosticStatus) -> DiagnosticStatus:
@@ -859,3 +885,61 @@ def _normalized_redirect_target(url: str) -> tuple[str, str, str]:
         parts.netloc.lower(),
         parts.path or "/",
     )
+
+
+def _select_sample_keywords(
+    config_keywords: list[str],
+    sample_keywords: list[str] | None,
+) -> list[str]:
+    selected_keywords = sample_keywords or config_keywords[:3] or DEFAULT_KEYWORDS[:3]
+    filtered_keywords = [keyword for keyword in selected_keywords if keyword.strip()]
+    if filtered_keywords:
+        return filtered_keywords
+    return [keyword for keyword in DEFAULT_KEYWORDS[:3] if keyword.strip()]
+
+
+def _entry_value(entry: Any, field_name: str) -> Any:
+    if isinstance(entry, dict):
+        return entry.get(field_name)
+    return getattr(entry, field_name, None)
+
+
+def _probe_rss_entry_date(entry: Any) -> datetime | None:
+    for field_name in ("published", "updated", "created"):
+        value = _entry_value(entry, field_name)
+        if isinstance(value, str) and value:
+            try:
+                return parsedate_to_datetime(value)
+            except (ValueError, TypeError):
+                pass
+
+        parsed_value = _entry_value(entry, f"{field_name}_parsed")
+        if parsed_value:
+            try:
+                return datetime.fromtimestamp(calendar.timegm(parsed_value), tz=UTC)
+            except (ValueError, TypeError, OverflowError):
+                pass
+
+    return None
+
+
+def _probe_rss_entry_matches(entry: Any, cutoff: datetime, sample_keywords: list[str]) -> bool:
+    link = _entry_value(entry, "link")
+    title = _entry_value(entry, "title")
+    if not isinstance(link, str) or not link or not isinstance(title, str) or not title.strip():
+        return False
+
+    date = _probe_rss_entry_date(entry)
+    if date is None:
+        date = datetime.now(UTC)
+    if date < cutoff:
+        return False
+
+    snippet = _entry_value(entry, "summary")
+    if not isinstance(snippet, str):
+        snippet = _entry_value(entry, "description")
+    if not isinstance(snippet, str):
+        snippet = ""
+
+    haystack = f"{title.strip()} {BeautifulSoup(snippet, 'lxml').get_text(' ', strip=True)}".casefold()
+    return any(keyword.casefold() in haystack for keyword in sample_keywords)
