@@ -1265,7 +1265,9 @@ def test_probe_rss_entry_date_returns_none_for_invalid_values() -> None:
 
 def test_probe_rss_entry_matches_handles_missing_fields_and_description_fallback() -> None:
     cutoff = datetime(2024, 1, 1, tzinfo=UTC)
-    assert not source_health._probe_rss_entry_matches({}, cutoff, ["זנות"], source_name="ynet")
+    assert not source_health._probe_rss_entry_matches(
+        {}, cutoff, ["זנות"], source_name="ynet"
+    )
 
     assert source_health._probe_rss_entry_matches(
         {
@@ -1292,21 +1294,6 @@ def test_probe_rss_entry_matches_uses_ynet_source_specific_relaxed_keywords() ->
         cutoff,
         ["זנות"],
         source_name="ynet",
-    )
-
-
-def test_probe_rss_entry_matches_uses_ynet_source_specific_relaxed_keywords() -> None:
-    cutoff = datetime(2024, 1, 1, tzinfo=UTC)
-
-    assert source_health._probe_rss_entry_matches(
-        {
-            "link": "https://www.ynet.co.il/news/article/r111111",
-            "title": "חשד לבית בושת בבני ברק: המשטרה עצרה חשודים",
-            "description": "<p>המשטרה עצרה חשודים בדירה ששימשה לפי החשד לבית בושת.</p>",
-            "published": "Mon, 01 Jan 2099 00:00:00 GMT",
-        },
-        cutoff,
-        ["זנות"],
     )
     assert not source_health._probe_rss_entry_matches(
         {
