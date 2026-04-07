@@ -1,5 +1,6 @@
 """Unit tests for CLI command wiring."""
 
+import json
 import runpy
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import typer
 from typer.testing import CliRunner
 
 from denbust.cli import app
+from denbust.diagnostics import source_health
 from denbust.models.common import DatasetName, JobName
 
 runner = CliRunner()
@@ -265,6 +267,147 @@ class TestCli:
             validation_common.DEFAULT_VARIANT_MATRIX_PATH,
             None,
         )
+
+    def test_diagnose_sources_forwards_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """diagnose-sources should pass its flags into the diagnostics runner."""
+        captured: dict[str, object] = {}
+
+        def fake_run_source_diagnostics(
+            *,
+            config_path: Path,
+            source_names: list[str] | None = None,
+            days_override: int | None = None,
+            include_artifacts: bool = True,
+            include_live: bool = True,
+            sample_keywords: list[str] | None = None,
+        ) -> object:
+            captured["config_path"] = config_path
+            captured["source_names"] = source_names
+            captured["days_override"] = days_override
+            captured["include_artifacts"] = include_artifacts
+            captured["include_live"] = include_live
+            captured["sample_keywords"] = sample_keywords
+            return object()
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_source_diagnostics",
+            fake_run_source_diagnostics,
+        )
+        monkeypatch.setattr(
+            "denbust.diagnostics.render_source_diagnostic_report",
+            lambda report: f"rendered:{type(report).__name__}",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "diagnose-sources",
+                "--config",
+                "agents/custom.yaml",
+                "--source",
+                "ynet",
+                "--days",
+                "5",
+                "--sample-keyword",
+                "זנות",
+                "--sample-keyword",
+                "בית בושת",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured == {
+            "config_path": Path("agents/custom.yaml"),
+            "source_names": ["ynet"],
+            "days_override": 5,
+            "include_artifacts": True,
+            "include_live": True,
+            "sample_keywords": ["זנות", "בית בושת"],
+        }
+
+    def test_diagnose_sources_json_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """diagnose-sources should emit machine-readable JSON when requested."""
+        report = source_health.SourceDiagnosticReport(
+            config_path="agents/news.yaml",
+            days=21,
+            sample_keywords=["זנות"],
+            artifact_analysis_enabled=True,
+            live_probe_enabled=True,
+            results=[],
+        )
+
+        def fake_run_source_diagnostics(**_kwargs: object) -> object:
+            return report
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_source_diagnostics",
+            fake_run_source_diagnostics,
+        )
+
+        result = runner.invoke(app, ["diagnose-sources", "--format", "json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["config_path"] == "agents/news.yaml"
+        assert payload["days"] == 21
+
+    def test_diagnose_sources_writes_output_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """diagnose-sources should write JSON to the requested output path."""
+        report = source_health.SourceDiagnosticReport(
+            config_path="agents/news.yaml",
+            days=21,
+            sample_keywords=["זנות"],
+            artifact_analysis_enabled=True,
+            live_probe_enabled=True,
+            results=[],
+        )
+        output_path = tmp_path / "diagnostics.json"
+
+        def fake_run_source_diagnostics(**_kwargs: object) -> object:
+            return report
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_source_diagnostics",
+            fake_run_source_diagnostics,
+        )
+        monkeypatch.setattr(
+            "denbust.diagnostics.render_source_diagnostic_report",
+            lambda report: f"rendered:{type(report).__name__}",
+        )
+
+        result = runner.invoke(app, ["diagnose-sources", "--output", str(output_path)])
+
+        assert result.exit_code == 0
+        assert (
+            json.loads(output_path.read_text(encoding="utf-8"))["config_path"] == "agents/news.yaml"
+        )
+
+    def test_diagnose_sources_rejects_conflicting_mode_flags(self) -> None:
+        """diagnose-sources should reject mutually exclusive mode flags."""
+        result = runner.invoke(app, ["diagnose-sources", "--artifacts-only", "--live-only"])
+
+        assert result.exit_code != 0
+        assert "Choose at most one" in result.stderr
+
+    def test_diagnose_sources_surfaces_invalid_source_selection_as_bad_parameter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """diagnose-sources should convert runner validation errors into CLI parameter errors."""
+
+        def fake_run_source_diagnostics(**_kwargs: object) -> object:
+            raise ValueError("Unknown or disabled sources: ghost")
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_source_diagnostics",
+            fake_run_source_diagnostics,
+        )
+
+        result = runner.invoke(app, ["diagnose-sources", "--source", "ghost"])
+
+        assert result.exit_code != 0
+        assert "Unknown or disabled sources: ghost" in result.stderr
 
     def test_validation_evaluate_uses_default_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """validation-evaluate should default to the tracked assets."""
