@@ -88,7 +88,11 @@ class TestDailyReviewHelpers:
             diagnostics_path,
             {
                 "results": [
-                    {"source_name": "ice", "status": "fail", "failure_bucket": "selector_drift_suspected"}
+                    {
+                        "source_name": "ice",
+                        "status": "fail",
+                        "failure_bucket": "selector_drift_suspected",
+                    }
                 ]
             },
         )
@@ -100,7 +104,11 @@ class TestDailyReviewHelpers:
 
         assert artifacts.source_diagnostics == {
             "results": [
-                {"source_name": "ice", "status": "fail", "failure_bucket": "selector_drift_suspected"}
+                {
+                    "source_name": "ice",
+                    "status": "fail",
+                    "failure_bucket": "selector_drift_suspected",
+                }
             ]
         }
 
@@ -398,7 +406,9 @@ class TestDailyReviewClients:
             debug_log_path=Path("logs/example.json"),
             run_snapshot={"result_summary": "x"},
             debug_summary={"suspicions": []},
-            source_diagnostics={"results": [{"source_name": "ice", "failure_bucket": "selector_drift_suspected"}]},
+            source_diagnostics={
+                "results": [{"source_name": "ice", "failure_bucket": "selector_drift_suspected"}]
+            },
             debug_log={"raw_articles": []},
         )
 

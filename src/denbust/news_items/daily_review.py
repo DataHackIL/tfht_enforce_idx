@@ -417,7 +417,9 @@ def main() -> None:
     raw_labels = os.getenv("DENBUST_REVIEW_ISSUE_LABELS", "")
     labels = [label.strip() for label in raw_labels.split(",") if label.strip()]
     raw_source_diagnostics_path = os.getenv("DENBUST_SOURCE_DIAGNOSTICS_PATH", "").strip()
-    source_diagnostics_path = Path(raw_source_diagnostics_path) if raw_source_diagnostics_path else None
+    source_diagnostics_path = (
+        Path(raw_source_diagnostics_path) if raw_source_diagnostics_path else None
+    )
 
     if not repository:
         raise SystemExit("GITHUB_REPOSITORY is required for daily review.")
