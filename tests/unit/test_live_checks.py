@@ -545,7 +545,9 @@ class TestLiveChecks:
                 assert target_url == "https://example.com/raw"
                 return FakeResponse()
 
-        monkeypatch.setattr("denbust.live_checks.runner.httpx.AsyncClient", lambda **_: FakeClient())
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.httpx.AsyncClient", lambda **_: FakeClient()
+        )
 
         case = LiveSourceArticleCaseConfig(
             id="live-dot",
@@ -569,7 +571,9 @@ class TestLiveChecks:
             source_name="walla",
         )
 
-        result = await __import__("denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"])._execute_live_source_article_case(  # type: ignore[attr-defined]
+        result = await __import__(
+            "denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"]
+        )._execute_live_source_article_case(  # type: ignore[attr-defined]
             case,
             classifier=FakeClassifier(_build_matching_classification()),
             sources_by_name={"walla": FakeSource("walla", [article])},
