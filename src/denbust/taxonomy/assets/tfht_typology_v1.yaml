@@ -1,0 +1,157 @@
+version: "1"
+asset_name: tfht_typology_v1
+categories:
+  - id: human_trafficking
+    label_he: סחר בבני אדם
+    label_en: Human trafficking
+    subcategories:
+      - id: trafficking_sexual_exploitation
+        label_he: סחר למטרת ניצול מיני (זנות)
+        label_en: Trafficking for sexual exploitation
+        index_relevant: true
+        legacy_category: trafficking
+        legacy_sub_category: arrest
+        example_urls:
+          - https://www.israelhayom.co.il/news/law/article/19956639
+          - https://www.mako.co.il/men-men_news/Article-921a9373b4aeb91026.htm
+      - id: trafficking_forced_marriage
+        label_he: סחר למטרת נישואין בכפייה
+        label_en: Trafficking for forced marriage
+        index_relevant: true
+        legacy_category: trafficking
+        legacy_sub_category:
+      - id: trafficking_forced_labor
+        label_he: סחר למטרת עבודת כפייה
+        label_en: Trafficking for forced labor
+        index_relevant: false
+        legacy_category: trafficking
+        legacy_sub_category:
+      - id: trafficking_organ_harvesting
+        label_he: סחר למטרת נטילת איברים
+        label_en: Trafficking for organ harvesting
+        index_relevant: false
+        legacy_category: trafficking
+        legacy_sub_category:
+      - id: trafficking_cross_border_prostitution
+        label_he: הבאת אדם למדינה אחרת לשם העיסוק בזנות
+        label_en: Cross-border prostitution trafficking
+        index_relevant: true
+        legacy_category: trafficking
+        legacy_sub_category: arrest
+      - id: trafficking_slavery_conditions
+        label_he: החזקה בתנאי עבדות
+        label_en: Holding in slavery conditions
+        index_relevant: true
+        legacy_category: trafficking
+        legacy_sub_category: rescue
+      - id: sexual_slavery
+        label_he: עבדות מינית
+        label_en: Sexual slavery
+        index_relevant: true
+        legacy_category: trafficking
+        legacy_sub_category: rescue
+      - id: trafficking_women
+        label_he: סחר בנשים
+        label_en: Women trafficking
+        index_relevant: true
+        legacy_category: trafficking
+        legacy_sub_category: arrest
+  - id: pimping_prostitution
+    label_he: סרסור וזנות
+    label_en: Pimping and prostitution
+    subcategories:
+      - id: pimping
+        label_he: סרסור
+        label_en: Pimping
+        index_relevant: true
+        legacy_category: pimping
+        legacy_sub_category: arrest
+        example_urls:
+          - https://www.maariv.co.il/news/law/article-1270778
+          - https://www.kolhair.co.il/jerusalem-news/258004/
+      - id: bringing_into_prostitution
+        label_he: הבאת אדם לידי זנות
+        label_en: Bringing a person into prostitution
+        index_relevant: true
+        legacy_category: prostitution
+        legacy_sub_category: arrest
+      - id: soliciting_prostitution
+        label_he: שידול לזנות
+        label_en: Soliciting prostitution
+        index_relevant: true
+        legacy_category: prostitution
+        legacy_sub_category: arrest
+      - id: women_testimonies
+        label_he: עדויות של נשים בזנות
+        label_en: Testimonies of women in prostitution
+        index_relevant: false
+        legacy_category: prostitution
+        legacy_sub_category:
+      - id: phenomenon_coverage
+        label_he: סיקור תופעת הזנות
+        label_en: Coverage of prostitution as a phenomenon
+        index_relevant: false
+        legacy_category: prostitution
+        legacy_sub_category:
+      - id: online_prostitution
+        label_he: זנות מקוונת
+        label_en: Online prostitution
+        index_relevant: true
+        legacy_category: prostitution
+        legacy_sub_category:
+      - id: nordic_model_law
+        label_he: חוק איסור צריכת זנות / המודל הנורדי
+        label_en: Nordic model / prohibition on buying prostitution
+        index_relevant: false
+        legacy_category: prostitution
+        legacy_sub_category:
+  - id: brothels
+    label_he: בתי בושת
+    label_en: Brothels
+    subcategories:
+      - id: keeping_brothel
+        label_he: החזקת מקום לשם זנות
+        label_en: Keeping a place for prostitution
+        index_relevant: true
+        legacy_category: brothel
+        legacy_sub_category:
+      - id: renting_brothel
+        label_he: השכרת מקום לשם זנות
+        label_en: Renting a place for prostitution
+        index_relevant: true
+        legacy_category: brothel
+        legacy_sub_category:
+      - id: advertising_prostitution
+        label_he: פרסום זנות
+        label_en: Advertising prostitution
+        index_relevant: true
+        legacy_category: brothel
+        legacy_sub_category:
+      - id: client_fine
+        label_he: קנס בגין צריכת זנות
+        label_en: Fine for buying prostitution
+        index_relevant: true
+        legacy_category: prostitution
+        legacy_sub_category: fine
+        example_urls:
+          - https://gal-gefen.co.il/news/205002
+      - id: administrative_closure
+        label_he: סגירה מנהלית / צו מנהלי לפי חוק הגבלת שימוש במקום לשם ביצוע עבירה
+        label_en: Administrative closure order
+        index_relevant: true
+        legacy_category: brothel
+        legacy_sub_category: closure
+        example_urls:
+          - https://www.kan-ashkelon.co.il/news/100735
+      - id: closure_appeal
+        label_he: ערעור על צו מנהלי
+        label_en: Appeal on closure order
+        index_relevant: true
+        legacy_category: brothel
+        legacy_sub_category: closure
+      - id: brothel_indictment
+        label_he: כתב אישום על החזקת/השכרת מקום לשם זנות
+        label_en: Indictment for keeping or renting a brothel
+        index_relevant: true
+        legacy_category: brothel
+        legacy_sub_category:

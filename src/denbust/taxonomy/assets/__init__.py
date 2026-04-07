@@ -1,0 +1,1 @@
+"""Packaged TFHT taxonomy assets."""

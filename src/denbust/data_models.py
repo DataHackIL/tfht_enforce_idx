@@ -52,6 +52,10 @@ class ClassificationResult(BaseModel):
 
     relevant: bool
     enforcement_related: bool = False
+    index_relevant: bool = False
+    taxonomy_version: str | None = None
+    taxonomy_category_id: str | None = None
+    taxonomy_subcategory_id: str | None = None
     category: Category
     sub_category: SubCategory | None = None
     confidence: str = Field(default="medium", pattern="^(high|medium|low)$")
@@ -79,6 +83,10 @@ class UnifiedItem(BaseModel):
     sources: list[SourceReference]
     date: datetime
     enforcement_related: bool = False
+    index_relevant: bool = False
+    taxonomy_version: str | None = None
+    taxonomy_category_id: str | None = None
+    taxonomy_subcategory_id: str | None = None
     category: Category
     sub_category: SubCategory | None = None
     canonical_url: HttpUrl | None = None

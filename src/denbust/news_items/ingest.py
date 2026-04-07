@@ -39,6 +39,8 @@ def _combined_privacy_input(item: UnifiedItem) -> str:
         for segment in (
             item.headline,
             item.summary,
+            item.taxonomy_category_id or "",
+            item.taxonomy_subcategory_id or "",
             item.category.value,
             item.sub_category.value if item.sub_category else "",
         )
