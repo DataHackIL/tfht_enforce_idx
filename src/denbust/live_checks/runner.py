@@ -12,11 +12,12 @@ import httpx
 import yaml
 from pydantic import BaseModel, Field, HttpUrl, TypeAdapter
 
-from denbust.classifier.relevance import create_classifier
+from denbust.classifier.relevance import Classifier, create_classifier
 from denbust.config import Config, load_config
 from denbust.data_models import ClassificationResult, RawArticle
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.pipeline import create_sources
+from denbust.sources.base import Source
 
 REQUIRED_ENV_VARS = ["ANTHROPIC_API_KEY"]
 
@@ -61,7 +62,7 @@ CaseConfig = Annotated[
     FixtureArticleCaseConfig | LiveSourceArticleCaseConfig,
     Field(discriminator="type"),
 ]
-CASE_CONFIG_ADAPTER = TypeAdapter(CaseConfig)
+CASE_CONFIG_ADAPTER: TypeAdapter[CaseConfig] = TypeAdapter(CaseConfig)
 
 
 class LiveCheckScenario(BaseModel):
@@ -259,7 +260,7 @@ async def _execute_fixture_article_case(
     case: FixtureArticleCaseConfig,
     *,
     repo_root: Path,
-    classifier: object,
+    classifier: Classifier,
     artifacts_dir: Path,
 ) -> CaseResult:
     fixture_path = _resolve_repo_path(repo_root, case.fixture)
@@ -311,8 +312,8 @@ async def _capture_live_source_payload(
 async def _execute_live_source_article_case(
     case: LiveSourceArticleCaseConfig,
     *,
-    classifier: object,
-    sources_by_name: dict[str, object],
+    classifier: Classifier,
+    sources_by_name: dict[str, Source],
     artifacts_dir: Path,
     runtime_config: Config,
 ) -> CaseResult:
@@ -476,7 +477,7 @@ async def run_live_check_scenario(
     needs_live_sources = any(
         isinstance(case, LiveSourceArticleCaseConfig) for case in scenario.cases
     )
-    sources_by_name: dict[str, object] = {}
+    sources_by_name: dict[str, Source] = {}
     if needs_live_sources:
         sources_by_name = {source.name: source for source in create_sources(runtime_config)}
 
