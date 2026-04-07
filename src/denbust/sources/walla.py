@@ -155,6 +155,26 @@ class WallaScraper(Source):
             response = await self._client.get(url)
             response.raise_for_status()
             return response.text
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.warning(
+                    "Walla archive branch unavailable for category %s, %04d-%02d page %s: %s",
+                    category_id,
+                    year,
+                    month,
+                    page_number,
+                    exc,
+                )
+                return None
+            logger.error(
+                "Error fetching Walla archive for category %s, %04d-%02d page %s: %s",
+                category_id,
+                year,
+                month,
+                page_number,
+                exc,
+            )
+            return None
         except httpx.HTTPError as exc:
             logger.error(
                 "Error fetching Walla archive for category %s, %04d-%02d page %s: %s",

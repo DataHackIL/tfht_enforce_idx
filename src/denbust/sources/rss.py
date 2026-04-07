@@ -16,6 +16,44 @@ logger = logging.getLogger(__name__)
 # User agent for HTTP requests
 USER_AGENT = "denbust/0.1.0 (news monitoring bot; +https://github.com/denbust)"
 
+YNET_SUPPLEMENTAL_KEYWORDS = [
+    "חשד לבית בושת",
+    "בית בושת אותר",
+    "חשד לזנות",
+    "שידול לזנות",
+    "מכון עיסוי",
+    "מכון ליווי",
+    "סרסורות",
+    "סחר בנשים",
+]
+
+
+def effective_keywords_for_source(source_name: str, keywords: list[str]) -> list[str]:
+    """Return the effective keyword set for an RSS source."""
+    seen: set[str] = set()
+    values: list[str] = []
+
+    supplemental_keywords = YNET_SUPPLEMENTAL_KEYWORDS if source_name == "ynet" else []
+    for keyword in [*keywords, *supplemental_keywords]:
+        candidate = " ".join(keyword.split()).strip()
+        if not candidate:
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(candidate)
+
+    return values
+
+
+def matches_keywords_for_source(
+    source_name: str, title: str, snippet: str, keywords: list[str]
+) -> bool:
+    """Check whether text matches the effective keyword set for an RSS source."""
+    text = f"{title} {snippet}".casefold()
+    return any(keyword.casefold() in text for keyword in effective_keywords_for_source(source_name, keywords))
+
 
 class RSSSource(Source):
     """Fetch and filter articles from RSS feeds."""
@@ -183,8 +221,7 @@ class RSSSource(Source):
         Returns:
             True if any keyword matches.
         """
-        text = f"{title} {snippet}".lower()
-        return any(kw.lower() in text for kw in keywords)
+        return matches_keywords_for_source(self._name, title, snippet, keywords)
 
     def _clean_html(self, text: str) -> str:
         """Remove HTML tags from text.

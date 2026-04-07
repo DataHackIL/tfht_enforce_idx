@@ -520,7 +520,7 @@ async def _probe_maariv(
     keyword_matches = [
         article
         for article in parsed_articles
-        if scraper._matches_keywords(article, sample_keywords)
+        if maariv_source.matches_maariv_keywords(article, sample_keywords)
     ]
     details = {
         "requested_url": maariv_source.MAARIV_LAW_URL,
@@ -941,7 +941,10 @@ def _probe_rss_entry_matches(entry: Any, cutoff: datetime, sample_keywords: list
     if not isinstance(snippet, str):
         snippet = ""
 
-    haystack = (
-        f"{title.strip()} {BeautifulSoup(snippet, 'lxml').get_text(' ', strip=True)}".casefold()
+    clean_snippet = BeautifulSoup(snippet, "lxml").get_text(" ", strip=True)
+    return rss_source.matches_keywords_for_source(
+        "ynet",
+        title.strip(),
+        clean_snippet,
+        sample_keywords,
     )
-    return any(keyword.casefold() in haystack for keyword in sample_keywords)
