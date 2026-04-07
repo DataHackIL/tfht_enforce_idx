@@ -62,6 +62,7 @@ class TestClassificationResult:
         )
 
         assert result.relevant is True
+        assert result.enforcement_related is False
         assert result.category == Category.BROTHEL
         assert result.sub_category == SubCategory.CLOSURE
         assert result.confidence == "high"
@@ -74,6 +75,7 @@ class TestClassificationResult:
         )
 
         assert result.relevant is False
+        assert result.enforcement_related is False
         assert result.category == Category.NOT_RELEVANT
         assert result.sub_category is None
         assert result.confidence == "medium"  # default
@@ -104,6 +106,7 @@ class TestUnifiedItem:
 
         assert item.headline == "Police Raid Brothel"
         assert len(item.sources) == 2
+        assert item.enforcement_related is False
         assert item.category == Category.BROTHEL
         assert item.sub_category == SubCategory.CLOSURE
 
@@ -135,4 +138,5 @@ class TestClassifiedArticle:
 
         assert classified.article.title == "Test Article"
         assert classified.classification.relevant is True
+        assert classified.classification.enforcement_related is False
         assert classified.classification.category == Category.ENFORCEMENT

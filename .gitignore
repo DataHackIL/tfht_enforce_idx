@@ -225,3 +225,5 @@ agents/local/
 .python-version
 
 uv.lock
+
+.live_checks/

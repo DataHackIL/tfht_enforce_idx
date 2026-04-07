@@ -201,6 +201,7 @@ def _serialize_classified_article(article: ClassifiedArticle) -> dict[str, objec
     return {
         **_serialize_raw_article(article.article),
         "relevant": article.classification.relevant,
+        "enforcement_related": article.classification.enforcement_related,
         "category": article.classification.category.value,
         "sub_category": (
             article.classification.sub_category.value
@@ -216,6 +217,7 @@ def _serialize_unified_item(item: UnifiedItem) -> dict[str, object]:
     return {
         "headline": item.headline,
         "summary": item.summary,
+        "enforcement_related": item.enforcement_related,
         "category": item.category.value,
         "sub_category": item.sub_category.value if item.sub_category is not None else None,
         "canonical_url": str(item.canonical_url) if item.canonical_url is not None else None,

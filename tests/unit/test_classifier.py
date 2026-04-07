@@ -27,10 +27,11 @@ class TestClassifierParsing:
         # Create classifier with dummy API key (won't make actual calls)
         classifier = Classifier(api_key="test-key")
 
-        response = '{"relevant": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}'
+        response = '{"relevant": true, "enforcement_related": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}'
         result = classifier._parse_response(response)
 
         assert result.relevant is True
+        assert result.enforcement_related is True
         assert result.category == Category.BROTHEL
         assert result.sub_category == SubCategory.CLOSURE
         assert result.confidence == "high"
@@ -43,7 +44,20 @@ class TestClassifierParsing:
         result = classifier._parse_response(response)
 
         assert result.relevant is False
+        assert result.enforcement_related is False
         assert result.category == Category.NOT_RELEVANT
+        assert result.sub_category is None
+
+    def test_parse_missing_enforcement_related_defaults_false(self) -> None:
+        """Older classifier JSON without the second axis should still parse safely."""
+        classifier = Classifier(api_key="test-key")
+
+        response = '{"relevant": true, "category": "prostitution", "sub_category": null, "confidence": "medium"}'
+        result = classifier._parse_response(response)
+
+        assert result.relevant is True
+        assert result.enforcement_related is False
+        assert result.category == Category.PROSTITUTION
         assert result.sub_category is None
 
     def test_parse_with_markdown_code_block(self) -> None:
@@ -256,10 +270,10 @@ class TestClassifierRuntime:
         classify_mock = AsyncMock(
             side_effect=[
                 classifier._parse_response(
-                    '{"relevant": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}'
+                    '{"relevant": true, "enforcement_related": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}'
                 ),
                 classifier._parse_response(
-                    '{"relevant": false, "category": "not_relevant", "confidence": "low"}'
+                    '{"relevant": false, "enforcement_related": false, "category": "not_relevant", "confidence": "low"}'
                 ),
             ]
         )
@@ -315,11 +329,10 @@ class TestClassificationPromptContent:
         """System prompt must not be empty."""
         assert CLASSIFICATION_SYSTEM_PROMPT.strip()
 
-    def test_system_prompt_is_inclusive_not_enforcement_only(self) -> None:
-        """System prompt must not restrict relevance to enforcement actions only."""
-        # The old framing 'anti-prostitution enforcement' was too narrow; the new
-        # system prompt must make relevance inclusive of all covered topics.
-        assert "even if no arrest or enforcement action occurred" in CLASSIFICATION_SYSTEM_PROMPT
+    def test_system_prompt_separates_inclusion_from_enforcement(self) -> None:
+        """System prompt must describe the two-axis contract explicitly."""
+        assert "Decide two separate things" in CLASSIFICATION_SYSTEM_PROMPT
+        assert "enforcement or legal-action event" in CLASSIFICATION_SYSTEM_PROMPT
 
     def test_prompt_contains_hebrew_brothel_term(self) -> None:
         """Prompt must include Hebrew term for brothels (בתי בושת)."""
@@ -349,6 +362,14 @@ class TestClassificationPromptContent:
             for subcategory in subcategories:
                 assert subcategory.value in CLASSIFICATION_PROMPT
 
+    def test_prompt_describes_relevant_non_enforcement_outputs(self) -> None:
+        """Prompt should allow topical non-enforcement coverage with a null subcategory."""
+        assert "relevant=true, enforcement_related=false" in CLASSIFICATION_PROMPT
+
+    def test_prompt_excludes_lifestyle_and_profile_stories(self) -> None:
+        """Prompt should explicitly exclude the out-of-scope celebrity/profile class."""
+        assert "Celebrity, lifestyle, profile, or entertainment stories" in CLASSIFICATION_PROMPT
+
 
 class TestClassifyPassesSystemPrompt:
     """Tests that classify() passes the system prompt to the Anthropic API."""
@@ -362,7 +383,7 @@ class TestClassifyPassesSystemPrompt:
                 content=[
                     TextBlock(
                         type="text",
-                        text='{"relevant": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
+                        text='{"relevant": true, "enforcement_related": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
                     )
                 ]
             )
@@ -391,11 +412,11 @@ class TestClassifyPassesSystemPrompt:
                 return_value=MagicMock(
                     content=[
                         TextBlock(
-                            type="text",
-                            text='{"relevant": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
-                        )
-                    ]
-                )
+                        type="text",
+                        text='{"relevant": true, "enforcement_related": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
+                    )
+                ]
+            )
             )
         )
         article = RawArticle(
@@ -409,6 +430,7 @@ class TestClassifyPassesSystemPrompt:
         result = await classifier.classify(article)
 
         assert result.relevant is True
+        assert result.enforcement_related is True
         assert result.category == Category.TRAFFICKING
 
     @pytest.mark.asyncio
@@ -420,11 +442,11 @@ class TestClassifyPassesSystemPrompt:
                 return_value=MagicMock(
                     content=[
                         TextBlock(
-                            type="text",
-                            text='{"relevant": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}',
-                        )
-                    ]
-                )
+                        type="text",
+                        text='{"relevant": true, "enforcement_related": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}',
+                    )
+                ]
+            )
             )
         )
         article = RawArticle(
@@ -438,4 +460,139 @@ class TestClassifyPassesSystemPrompt:
         result = await classifier.classify(article)
 
         assert result.relevant is True
+        assert result.enforcement_related is True
         assert result.category == Category.BROTHEL
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("title", "snippet", "category", "sub_category"),
+        [
+            (
+                '"שידול לזנות": עידן דביר הוא עו"ד החשוד בסחיטה מינית של חיילות',
+                "כתבה על חשד לשידול לזנות וסחיטה מינית של חיילות בתמורה לייצוג",
+                Category.PROSTITUTION,
+                SubCategory.ARREST,
+            ),
+            (
+                "הוא הבטיח להן הארה, והפך אותן לקורבנות אונס וסחר בבני אדם",
+                "כתבה על קורבנות אונס וסחר בבני אדם",
+                Category.TRAFFICKING,
+                SubCategory.RESCUE,
+            ),
+            (
+                "בית בושת אותר בתוך מקלט ציבורי",
+                "כוחות אכיפה איתרו בית בושת שפעל במקלט ציבורי",
+                Category.BROTHEL,
+                SubCategory.CLOSURE,
+            ),
+            (
+                "בני זוג שעלו מברזיל הפעילו רשת זנות בארץ",
+                "חשד להפעלת רשת זנות בישראל על ידי בני זוג שעלו מברזיל",
+                Category.PROSTITUTION,
+                SubCategory.ARREST,
+            ),
+        ],
+    )
+    async def test_issue_48_false_negative_examples_can_classify_as_enforcement_related(
+        self,
+        title: str,
+        snippet: str,
+        category: Category,
+        sub_category: SubCategory,
+    ) -> None:
+        """Known missed enforcement stories should remain covered as regression examples."""
+        classifier = Classifier(api_key="test-key")
+        classifier._client.messages = MagicMock(
+            create=MagicMock(
+                return_value=MagicMock(
+                    content=[
+                        TextBlock(
+                            type="text",
+                            text=(
+                                '{"relevant": true, "enforcement_related": true, '
+                                f'"category": "{category.value}", '
+                                f'"sub_category": "{sub_category.value}", '
+                                '"confidence": "high"}'
+                            ),
+                        )
+                    ]
+                )
+            )
+        )
+        article = RawArticle(
+            url=HttpUrl("https://example.com/regression"),
+            title=title,
+            snippet=snippet,
+            date=datetime(2026, 4, 6, tzinfo=UTC),
+            source_name="test",
+        )
+
+        result = await classifier.classify(article)
+
+        assert result.relevant is True
+        assert result.enforcement_related is True
+        assert result.category == category
+        assert result.sub_category == sub_category
+
+    @pytest.mark.asyncio
+    async def test_classify_non_enforcement_topical_story_returns_relevant_without_subcategory(self) -> None:
+        """Relevant topical stories may be kept even when they are not enforcement events."""
+        classifier = Classifier(api_key="test-key")
+        classifier._client.messages = MagicMock(
+            create=MagicMock(
+                return_value=MagicMock(
+                    content=[
+                        TextBlock(
+                            type="text",
+                            text='{"relevant": true, "enforcement_related": false, "category": "prostitution", "sub_category": null, "confidence": "medium"}',
+                        )
+                    ]
+                )
+            )
+        )
+        article = RawArticle(
+            url=HttpUrl("https://example.com/topic-only"),
+            title="דיווח על נשים בזנות בישראל",
+            snippet="כתבת רקע על זנות בישראל ללא אירוע אכיפה מסוים",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="test",
+        )
+
+        result = await classifier.classify(article)
+
+        assert result.relevant is True
+        assert result.enforcement_related is False
+        assert result.category == Category.PROSTITUTION
+        assert result.sub_category is None
+
+    @pytest.mark.asyncio
+    async def test_issue_10_style_celebrity_story_can_be_rejected(self) -> None:
+        """Celebrity/profile coverage about sex work should be out of scope."""
+        classifier = Classifier(api_key="test-key")
+        classifier._client.messages = MagicMock(
+            create=MagicMock(
+                return_value=MagicMock(
+                    content=[
+                        TextBlock(
+                            type="text",
+                            text='{"relevant": false, "enforcement_related": false, "category": "not_relevant", "sub_category": null, "confidence": "high"}',
+                        )
+                    ]
+                )
+            )
+        )
+        article = RawArticle(
+            url=HttpUrl(
+                "https://www.mako.co.il/music-news/world/Article-b6d8dc4b6d2ec91026.htm"
+            ),
+            title="אני מממנת את הקריירה שלי משירותי מין",
+            snippet="הווידוי המפתיע של הזמרת",
+            date=datetime(2026, 3, 14, tzinfo=UTC),
+            source_name="mako",
+        )
+
+        result = await classifier.classify(article)
+
+        assert result.relevant is False
+        assert result.enforcement_related is False
+        assert result.category == Category.NOT_RELEVANT

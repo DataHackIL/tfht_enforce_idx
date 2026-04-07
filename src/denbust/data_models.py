@@ -51,6 +51,7 @@ class ClassificationResult(BaseModel):
     """Result of LLM classification."""
 
     relevant: bool
+    enforcement_related: bool = False
     category: Category
     sub_category: SubCategory | None = None
     confidence: str = Field(default="medium", pattern="^(high|medium|low)$")
@@ -77,6 +78,7 @@ class UnifiedItem(BaseModel):
     summary: str
     sources: list[SourceReference]
     date: datetime
+    enforcement_related: bool = False
     category: Category
     sub_category: SubCategory | None = None
     canonical_url: HttpUrl | None = None

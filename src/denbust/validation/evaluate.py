@@ -49,7 +49,9 @@ def _load_variant_matrix(path: Path) -> ClassifierVariantMatrix:
     return matrix
 
 
-def _load_validation_examples(path: Path) -> tuple[list[RawArticle], list[tuple[bool, str, str]]]:
+def _load_validation_examples(
+    path: Path,
+) -> tuple[list[RawArticle], list[tuple[bool, bool, str, str]]]:
     if not path.exists():
         raise FileNotFoundError(f"Validation set not found: {path}")
     rows = read_csv_rows(path)
@@ -57,7 +59,7 @@ def _load_validation_examples(path: Path) -> tuple[list[RawArticle], list[tuple[
         raise ValueError("Validation set is empty")
 
     articles: list[RawArticle] = []
-    labels: list[tuple[bool, str, str]] = []
+    labels: list[tuple[bool, bool, str, str]] = []
     for row in rows:
         article = RawArticle(
             url=HttpUrl(row["url"].strip()),
@@ -67,28 +69,31 @@ def _load_validation_examples(path: Path) -> tuple[list[RawArticle], list[tuple[
             source_name=row["source_name"].strip(),
         )
         relevant = parse_bool(row["relevant"])
+        enforcement_related = parse_bool(row.get("enforcement_related", "False"))
         category = Category(row["category"].strip())
         sub_category = row["sub_category"].strip()
         articles.append(article)
-        labels.append((relevant, category.value, sub_category))
+        labels.append((relevant, enforcement_related, category.value, sub_category))
     return articles, labels
 
 
 def _score_predictions(
-    labels: list[tuple[bool, str, str]],
-    predictions: list[tuple[bool, str, str]],
+    labels: list[tuple[bool, bool, str, str]],
+    predictions: list[tuple[bool, bool, str, str]],
     *,
     variant: ClassifierVariantSpec,
     model: str,
 ) -> VariantMetrics:
     tp = fp = fn = tn = 0
     relevant_rows = 0
+    enforcement_tp = enforcement_fp = enforcement_fn = enforcement_tn = 0
     category_matches = 0
     subcategory_matches = 0
     exact_matches = 0
 
-    for (true_relevant, true_category, true_sub_category), (
+    for (true_relevant, true_enforcement_related, true_category, true_sub_category), (
         predicted_relevant,
+        predicted_enforcement_related,
         predicted_category,
         predicted_sub_category,
     ) in zip(labels, predictions, strict=True):
@@ -103,6 +108,14 @@ def _score_predictions(
 
         if true_relevant:
             relevant_rows += 1
+            if true_enforcement_related and predicted_enforcement_related:
+                enforcement_tp += 1
+            elif not true_enforcement_related and predicted_enforcement_related:
+                enforcement_fp += 1
+            elif true_enforcement_related and not predicted_enforcement_related:
+                enforcement_fn += 1
+            else:
+                enforcement_tn += 1
             if predicted_relevant:
                 if predicted_category == true_category:
                     category_matches += 1
@@ -111,6 +124,7 @@ def _score_predictions(
 
         if (
             predicted_relevant == true_relevant
+            and predicted_enforcement_related == true_enforcement_related
             and predicted_category == true_category
             and predicted_sub_category == true_sub_category
         ):
@@ -121,6 +135,24 @@ def _score_predictions(
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
     relevance_accuracy = (tp + tn) / total if total else 0.0
+    enforcement_precision = (
+        enforcement_tp / (enforcement_tp + enforcement_fp)
+        if (enforcement_tp + enforcement_fp)
+        else 0.0
+    )
+    enforcement_recall = (
+        enforcement_tp / (enforcement_tp + enforcement_fn)
+        if (enforcement_tp + enforcement_fn)
+        else 0.0
+    )
+    enforcement_f1 = (
+        2 * enforcement_precision * enforcement_recall / (enforcement_precision + enforcement_recall)
+        if (enforcement_precision + enforcement_recall)
+        else 0.0
+    )
+    enforcement_accuracy = (
+        (enforcement_tp + enforcement_tn) / relevant_rows if relevant_rows else 0.0
+    )
     category_accuracy = category_matches / relevant_rows if relevant_rows else 0.0
     subcategory_accuracy = subcategory_matches / relevant_rows if relevant_rows else 0.0
     overall_exact_match = exact_matches / total if total else 0.0
@@ -133,6 +165,10 @@ def _score_predictions(
         relevance_recall=recall,
         relevance_f1=f1,
         relevance_accuracy=relevance_accuracy,
+        enforcement_precision_relevant_only=enforcement_precision,
+        enforcement_recall_relevant_only=enforcement_recall,
+        enforcement_f1_relevant_only=enforcement_f1,
+        enforcement_accuracy_relevant_only=enforcement_accuracy,
         category_accuracy_relevant_only=category_accuracy,
         subcategory_accuracy_relevant_only=subcategory_accuracy,
         overall_exact_match=overall_exact_match,
@@ -149,6 +185,7 @@ def _sort_rankings(metrics: list[VariantMetrics]) -> list[VariantMetrics]:
         metrics,
         key=lambda item: (
             -item.relevance_f1,
+            -item.enforcement_f1_relevant_only,
             -item.category_accuracy_relevant_only,
             -item.subcategory_accuracy_relevant_only,
             -item.overall_exact_match,
@@ -197,6 +234,7 @@ async def evaluate_classifier_variants(
         predictions = [
             (
                 item.classification.relevant,
+                item.classification.enforcement_related,
                 item.classification.category.value,
                 item.classification.sub_category.value
                 if item.classification.sub_category is not None
@@ -231,6 +269,8 @@ def render_rankings_table(metrics: list[VariantMetrics]) -> str:
         "name",
         "rel_f1",
         "rel_acc",
+        "enf_f1",
+        "enf_acc",
         "cat_acc",
         "subcat_acc",
         "exact",
@@ -245,6 +285,8 @@ def render_rankings_table(metrics: list[VariantMetrics]) -> str:
             metric.name,
             f"{metric.relevance_f1:.3f}",
             f"{metric.relevance_accuracy:.3f}",
+            f"{metric.enforcement_f1_relevant_only:.3f}",
+            f"{metric.enforcement_accuracy_relevant_only:.3f}",
             f"{metric.category_accuracy_relevant_only:.3f}",
             f"{metric.subcategory_accuracy_relevant_only:.3f}",
             f"{metric.overall_exact_match:.3f}",

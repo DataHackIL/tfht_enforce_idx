@@ -17,10 +17,12 @@ class ValidationDraftRow(BaseModel):
     title: str
     snippet: str
     suggested_relevant: bool
+    suggested_enforcement_related: bool = False
     suggested_category: str
     suggested_sub_category: str = ""
     suggested_confidence: str
     relevant: bool
+    enforcement_related: bool = False
     category: str
     sub_category: str = ""
     review_status: str = "pending"
@@ -38,6 +40,7 @@ class ValidationSetRow(BaseModel):
     title: str
     snippet: str
     relevant: bool
+    enforcement_related: bool = False
     category: str
     sub_category: str = ""
     review_status: str = "reviewed"
@@ -79,6 +82,10 @@ class VariantMetrics(BaseModel):
     relevance_recall: float
     relevance_f1: float
     relevance_accuracy: float
+    enforcement_precision_relevant_only: float
+    enforcement_recall_relevant_only: float
+    enforcement_f1_relevant_only: float
+    enforcement_accuracy_relevant_only: float
     category_accuracy_relevant_only: float
     subcategory_accuracy_relevant_only: float
     overall_exact_match: float

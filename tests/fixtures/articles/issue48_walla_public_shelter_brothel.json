@@ -1,0 +1,14 @@
+{
+  "url": "https://news.walla.co.il/item/3823239",
+  "title": "בית בושת אותר בתוך מקלט ציבורי: \"לא נתנו להיכנס בזמן אזעקה\"",
+  "snippet": "דיווח על בית בושת שפעל בתוך מקלט ציבורי ועל איתורו בידי הרשויות",
+  "date": "2026-03-27T05:43:57+00:00",
+  "source_name": "walla",
+  "expected_classification": {
+    "relevant": true,
+    "enforcement_related": true,
+    "category": "brothel",
+    "sub_category": "closure",
+    "confidence": "high"
+  }
+}
