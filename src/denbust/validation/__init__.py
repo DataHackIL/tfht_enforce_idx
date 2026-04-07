@@ -17,17 +17,25 @@ from denbust.validation.evaluate import (
     evaluate_classifier_variants,
     run_validation_evaluate,
 )
+from denbust.validation.import_reviewed import (
+    TFHT_MANUAL_TRACKING_V1,
+    ReviewedTableImportResult,
+    import_reviewed_table,
+)
 
 __all__ = [
     "DEFAULT_VALIDATION_SET_PATH",
     "DEFAULT_VARIANT_MATRIX_PATH",
     "RELAXED_VALIDATION_KEYWORDS",
+    "ReviewedTableImportResult",
+    "TFHT_MANUAL_TRACKING_V1",
     "ValidationCollectResult",
     "ValidationEvaluateResult",
     "ValidationFinalizeResult",
     "collect_validation_draft",
     "evaluate_classifier_variants",
     "finalize_validation_set",
+    "import_reviewed_table",
     "run_validation_collect",
     "run_validation_evaluate",
     "run_validation_finalize",

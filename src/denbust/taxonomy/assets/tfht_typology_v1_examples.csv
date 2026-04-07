@@ -1,0 +1,8 @@
+taxonomy_version,category_id,subcategory_id,index_relevant,example_url,notes
+1,human_trafficking,trafficking_sexual_exploitation,true,https://www.israelhayom.co.il/news/law/article/19956639,Typology workbook example
+1,human_trafficking,trafficking_sexual_exploitation,true,https://www.mako.co.il/men-men_news/Article-921a9373b4aeb91026.htm,Typology workbook example
+1,pimping_prostitution,pimping,true,https://www.maariv.co.il/news/law/article-1270778,Typology workbook example
+1,pimping_prostitution,pimping,true,https://www.kolhair.co.il/jerusalem-news/258004/,Typology workbook example
+1,brothels,administrative_closure,true,https://www.kan-ashkelon.co.il/news/100735,Typology workbook example
+1,brothels,client_fine,true,https://gal-gefen.co.il/news/205002,Typology workbook example
+1,pimping_prostitution,phenomenon_coverage,false,https://www.mako.co.il/men-men_news/Article-7f4b0e1ad9acc91027.htm,Workbook example explicitly marked as outside the index

@@ -235,6 +235,34 @@ def validation_finalize(
     )
 
 
+@app.command("validation-import-reviewed-table")
+def validation_import_reviewed_table(
+    input_path: Annotated[
+        Path,
+        typer.Option("--input", "-i", help="Path to a reviewed table workbook"),
+    ],
+    format_name: Annotated[
+        str,
+        typer.Option("--format", help="Reviewed table format adapter to use"),
+    ] = "tfht_manual_tracking_v1",
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Path to the generated validation draft CSV"),
+    ] = None,
+) -> None:
+    """Normalize a reviewed TFHT example table into the validation draft CSV shape."""
+    from denbust.validation import import_reviewed_table
+
+    result = import_reviewed_table(
+        input_path=input_path,
+        format_name=format_name,
+        output_path=output,
+    )
+    typer.echo(f"Wrote {result.imported_rows} reviewed rows to {result.output_path}")
+    for warning in result.warnings:
+        typer.echo(f"warning: {warning}", err=True)
+
+
 @app.command("validation-evaluate")
 def validation_evaluate(
     validation_set: Annotated[

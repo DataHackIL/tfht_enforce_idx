@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from denbust.data_models import Category, SubCategory
+from denbust.taxonomy import default_taxonomy
 from denbust.validation.common import (
     ALLOWED_SUBCATEGORIES_BY_CATEGORY,
     DEFAULT_VALIDATION_SET_PATH,
@@ -45,9 +46,18 @@ def _serialize_validation_rows(rows: list[ValidationSetRow]) -> list[dict[str, s
             "snippet": row.snippet,
             "relevant": str(row.relevant),
             "enforcement_related": str(row.enforcement_related),
+            "index_relevant": str(row.index_relevant),
+            "taxonomy_version": row.taxonomy_version,
+            "taxonomy_category_id": row.taxonomy_category_id,
+            "taxonomy_subcategory_id": row.taxonomy_subcategory_id,
             "category": row.category,
             "sub_category": row.sub_category,
             "review_status": row.review_status,
+            "annotation_source": row.annotation_source,
+            "manual_city": row.manual_city,
+            "manual_address": row.manual_address,
+            "manual_event_label": row.manual_event_label,
+            "manual_status": row.manual_status,
             "annotation_notes": row.annotation_notes,
             "collected_at": row.collected_at.isoformat(),
             "finalized_at": row.finalized_at.isoformat(),
@@ -66,10 +76,19 @@ def _parse_existing_validation_row(raw_row: dict[str, str]) -> ValidationSetRow:
         title=raw_row["title"],
         snippet=raw_row["snippet"],
         relevant=parse_bool(raw_row["relevant"]),
-        enforcement_related=parse_bool(raw_row.get("enforcement_related", "False")),
+        enforcement_related=parse_bool(raw_row.get("enforcement_related", "False") or "False"),
+        index_relevant=parse_bool(raw_row.get("index_relevant", "False") or "False"),
+        taxonomy_version=raw_row.get("taxonomy_version", ""),
+        taxonomy_category_id=raw_row.get("taxonomy_category_id", ""),
+        taxonomy_subcategory_id=raw_row.get("taxonomy_subcategory_id", ""),
         category=normalize_category_value(raw_row["category"]),
         sub_category=normalize_subcategory_value(raw_row["sub_category"]),
         review_status=normalize_review_status(raw_row["review_status"]) or "reviewed",
+        annotation_source=raw_row.get("annotation_source", ""),
+        manual_city=raw_row.get("manual_city", ""),
+        manual_address=raw_row.get("manual_address", ""),
+        manual_event_label=raw_row.get("manual_event_label", ""),
+        manual_status=raw_row.get("manual_status", ""),
         annotation_notes=raw_row["annotation_notes"],
         collected_at=parse_datetime(raw_row["collected_at"]),
         finalized_at=parse_datetime(raw_row["finalized_at"]),
@@ -78,8 +97,13 @@ def _parse_existing_validation_row(raw_row: dict[str, str]) -> ValidationSetRow:
 
 
 def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> ValidationSetRow:
+    taxonomy = default_taxonomy()
     relevant = parse_bool(raw_row["relevant"])
-    enforcement_related = parse_bool(raw_row.get("enforcement_related", "False"))
+    enforcement_related = parse_bool(raw_row.get("enforcement_related", "False") or "False")
+    index_relevant = parse_bool(raw_row.get("index_relevant", "False") or "False")
+    taxonomy_version = raw_row.get("taxonomy_version", "").strip()
+    taxonomy_category_id = raw_row.get("taxonomy_category_id", "").strip()
+    taxonomy_subcategory_id = raw_row.get("taxonomy_subcategory_id", "").strip()
     category_value = normalize_category_value(raw_row["category"])
     sub_category_value = normalize_subcategory_value(raw_row["sub_category"])
 
@@ -102,7 +126,32 @@ def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Val
     else:
         category = Category.NOT_RELEVANT
         enforcement_related = False
+        index_relevant = False
+        taxonomy_version = ""
+        taxonomy_category_id = ""
+        taxonomy_subcategory_id = ""
         sub_category = None
+
+    if taxonomy_category_id or taxonomy_subcategory_id:
+        if not (taxonomy_category_id and taxonomy_subcategory_id):
+            raise ValueError("Taxonomy labels must include both category and subcategory ids")
+        if not taxonomy.has_pair(taxonomy_category_id, taxonomy_subcategory_id):
+            raise ValueError(
+                f"Invalid taxonomy pair: {taxonomy_category_id}/{taxonomy_subcategory_id}"
+            )
+        if taxonomy_version and taxonomy_version != taxonomy.version:
+            raise ValueError(
+                f"Unsupported taxonomy version {taxonomy_version!r}; expected {taxonomy.version!r}"
+            )
+        taxonomy_version = taxonomy.version
+        expected_index_relevant = taxonomy.is_index_relevant(
+            taxonomy_category_id,
+            taxonomy_subcategory_id,
+        )
+        if index_relevant != expected_index_relevant:
+            raise ValueError(
+                "index_relevant does not match the packaged taxonomy for the selected leaf"
+            )
 
     finalized_at = datetime.now(UTC)
     return ValidationSetRow(
@@ -114,9 +163,18 @@ def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Val
         snippet=raw_row["snippet"],
         relevant=relevant,
         enforcement_related=enforcement_related,
+        index_relevant=index_relevant,
+        taxonomy_version=taxonomy_version,
+        taxonomy_category_id=taxonomy_category_id,
+        taxonomy_subcategory_id=taxonomy_subcategory_id,
         category=category.value,
         sub_category=sub_category.value if sub_category is not None else "",
         review_status="reviewed",
+        annotation_source=raw_row.get("annotation_source", ""),
+        manual_city=raw_row.get("manual_city", ""),
+        manual_address=raw_row.get("manual_address", ""),
+        manual_event_label=raw_row.get("manual_event_label", ""),
+        manual_status=raw_row.get("manual_status", ""),
         annotation_notes=raw_row["annotation_notes"],
         collected_at=parse_datetime(raw_row["collected_at"]),
         finalized_at=finalized_at,
