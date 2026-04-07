@@ -51,11 +51,14 @@ def matches_keywords_for_source(
     source_name: str, title: str, snippet: str, keywords: list[str]
 ) -> bool:
     """Check whether text matches the effective keyword set for an RSS source."""
+    effective_keywords = effective_keywords_for_source(source_name, keywords)
+    return _matches_keywords_in_text(title, snippet, effective_keywords)
+
+
+def _matches_keywords_in_text(title: str, snippet: str, keywords: list[str]) -> bool:
+    """Check whether text contains any keyword from an already-normalized list."""
     text = f"{title} {snippet}".casefold()
-    return any(
-        keyword.casefold() in text
-        for keyword in effective_keywords_for_source(source_name, keywords)
-    )
+    return any(keyword.casefold() in text for keyword in keywords)
 
 
 class RSSSource(Source):
@@ -101,12 +104,13 @@ class RSSSource(Source):
 
         # Calculate cutoff date
         cutoff = datetime.now(UTC) - timedelta(days=days)
+        effective_keywords = effective_keywords_for_source(self._name, keywords)
 
         articles: list[RawArticle] = []
 
         for entry in feed.entries:
             # Parse the article
-            article = self._parse_entry(entry, cutoff, keywords)
+            article = self._parse_entry(entry, cutoff, effective_keywords)
             if article:
                 articles.append(article)
 
@@ -136,14 +140,14 @@ class RSSSource(Source):
         self,
         entry: feedparser.FeedParserDict,
         cutoff: datetime,
-        keywords: list[str],
+        effective_keywords: list[str],
     ) -> RawArticle | None:
         """Parse a feed entry into a RawArticle.
 
         Args:
             entry: Feed entry from feedparser.
             cutoff: Cutoff datetime for filtering.
-            keywords: Keywords to match.
+            effective_keywords: Precomputed effective keywords to match.
 
         Returns:
             RawArticle if entry matches criteria, None otherwise.
@@ -174,7 +178,7 @@ class RSSSource(Source):
             return None
 
         # Filter by keywords
-        if not self._matches_keywords(title, snippet, keywords):
+        if not self._matches_keywords(title, snippet, effective_keywords):
             return None
 
         return RawArticle(
@@ -224,7 +228,7 @@ class RSSSource(Source):
         Returns:
             True if any keyword matches.
         """
-        return matches_keywords_for_source(self._name, title, snippet, keywords)
+        return _matches_keywords_in_text(title, snippet, keywords)
 
     def _clean_html(self, text: str) -> str:
         """Remove HTML tags from text.

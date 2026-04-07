@@ -407,7 +407,7 @@ async def _probe_ynet(
             parseable_date_count += 1
             if date >= cutoff:
                 recent_entry_count += 1
-        if _probe_rss_entry_matches(entry, cutoff, sample_keywords):
+        if _probe_rss_entry_matches(entry, cutoff, sample_keywords, source_name="ynet"):
             keyword_match_count += 1
 
     unexpected_redirect = _is_unexpected_redirect(fetch_result.final_url, feed_url)
@@ -923,7 +923,9 @@ def _probe_rss_entry_date(entry: Any) -> datetime | None:
     return None
 
 
-def _probe_rss_entry_matches(entry: Any, cutoff: datetime, sample_keywords: list[str]) -> bool:
+def _probe_rss_entry_matches(
+    entry: Any, cutoff: datetime, sample_keywords: list[str], *, source_name: str
+) -> bool:
     link = _entry_value(entry, "link")
     title = _entry_value(entry, "title")
     if not isinstance(link, str) or not link or not isinstance(title, str) or not title.strip():
@@ -943,7 +945,7 @@ def _probe_rss_entry_matches(entry: Any, cutoff: datetime, sample_keywords: list
 
     clean_snippet = BeautifulSoup(snippet, "lxml").get_text(" ", strip=True)
     return rss_source.matches_keywords_for_source(
-        "ynet",
+        source_name,
         title.strip(),
         clean_snippet,
         sample_keywords,

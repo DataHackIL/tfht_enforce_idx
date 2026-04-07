@@ -3246,6 +3246,51 @@ class TestRSSSource:
 
         assert len(articles) == 1
 
+    @pytest.mark.asyncio
+    async def test_fetch_computes_effective_keywords_once_per_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RSS fetch should precompute the effective keyword list once per fetch run."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        entries = [
+            {
+                "link": "https://example.com/1",
+                "title": "חשד לבית בושת בבני ברק",
+                "summary": "summary",
+                "published": "Sun, 15 Feb 2026 10:00:00 +0200",
+            },
+            {
+                "link": "https://example.com/2",
+                "title": "חדשות כלליות",
+                "summary": "summary",
+                "published": "Sun, 15 Feb 2026 09:00:00 +0200",
+            },
+        ]
+        calls: list[tuple[str, list[str]]] = []
+
+        async def fake_fetch_feed() -> str:
+            return "<xml />"
+
+        def fake_effective_keywords(source_name: str, keywords: list[str]) -> list[str]:
+            calls.append((source_name, list(keywords)))
+            return ["חשד לבית בושת"]
+
+        monkeypatch.setattr(source, "_fetch_feed", fake_fetch_feed)
+        monkeypatch.setattr(
+            "denbust.sources.rss.feedparser.parse",
+            lambda _content: SimpleNamespace(
+                bozo=False,
+                bozo_exception=None,
+                entries=entries,
+            ),
+        )
+        monkeypatch.setattr("denbust.sources.rss.effective_keywords_for_source", fake_effective_keywords)
+
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
+
+        assert len(articles) == 1
+        assert calls == [("ynet", ["זנות"])]
+
     def test_factory_helpers_create_expected_sources(self) -> None:
         """Factory helpers should return the canonical source names and URLs."""
         from denbust.sources.rss import create_ynet_source
