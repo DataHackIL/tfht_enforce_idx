@@ -19,6 +19,7 @@ env:
   DEFAULT_PYTHON_VERSION: "3.11"
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
   STATE_JOB_DIR: state_repo/news_items/ingest
+  JOB_CONFIG_PATH: agents/news/github.yaml
   DENBUST_REVIEW_WORKFLOW_NAME: daily-state-run
 
 jobs:
@@ -51,6 +52,33 @@ jobs:
           install-playwright: "false"
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
+      - name: Generate artifact-only source diagnostics
+        env:
+          DENBUST_STATE_ROOT: state_repo
+        run: |
+          mkdir -p diagnostics
+          if ! denbust diagnose-sources \
+            --config "${{ env.JOB_CONFIG_PATH }}" \
+            --artifacts-only \
+            --format json \
+            --output diagnostics/source_diagnostics.json; then
+            echo "Source diagnostics failed; writing fallback diagnostics payload."
+            cat > diagnostics/source_diagnostics.json <<'EOF'
+            {
+              "status": "failed",
+              "warning": "Artifact-only source diagnostics step failed in news-items-daily-review workflow."
+            }
+            EOF
+          fi
+
+      - name: Upload source diagnostics artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: source-diagnostics-json
+          path: diagnostics/source_diagnostics.json
+          if-no-files-found: warn
+
       - name: Review latest daily ingest artifacts and open issues
         # Required secrets:
         # - STATE_REPO_PAT
@@ -64,4 +92,5 @@ jobs:
           DENBUST_STATE_ROOT: state_repo
           DENBUST_REVIEW_MODEL: ${{ secrets.DENBUST_REVIEW_MODEL }}
           DENBUST_REVIEW_ISSUE_LABELS: ${{ secrets.DENBUST_REVIEW_ISSUE_LABELS }}
+          DENBUST_SOURCE_DIAGNOSTICS_PATH: diagnostics/source_diagnostics.json
         run: python -m denbust.news_items.daily_review

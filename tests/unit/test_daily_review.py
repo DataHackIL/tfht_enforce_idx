@@ -17,6 +17,7 @@ from denbust.news_items.daily_review import (
     ReviewResult,
     _compact_for_prompt,
     _load_json,
+    _render_source_diagnostics_section,
     extract_json_block,
     issue_marker,
     latest_daily_review_artifacts,
@@ -65,6 +66,82 @@ class TestDailyReviewHelpers:
 
         assert artifacts.stem == "2026-03-21T04-00-00-000000Z"
         assert artifacts.run_snapshot["result_summary"] == "daily"
+        assert artifacts.source_diagnostics is None
+
+    def test_latest_daily_review_artifacts_loads_optional_source_diagnostics(
+        self, tmp_path: Path
+    ) -> None:
+        """Optional source diagnostics should be loaded into the review artifacts."""
+        runs_dir = tmp_path / "news_items" / "ingest" / "runs"
+        logs_dir = tmp_path / "news_items" / "ingest" / "logs"
+        diagnostics_path = tmp_path / "diagnostics" / "source_diagnostics.json"
+
+        _write_json(
+            logs_dir / "2026-03-21T04-00-00-000000Z.summary.json",
+            {
+                "run_timestamp": "2026-03-21T04:00:00Z",
+                "workflow": {"workflow_name": "daily-state-run"},
+            },
+        )
+        _write_json(logs_dir / "2026-03-21T04-00-00-000000Z.json", {"raw_articles": []})
+        _write_json(runs_dir / "2026-03-21T04-00-00-000000Z.json", {"result_summary": "daily"})
+        _write_json(
+            diagnostics_path,
+            {
+                "results": [
+                    {
+                        "source_name": "ice",
+                        "status": "fail",
+                        "failure_bucket": "selector_drift_suspected",
+                    }
+                ]
+            },
+        )
+
+        artifacts = latest_daily_review_artifacts(
+            state_root=tmp_path,
+            source_diagnostics_path=diagnostics_path,
+        )
+
+        assert artifacts.source_diagnostics == {
+            "results": [
+                {
+                    "source_name": "ice",
+                    "status": "fail",
+                    "failure_bucket": "selector_drift_suspected",
+                }
+            ]
+        }
+
+    def test_latest_daily_review_artifacts_ignores_invalid_optional_source_diagnostics(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Invalid optional diagnostics should be skipped rather than failing review."""
+        runs_dir = tmp_path / "news_items" / "ingest" / "runs"
+        logs_dir = tmp_path / "news_items" / "ingest" / "logs"
+        diagnostics_path = tmp_path / "diagnostics" / "source_diagnostics.json"
+
+        _write_json(
+            logs_dir / "2026-03-21T04-00-00-000000Z.summary.json",
+            {
+                "run_timestamp": "2026-03-21T04:00:00Z",
+                "workflow": {"workflow_name": "daily-state-run"},
+            },
+        )
+        _write_json(logs_dir / "2026-03-21T04-00-00-000000Z.json", {"raw_articles": []})
+        _write_json(runs_dir / "2026-03-21T04-00-00-000000Z.json", {"result_summary": "daily"})
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text("{not-json", encoding="utf-8")
+
+        artifacts = latest_daily_review_artifacts(
+            state_root=tmp_path,
+            source_diagnostics_path=diagnostics_path,
+        )
+
+        assert artifacts.source_diagnostics is None
+        assert "Skipping unreadable optional JSON artifact" in capsys.readouterr().out
 
     def test_extract_json_block_handles_markdown_fences(self) -> None:
         """Anthropic JSON responses may be wrapped in markdown fences."""
@@ -140,6 +217,10 @@ class TestDailyReviewHelpers:
         assert len(compact["run_snapshot"]["items"]) == 11
         assert len(compact["debug_summary"]["suspicions"]) == 11
 
+    def test_render_source_diagnostics_section_omits_absent_diagnostics(self) -> None:
+        """Absent diagnostics should not render a null prompt section."""
+        assert _render_source_diagnostics_section(None) == ""
+
 
 class TestDailyReviewClients:
     """Tests for the Anthropic and GitHub review clients."""
@@ -179,6 +260,7 @@ class TestDailyReviewClients:
             debug_log_path=Path("logs/example.json"),
             run_snapshot={"result_summary": "x"},
             debug_summary={"suspicions": []},
+            source_diagnostics={"results": [{"source_name": "ice", "status": "fail"}]},
             debug_log={"raw_articles": []},
         )
 
@@ -232,6 +314,7 @@ class TestDailyReviewClients:
             debug_log_path=Path("logs/example.json"),
             run_snapshot={"result_summary": "x"},
             debug_summary={"suspicions": []},
+            source_diagnostics={"results": [{"source_name": "ice", "status": "warn"}]},
             debug_log={"raw_articles": []},
         )
 
@@ -288,6 +371,104 @@ class TestDailyReviewClients:
         reviewer = AnthropicDailyReviewer(api_key="test", model="model")
         assert reviewer.review(artifacts) == ReviewResult()
         assert "malformed JSON" in capsys.readouterr().out
+
+    def test_anthropic_daily_reviewer_prompt_includes_source_diagnostics(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Source diagnostics should be passed as a distinct prompt section."""
+        captured_prompt: dict[str, str] = {}
+
+        class FakeTextBlock:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+        class FakeResponse:
+            def __init__(self) -> None:
+                self.content = [FakeTextBlock('{"issues": []}')]
+
+        class FakeMessages:
+            def create(self, **kwargs: object) -> FakeResponse:
+                messages = kwargs["messages"]
+                assert isinstance(messages, list)
+                content = messages[0]["content"]
+                assert isinstance(content, str)
+                captured_prompt["content"] = content
+                return FakeResponse()
+
+        class FakeClient:
+            def __init__(self, **_: object) -> None:
+                self.messages = FakeMessages()
+
+        monkeypatch.setattr("denbust.news_items.daily_review.anthropic.Anthropic", FakeClient)
+        monkeypatch.setattr("denbust.news_items.daily_review.TextBlock", FakeTextBlock)
+
+        reviewer = AnthropicDailyReviewer(api_key="test", model="model")
+        artifacts = ReviewArtifacts(
+            run_timestamp="2026-03-21T04:00:00Z",
+            stem="2026-03-21T04-00-00-000000Z",
+            run_snapshot_path=Path("runs/example.json"),
+            debug_summary_path=Path("logs/example.summary.json"),
+            debug_log_path=Path("logs/example.json"),
+            run_snapshot={"result_summary": "x"},
+            debug_summary={"suspicions": []},
+            source_diagnostics={
+                "results": [{"source_name": "ice", "failure_bucket": "selector_drift_suspected"}]
+            },
+            debug_log={"raw_articles": []},
+        )
+
+        assert reviewer.review(artifacts) == ReviewResult()
+        prompt = captured_prompt["content"]
+        assert "source_diagnostics:" in prompt
+        assert '"failure_bucket":"selector_drift_suspected"' in prompt
+
+    def test_anthropic_daily_reviewer_prompt_omits_source_diagnostics_when_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The prompt should not inject a null diagnostics section when absent."""
+        captured_prompt: dict[str, str] = {}
+
+        class FakeTextBlock:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+        class FakeResponse:
+            def __init__(self) -> None:
+                self.content = [FakeTextBlock('{"issues": []}')]
+
+        class FakeMessages:
+            def create(self, **kwargs: object) -> FakeResponse:
+                messages = kwargs["messages"]
+                assert isinstance(messages, list)
+                content = messages[0]["content"]
+                assert isinstance(content, str)
+                captured_prompt["content"] = content
+                return FakeResponse()
+
+        class FakeClient:
+            def __init__(self, **_: object) -> None:
+                self.messages = FakeMessages()
+
+        monkeypatch.setattr("denbust.news_items.daily_review.anthropic.Anthropic", FakeClient)
+        monkeypatch.setattr("denbust.news_items.daily_review.TextBlock", FakeTextBlock)
+
+        reviewer = AnthropicDailyReviewer(api_key="test", model="model")
+        artifacts = ReviewArtifacts(
+            run_timestamp="2026-03-21T04:00:00Z",
+            stem="2026-03-21T04-00-00-000000Z",
+            run_snapshot_path=Path("runs/example.json"),
+            debug_summary_path=Path("logs/example.summary.json"),
+            debug_log_path=Path("logs/example.json"),
+            run_snapshot={"result_summary": "x"},
+            debug_summary={"suspicions": []},
+            source_diagnostics=None,
+            debug_log={"raw_articles": []},
+        )
+
+        assert reviewer.review(artifacts) == ReviewResult()
+        prompt = captured_prompt["content"]
+        assert "source_diagnostics:\nnull" not in prompt
+        assert "\nsource_diagnostics:\n" not in prompt
 
     def test_github_issue_client_extracts_open_markers(
         self, monkeypatch: pytest.MonkeyPatch
@@ -494,6 +675,8 @@ def test_review_latest_daily_run_skips_existing_fingerprints(
     )
     _write_json(logs_dir / f"{stem}.json", {"raw_articles": []})
     _write_json(runs_dir / f"{stem}.json", {"result_summary": "ok"})
+    diagnostics_path = tmp_path / "diagnostics" / "source_diagnostics.json"
+    _write_json(diagnostics_path, {"results": [{"source_name": "ice", "status": "fail"}]})
 
     class FakeReviewer:
         def __init__(self, **_: object) -> None:
@@ -539,6 +722,7 @@ def test_review_latest_daily_run_skips_existing_fingerprints(
         repository="DataHackIL/tfht_enforce_idx",
         anthropic_api_key="test",
         github_token="token",
+        source_diagnostics_path=diagnostics_path,
     )
 
     assert created_count == 1
@@ -614,6 +798,7 @@ def test_main_reads_env_and_prints_created_count(
     monkeypatch.setenv("DENBUST_REVIEW_WORKFLOW_NAME", "daily-state-run")
     monkeypatch.setenv("DENBUST_REVIEW_MODEL", "claude-test")
     monkeypatch.setenv("DENBUST_REVIEW_ISSUE_LABELS", "ai-review, triage ")
+    monkeypatch.setenv("DENBUST_SOURCE_DIAGNOSTICS_PATH", "/tmp/source-diagnostics.json")
 
     captured: dict[str, Any] = {}
 
@@ -635,6 +820,7 @@ def test_main_reads_env_and_prints_created_count(
     assert captured["workflow_name"] == "daily-state-run"
     assert captured["model"] == "claude-test"
     assert captured["labels"] == ["ai-review", "triage"]
+    assert captured["source_diagnostics_path"] == Path("/tmp/source-diagnostics.json")
     assert "Daily review created 2 issue(s)." in capsys.readouterr().out
 
 
