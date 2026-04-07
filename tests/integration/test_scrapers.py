@@ -3284,7 +3284,9 @@ class TestRSSSource:
                 entries=entries,
             ),
         )
-        monkeypatch.setattr("denbust.sources.rss.effective_keywords_for_source", fake_effective_keywords)
+        monkeypatch.setattr(
+            "denbust.sources.rss.effective_keywords_for_source", fake_effective_keywords
+        )
 
         articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
 
