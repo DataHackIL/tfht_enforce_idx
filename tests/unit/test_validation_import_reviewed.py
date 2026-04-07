@@ -23,7 +23,7 @@ def _build_manual_tracking_workbook(path: Path) -> None:
     sheet["B5"] = 8
     sheet["C5"] = "בני ברק"
     sheet["D5"] = "מעצר חשודה על החזקת מקום לשם זנות"
-    sheet["E5"] = 'עינת הראל נעצרה; אותר בית בושת פעיל'
+    sheet["E5"] = "עינת הראל נעצרה; אותר בית בושת פעיל"
     sheet["F5"] = "פתוח"
     sheet["G5"] = (
         "https://www.maariv.co.il/news/law/article-1270778; "
@@ -47,7 +47,7 @@ def _build_manual_tracking_workbook(path: Path) -> None:
     sheet["B8"] = 8
     sheet["C8"] = "בני ברק"
     sheet["D8"] = "מעצר חשודה על החזקת מקום לשם זנות"
-    sheet["E8"] = 'עינת הראל נעצרה; אותר בית בושת פעיל'
+    sheet["E8"] = "עינת הראל נעצרה; אותר בית בושת פעיל"
     sheet["F8"] = "פתוח"
     sheet["G8"] = "https://www.maariv.co.il/news/law/article-1270778"
 
