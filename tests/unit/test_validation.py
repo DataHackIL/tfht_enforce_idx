@@ -700,7 +700,13 @@ class TestValidationFinalize:
             finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
 
     @pytest.mark.parametrize(
-        ("taxonomy_category_id", "taxonomy_subcategory_id", "taxonomy_version", "index_relevant", "match"),
+        (
+            "taxonomy_category_id",
+            "taxonomy_subcategory_id",
+            "taxonomy_version",
+            "index_relevant",
+            "match",
+        ),
         [
             ("brothels", "", "1", "True", "must include both category and subcategory ids"),
             ("brothels", "not_a_leaf", "1", "True", "Invalid taxonomy pair"),
@@ -767,7 +773,9 @@ class TestValidationFinalize:
         with pytest.raises(ValueError, match=match):
             finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
 
-    def test_finalize_validation_set_normalizes_valid_taxonomy_version(self, tmp_path: Path) -> None:
+    def test_finalize_validation_set_normalizes_valid_taxonomy_version(
+        self, tmp_path: Path
+    ) -> None:
         draft_path = tmp_path / "draft.csv"
         write_csv_rows(
             draft_path,
@@ -809,7 +817,9 @@ class TestValidationFinalize:
             ],
         )
 
-        result = finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
+        result = finalize_validation_set(
+            input_path=draft_path, validation_set_path=tmp_path / "out.csv"
+        )
         rows = read_csv_rows(result.validation_set_path)
 
         assert rows[0]["taxonomy_version"] == "1"
