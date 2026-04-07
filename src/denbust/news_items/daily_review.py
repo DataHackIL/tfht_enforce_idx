@@ -50,8 +50,7 @@ run_snapshot:
 debug_summary:
 {debug_summary_json}
 
-source_diagnostics:
-{source_diagnostics_json}
+{source_diagnostics_section}
 
 debug_log:
 {debug_log_json}
@@ -157,6 +156,18 @@ def _compact_for_prompt(value: Any) -> Any:
     return value
 
 
+def _render_source_diagnostics_section(source_diagnostics: dict[str, Any] | None) -> str:
+    """Render the optional prompt section for source diagnostics."""
+    if source_diagnostics is None:
+        return ""
+    return "source_diagnostics:\n" + json.dumps(
+        _compact_for_prompt(source_diagnostics),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def latest_daily_review_artifacts(
     *,
     state_root: Path,
@@ -220,11 +231,8 @@ class AnthropicDailyReviewer:
                 sort_keys=True,
                 separators=(",", ":"),
             ),
-            source_diagnostics_json=json.dumps(
-                _compact_for_prompt(artifacts.source_diagnostics),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
+            source_diagnostics_section=_render_source_diagnostics_section(
+                artifacts.source_diagnostics
             ),
             debug_log_json=json.dumps(
                 _compact_for_prompt(artifacts.debug_log),

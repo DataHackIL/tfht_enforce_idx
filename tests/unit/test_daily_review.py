@@ -17,6 +17,7 @@ from denbust.news_items.daily_review import (
     ReviewResult,
     _compact_for_prompt,
     _load_json,
+    _render_source_diagnostics_section,
     extract_json_block,
     issue_marker,
     latest_daily_review_artifacts,
@@ -215,6 +216,10 @@ class TestDailyReviewHelpers:
         assert str(compact["notes"]).endswith("... [truncated]")
         assert len(compact["run_snapshot"]["items"]) == 11
         assert len(compact["debug_summary"]["suspicions"]) == 11
+
+    def test_render_source_diagnostics_section_omits_absent_diagnostics(self) -> None:
+        """Absent diagnostics should not render a null prompt section."""
+        assert _render_source_diagnostics_section(None) == ""
 
 
 class TestDailyReviewClients:
@@ -416,6 +421,54 @@ class TestDailyReviewClients:
         prompt = captured_prompt["content"]
         assert "source_diagnostics:" in prompt
         assert '"failure_bucket":"selector_drift_suspected"' in prompt
+
+    def test_anthropic_daily_reviewer_prompt_omits_source_diagnostics_when_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The prompt should not inject a null diagnostics section when absent."""
+        captured_prompt: dict[str, str] = {}
+
+        class FakeTextBlock:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+        class FakeResponse:
+            def __init__(self) -> None:
+                self.content = [FakeTextBlock('{"issues": []}')]
+
+        class FakeMessages:
+            def create(self, **kwargs: object) -> FakeResponse:
+                messages = kwargs["messages"]
+                assert isinstance(messages, list)
+                content = messages[0]["content"]
+                assert isinstance(content, str)
+                captured_prompt["content"] = content
+                return FakeResponse()
+
+        class FakeClient:
+            def __init__(self, **_: object) -> None:
+                self.messages = FakeMessages()
+
+        monkeypatch.setattr("denbust.news_items.daily_review.anthropic.Anthropic", FakeClient)
+        monkeypatch.setattr("denbust.news_items.daily_review.TextBlock", FakeTextBlock)
+
+        reviewer = AnthropicDailyReviewer(api_key="test", model="model")
+        artifacts = ReviewArtifacts(
+            run_timestamp="2026-03-21T04:00:00Z",
+            stem="2026-03-21T04-00-00-000000Z",
+            run_snapshot_path=Path("runs/example.json"),
+            debug_summary_path=Path("logs/example.summary.json"),
+            debug_log_path=Path("logs/example.json"),
+            run_snapshot={"result_summary": "x"},
+            debug_summary={"suspicions": []},
+            source_diagnostics=None,
+            debug_log={"raw_articles": []},
+        )
+
+        assert reviewer.review(artifacts) == ReviewResult()
+        prompt = captured_prompt["content"]
+        assert "source_diagnostics:\nnull" not in prompt
+        assert "\nsource_diagnostics:\n" not in prompt
 
     def test_github_issue_client_extracts_open_markers(
         self, monkeypatch: pytest.MonkeyPatch

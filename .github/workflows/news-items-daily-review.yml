@@ -63,12 +63,17 @@ jobs:
             --format json \
             --output diagnostics/source_diagnostics.json; then
             echo "Source diagnostics failed; writing fallback diagnostics payload."
-            python -c "import json; from pathlib import Path; Path('diagnostics').mkdir(parents=True, exist_ok=True); Path('diagnostics/source_diagnostics.json').write_text(json.dumps({'status': 'failed', 'warning': 'Artifact-only source diagnostics step failed in news-items-daily-review workflow.'}, ensure_ascii=False, indent=2), encoding='utf-8')"
+            cat > diagnostics/source_diagnostics.json <<'EOF'
+            {
+              "status": "failed",
+              "warning": "Artifact-only source diagnostics step failed in news-items-daily-review workflow."
+            }
+            EOF
           fi
 
       - name: Upload source diagnostics artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: source-diagnostics-json
           path: diagnostics/source_diagnostics.json
