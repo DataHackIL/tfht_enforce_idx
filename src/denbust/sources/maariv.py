@@ -24,6 +24,40 @@ MAARIV_BASE_URL = "https://www.maariv.co.il"
 MAARIV_LAW_URL = "https://www.maariv.co.il/news/law"
 # Search URL
 MAARIV_SEARCH_URL = "https://www.maariv.co.il/search"
+MAARIV_SUPPLEMENTAL_KEYWORDS = [
+    "חשד לבית בושת",
+    "בית בושת אותר",
+    "חשד לזנות",
+    "שידול לזנות",
+    "סרסורות",
+    "סחר בנשים",
+    "סחר מיני",
+    "מכון עיסוי",
+]
+
+
+def effective_maariv_keywords(keywords: list[str]) -> list[str]:
+    """Return Maariv's effective keyword set with targeted supplemental phrases."""
+    seen: set[str] = set()
+    values: list[str] = []
+
+    for keyword in [*keywords, *MAARIV_SUPPLEMENTAL_KEYWORDS]:
+        candidate = " ".join(keyword.split()).strip()
+        if not candidate:
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(candidate)
+
+    return values
+
+
+def matches_maariv_keywords(article: RawArticle, keywords: list[str]) -> bool:
+    """Check whether an article matches Maariv's effective keyword set."""
+    text = f"{article.title} {article.snippet}".casefold()
+    return any(keyword.casefold() in text for keyword in effective_maariv_keywords(keywords))
 
 
 class MaarivScraper(Source):
@@ -305,8 +339,7 @@ class MaarivScraper(Source):
         Returns:
             True if any keyword matches.
         """
-        text = f"{article.title} {article.snippet}".lower()
-        return any(kw.lower() in text for kw in keywords)
+        return matches_maariv_keywords(article, keywords)
 
 
 def create_maariv_source() -> MaarivScraper:

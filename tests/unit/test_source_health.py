@@ -589,6 +589,37 @@ async def test_probe_maariv_distinguishes_keyword_zeroing(
 
 
 @pytest.mark.asyncio
+async def test_probe_maariv_uses_source_specific_relaxed_keywords(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <article class="category-article">
+      <a class="category-article-link" href="/news/article-123">לינק</a>
+      <h2>חשד לבית בושת בבני ברק</h2>
+      <p>המשטרה עצרה חשודים.</p>
+      <time datetime="2099-01-01T00:00:00+00:00"></time>
+    </article>
+    """
+
+    async def fake_fetch(url: str, *, user_agent: str) -> _FetchResult:
+        del user_agent
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text=html,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_maariv(days=21, sample_keywords=["זנות"])
+
+    assert result.live_status == DiagnosticStatus.OK
+    assert result.failure_bucket is None
+
+
+@pytest.mark.asyncio
 async def test_probe_maariv_distinguishes_unexpected_redirect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -709,6 +740,44 @@ async def test_probe_ice_reports_successful_page(monkeypatch: pytest.MonkeyPatch
     <html>
       <body>
         <h1>תוצאות חיפוש</h1>
+        <article>
+          <ul>
+            <li>
+              <a href="/article/123">בית בושת אותר</a>
+              <span>01/01/2099 12:00</span>
+            </li>
+          </ul>
+        </article>
+      </body>
+    </html>
+    """
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text=html,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_ice(days=21, sample_keywords=["זנות"])
+
+    assert result.live_status == DiagnosticStatus.OK
+    assert result.failure_bucket is None
+
+
+@pytest.mark.asyncio
+async def test_probe_ice_handles_nested_heading_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html>
+      <body>
+        <h1><span>נמצאו 388</span> <span>תוצאות חיפוש</span> <span>של זנות</span></h1>
         <article>
           <ul>
             <li>
@@ -1196,7 +1265,7 @@ def test_probe_rss_entry_date_returns_none_for_invalid_values() -> None:
 
 def test_probe_rss_entry_matches_handles_missing_fields_and_description_fallback() -> None:
     cutoff = datetime(2024, 1, 1, tzinfo=UTC)
-    assert not source_health._probe_rss_entry_matches({}, cutoff, ["זנות"])
+    assert not source_health._probe_rss_entry_matches({}, cutoff, ["זנות"], source_name="ynet")
 
     assert source_health._probe_rss_entry_matches(
         {
@@ -1206,6 +1275,23 @@ def test_probe_rss_entry_matches_handles_missing_fields_and_description_fallback
         },
         cutoff,
         ["זנות"],
+        source_name="ynet",
+    )
+
+
+def test_probe_rss_entry_matches_uses_ynet_source_specific_relaxed_keywords() -> None:
+    cutoff = datetime(2024, 1, 1, tzinfo=UTC)
+
+    assert source_health._probe_rss_entry_matches(
+        {
+            "link": "https://www.ynet.co.il/news/article/r111111",
+            "title": "חשד לבית בושת בבני ברק: המשטרה עצרה חשודים",
+            "description": "<p>המשטרה עצרה חשודים בדירה ששימשה לפי החשד לבית בושת.</p>",
+            "published": "Mon, 01 Jan 2099 00:00:00 GMT",
+        },
+        cutoff,
+        ["זנות"],
+        source_name="ynet",
     )
     assert not source_health._probe_rss_entry_matches(
         {
@@ -1216,6 +1302,7 @@ def test_probe_rss_entry_matches_handles_missing_fields_and_description_fallback
         },
         cutoff,
         ["זנות"],
+        source_name="ynet",
     )
 
 

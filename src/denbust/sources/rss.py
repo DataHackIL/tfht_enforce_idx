@@ -16,6 +16,50 @@ logger = logging.getLogger(__name__)
 # User agent for HTTP requests
 USER_AGENT = "denbust/0.1.0 (news monitoring bot; +https://github.com/denbust)"
 
+YNET_SUPPLEMENTAL_KEYWORDS = [
+    "חשד לבית בושת",
+    "בית בושת אותר",
+    "חשד לזנות",
+    "שידול לזנות",
+    "מכון עיסוי",
+    "מכון ליווי",
+    "סרסורות",
+    "סחר בנשים",
+]
+
+
+def effective_keywords_for_source(source_name: str, keywords: list[str]) -> list[str]:
+    """Return the effective keyword set for an RSS source."""
+    seen: set[str] = set()
+    values: list[str] = []
+
+    supplemental_keywords = YNET_SUPPLEMENTAL_KEYWORDS if source_name == "ynet" else []
+    for keyword in [*keywords, *supplemental_keywords]:
+        candidate = " ".join(keyword.split()).strip()
+        if not candidate:
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(candidate)
+
+    return values
+
+
+def matches_keywords_for_source(
+    source_name: str, title: str, snippet: str, keywords: list[str]
+) -> bool:
+    """Check whether text matches the effective keyword set for an RSS source."""
+    effective_keywords = effective_keywords_for_source(source_name, keywords)
+    return _matches_keywords_in_text(title, snippet, effective_keywords)
+
+
+def _matches_keywords_in_text(title: str, snippet: str, keywords: list[str]) -> bool:
+    """Check whether text contains any keyword from an already-normalized list."""
+    text = f"{title} {snippet}".casefold()
+    return any(keyword.casefold() in text for keyword in keywords)
+
 
 class RSSSource(Source):
     """Fetch and filter articles from RSS feeds."""
@@ -60,12 +104,13 @@ class RSSSource(Source):
 
         # Calculate cutoff date
         cutoff = datetime.now(UTC) - timedelta(days=days)
+        effective_keywords = effective_keywords_for_source(self._name, keywords)
 
         articles: list[RawArticle] = []
 
         for entry in feed.entries:
             # Parse the article
-            article = self._parse_entry(entry, cutoff, keywords)
+            article = self._parse_entry(entry, cutoff, effective_keywords)
             if article:
                 articles.append(article)
 
@@ -95,14 +140,14 @@ class RSSSource(Source):
         self,
         entry: feedparser.FeedParserDict,
         cutoff: datetime,
-        keywords: list[str],
+        effective_keywords: list[str],
     ) -> RawArticle | None:
         """Parse a feed entry into a RawArticle.
 
         Args:
             entry: Feed entry from feedparser.
             cutoff: Cutoff datetime for filtering.
-            keywords: Keywords to match.
+            effective_keywords: Precomputed effective keywords to match.
 
         Returns:
             RawArticle if entry matches criteria, None otherwise.
@@ -133,7 +178,7 @@ class RSSSource(Source):
             return None
 
         # Filter by keywords
-        if not self._matches_keywords(title, snippet, keywords):
+        if not self._matches_keywords(title, snippet, effective_keywords):
             return None
 
         return RawArticle(
@@ -183,8 +228,7 @@ class RSSSource(Source):
         Returns:
             True if any keyword matches.
         """
-        text = f"{title} {snippet}".lower()
-        return any(kw.lower() in text for kw in keywords)
+        return _matches_keywords_in_text(title, snippet, keywords)
 
     def _clean_html(self, text: str) -> str:
         """Remove HTML tags from text.

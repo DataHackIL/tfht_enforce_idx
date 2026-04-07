@@ -1145,6 +1145,26 @@ class TestIceScraper:
         assert scraper._find_results_article(no_heading) is None
         assert scraper._find_results_article(no_items) is None
 
+    def test_find_results_article_supports_nested_heading_text(self) -> None:
+        """Nested spans inside the search heading should still expose the results article."""
+        scraper = self._create_scraper()
+        soup = BeautifulSoup(
+            """
+            <html>
+              <body>
+                <h1><span>נמצאו 64</span> <span>תוצאות חיפוש</span></h1>
+                <article><ul><li><a href="/article/1">test</a></li></ul></article>
+              </body>
+            </html>
+            """,
+            "lxml",
+        )
+
+        result = scraper._find_results_article(soup)
+
+        assert result is not None
+        assert result.name == "article"
+
     def test_parse_article_item_returns_none_without_text_links(self) -> None:
         """Article parsing should skip matches whose candidate links have no visible text."""
         scraper = self._create_scraper()
@@ -2419,6 +2439,38 @@ class TestWallaScraper:
         assert await scraper._fetch_archive_page(1, 2026, 3, 1) is None
 
     @pytest.mark.asyncio
+    async def test_fetch_archive_page_treats_404_as_expected_degradation(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A missing archive branch should warn and return None."""
+        scraper = self._create_scraper()
+
+        class FakeResponse:
+            status_code = 404
+
+            def raise_for_status(self) -> None:
+                raise httpx.HTTPStatusError(
+                    "not found",
+                    request=httpx.Request(
+                        "GET", "https://news.walla.co.il/archive/10?year=2026&month=4"
+                    ),
+                    response=httpx.Response(404),
+                )
+
+        class FakeClient:
+            async def get(self, url: str) -> FakeResponse:
+                del url
+                return FakeResponse()
+
+        scraper._client = FakeClient()
+
+        with caplog.at_level("WARNING"):
+            result = await scraper._fetch_archive_page(10, 2026, 4, 1)
+
+        assert result is None
+        assert "Walla archive branch unavailable" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_fetch_archive_page_returns_response_text(self) -> None:
         """Archive page fetch should return response HTML on success."""
         scraper = self._create_scraper()
@@ -2848,6 +2900,40 @@ class TestMaarivScraper:
 
         assert len(articles) == 1
 
+    def test_parse_section_page_keeps_source_specific_relaxed_matches(self) -> None:
+        """Maariv supplemental phrases should recover relevant enforcement stories."""
+        scraper = MaarivScraper()
+        html = """
+        <article class="category-article">
+          <a class="category-article-link" href="/news/law/article-1270778"></a>
+          <h2>המאדאם של תל אביב שוב הסתבכה: חשד לבית בושת בבני ברק</h2>
+          <p>המשטרה עצרה חשודים.</p>
+          <time datetime="2026-03-01T10:00:00+00:00"></time>
+        </article>
+        """
+
+        articles = scraper._parse_section_page(
+            html,
+            cutoff=datetime(2026, 2, 1, tzinfo=UTC),
+            keywords=["זנות"],
+        )
+
+        assert len(articles) == 1
+
+    def test_effective_maariv_keywords_deduplicates_and_skips_blank_values(self) -> None:
+        """Maariv keyword supplements should not duplicate or preserve blank values."""
+        keywords = MaarivScraper.__module__
+        del keywords
+        from denbust.sources.maariv import effective_maariv_keywords
+
+        values = effective_maariv_keywords(["זנות", "  ", "זנות", "חשד לבית בושת"])
+
+        assert "" not in values
+        assert "  " not in values
+        assert len(values) == len({value.casefold() for value in values})
+        assert "זנות" in values
+        assert "חשד לבית בושת" in values
+
     def test_parse_article_item_rejects_non_article_links(self) -> None:
         """Generic links that are not article URLs should be ignored."""
         scraper = MaarivScraper()
@@ -3160,6 +3246,53 @@ class TestRSSSource:
 
         assert len(articles) == 1
 
+    @pytest.mark.asyncio
+    async def test_fetch_computes_effective_keywords_once_per_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RSS fetch should precompute the effective keyword list once per fetch run."""
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        entries = [
+            {
+                "link": "https://example.com/1",
+                "title": "חשד לבית בושת בבני ברק",
+                "summary": "summary",
+                "published": "Sun, 15 Feb 2026 10:00:00 +0200",
+            },
+            {
+                "link": "https://example.com/2",
+                "title": "חדשות כלליות",
+                "summary": "summary",
+                "published": "Sun, 15 Feb 2026 09:00:00 +0200",
+            },
+        ]
+        calls: list[tuple[str, list[str]]] = []
+
+        async def fake_fetch_feed() -> str:
+            return "<xml />"
+
+        def fake_effective_keywords(source_name: str, keywords: list[str]) -> list[str]:
+            calls.append((source_name, list(keywords)))
+            return ["חשד לבית בושת"]
+
+        monkeypatch.setattr(source, "_fetch_feed", fake_fetch_feed)
+        monkeypatch.setattr(
+            "denbust.sources.rss.feedparser.parse",
+            lambda _content: SimpleNamespace(
+                bozo=False,
+                bozo_exception=None,
+                entries=entries,
+            ),
+        )
+        monkeypatch.setattr(
+            "denbust.sources.rss.effective_keywords_for_source", fake_effective_keywords
+        )
+
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
+
+        assert len(articles) == 1
+        assert calls == [("ynet", ["זנות"])]
+
     def test_factory_helpers_create_expected_sources(self) -> None:
         """Factory helpers should return the canonical source names and URLs."""
         from denbust.sources.rss import create_ynet_source
@@ -3202,10 +3335,45 @@ class TestRSSSource:
 
         respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
 
-        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        source = RSSSource("generic-rss", "https://ynet.co.il/feed.xml")
         articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["מילה_שלא_קיימת"])
 
         assert len(articles) == 0
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ynet_source_uses_source_specific_relaxed_keywords(self) -> None:
+        """Ynet should keep relevant items matched only by its supplemental phrases."""
+        rss_content = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Ynet News</title>
+            <item>
+              <title>חשד לבית בושת בבני ברק: המשטרה עצרה חשודים</title>
+              <link>https://www.ynet.co.il/news/article/r111111</link>
+              <description>המשטרה עצרה חשודים בדירה ששימשה לפי החשד לבית בושת.</description>
+              <pubDate>Sun, 15 Feb 2026 10:00:00 +0200</pubDate>
+            </item>
+          </channel>
+        </rss>"""
+
+        respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
+
+        source = RSSSource("ynet", "https://ynet.co.il/feed.xml")
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
+
+        assert len(articles) == 1
+        assert articles[0].title.startswith("חשד לבית בושת")
+
+    def test_effective_keywords_for_generic_rss_source_deduplicates_and_skips_blank_values(
+        self,
+    ) -> None:
+        """Generic RSS keyword helpers should skip blank inputs and deduplicate values."""
+        from denbust.sources.rss import effective_keywords_for_source
+
+        values = effective_keywords_for_source("generic-rss", ["זנות", " ", "זנות"])
+
+        assert values == ["זנות"]
 
     @respx.mock
     @pytest.mark.asyncio
