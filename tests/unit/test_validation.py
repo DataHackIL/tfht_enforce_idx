@@ -76,6 +76,7 @@ def build_classified_article(
     article: RawArticle,
     *,
     relevant: bool,
+    enforcement_related: bool = False,
     category: Category,
     sub_category: SubCategory | None = None,
 ) -> ClassifiedArticle:
@@ -84,6 +85,7 @@ def build_classified_article(
         article=article,
         classification=ClassificationResult(
             relevant=relevant,
+            enforcement_related=enforcement_related,
             category=category,
             sub_category=sub_category,
             confidence="high",
@@ -196,6 +198,7 @@ class TestValidationCollection:
             build_classified_article(
                 source_one_articles[1],
                 relevant=True,
+                enforcement_related=True,
                 category=Category.BROTHEL,
                 sub_category=SubCategory.CLOSURE,
             ),
@@ -236,9 +239,11 @@ class TestValidationCollection:
         rows = read_csv_rows(output_path)
         assert len(rows) == 2
         assert [row["review_status"] for row in rows] == ["pending", "pending"]
+        assert {row["suggested_enforcement_related"] for row in rows} == {"False", "True"}
         assert rows[0]["suggested_category"]
         assert rows[0]["category"] == rows[0]["suggested_category"]
         assert rows[0]["relevant"] == rows[0]["suggested_relevant"]
+        assert rows[0]["enforcement_related"] == rows[0]["suggested_enforcement_related"]
 
     @pytest.mark.asyncio
     async def test_collect_validation_draft_requires_api_key(self, tmp_path: Path) -> None:
@@ -448,6 +453,7 @@ class TestValidationFinalize:
                     "title": "title a",
                     "snippet": "snippet a",
                     "relevant": "True",
+                    "enforcement_related": "True",
                     "category": "brothel",
                     "sub_category": "closure",
                     "review_status": "reviewed",
@@ -471,10 +477,12 @@ class TestValidationFinalize:
                     "title": "title a",
                     "snippet": "snippet a",
                     "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
                     "suggested_category": "brothel",
                     "suggested_sub_category": "closure",
                     "suggested_confidence": "high",
                     "relevant": "True",
+                    "enforcement_related": "True",
                     "category": "brothel",
                     "sub_category": "closure",
                     "review_status": "reviewed",
@@ -489,10 +497,12 @@ class TestValidationFinalize:
                     "title": "title b",
                     "snippet": "snippet b",
                     "suggested_relevant": "False",
+                    "suggested_enforcement_related": "False",
                     "suggested_category": "not_relevant",
                     "suggested_sub_category": "",
                     "suggested_confidence": "high",
                     "relevant": "False",
+                    "enforcement_related": "False",
                     "category": "",
                     "sub_category": "",
                     "review_status": "reviewed",
@@ -507,10 +517,12 @@ class TestValidationFinalize:
                     "title": "title c",
                     "snippet": "snippet c",
                     "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
                     "suggested_category": "trafficking",
                     "suggested_sub_category": "rescue",
                     "suggested_confidence": "high",
                     "relevant": "True",
+                    "enforcement_related": "True",
                     "category": "trafficking",
                     "sub_category": "rescue",
                     "review_status": "pending",
@@ -547,10 +559,12 @@ class TestValidationFinalize:
                     "title": "title b",
                     "snippet": "snippet b",
                     "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
                     "suggested_category": "brothel",
                     "suggested_sub_category": "closure",
                     "suggested_confidence": "high",
                     "relevant": "True",
+                    "enforcement_related": "True",
                     "category": "brothel",
                     "sub_category": "rescue",
                     "review_status": "reviewed",
@@ -589,10 +603,12 @@ class TestValidationFinalize:
                     "title": "title b",
                     "snippet": "snippet b",
                     "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
                     "suggested_category": "not_relevant",
                     "suggested_sub_category": "",
                     "suggested_confidence": "high",
                     "relevant": "True",
+                    "enforcement_related": "True",
                     "category": "not_relevant",
                     "sub_category": "closure",
                     "review_status": "reviewed",
@@ -605,11 +621,11 @@ class TestValidationFinalize:
         with pytest.raises(ValueError, match="cannot use category 'not_relevant'"):
             finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
 
-    def test_finalize_validation_set_requires_subcategory_for_relevant_rows(
+    def test_finalize_validation_set_allows_blank_subcategory_for_relevant_rows(
         self,
         tmp_path: Path,
     ) -> None:
-        """Reviewed relevant rows must include a sub-category."""
+        """Reviewed relevant rows may omit a sub-category."""
         draft_path = tmp_path / "draft.csv"
         write_csv_rows(
             draft_path,
@@ -623,10 +639,12 @@ class TestValidationFinalize:
                     "title": "title b",
                     "snippet": "snippet b",
                     "suggested_relevant": "True",
+                    "suggested_enforcement_related": "False",
                     "suggested_category": "brothel",
                     "suggested_sub_category": "",
                     "suggested_confidence": "high",
                     "relevant": "True",
+                    "enforcement_related": "False",
                     "category": "brothel",
                     "sub_category": "",
                     "review_status": "reviewed",
@@ -636,7 +654,49 @@ class TestValidationFinalize:
             ],
         )
 
-        with pytest.raises(ValueError, match="require a sub_category"):
+        result = finalize_validation_set(
+            input_path=draft_path, validation_set_path=tmp_path / "out.csv"
+        )
+        rows = read_csv_rows(result.validation_set_path)
+
+        assert rows[0]["relevant"] == "True"
+        assert rows[0]["enforcement_related"] == "False"
+        assert rows[0]["sub_category"] == ""
+
+    def test_finalize_validation_set_requires_subcategory_for_enforcement_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Reviewed enforcement-related rows must include a sub-category."""
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "category": "brothel",
+                    "sub_category": "",
+                    "review_status": "reviewed",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        with pytest.raises(ValueError, match="must include a non-empty sub_category"):
             finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
 
     def test_run_validation_finalize_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -703,6 +763,10 @@ class TestValidationEvaluate:
                     relevance_recall=0.5,
                     relevance_f1=0.667,
                     relevance_accuracy=0.75,
+                    enforcement_precision_relevant_only=1.0,
+                    enforcement_recall_relevant_only=1.0,
+                    enforcement_f1_relevant_only=1.0,
+                    enforcement_accuracy_relevant_only=1.0,
                     category_accuracy_relevant_only=0.5,
                     subcategory_accuracy_relevant_only=0.5,
                     overall_exact_match=0.5,
@@ -715,8 +779,56 @@ class TestValidationEvaluate:
             ]
         )
         assert "rank" in table
+        assert "enf_f1" in table
         assert "baseline" in table
         assert "0.667" in table
+
+    def test_load_validation_examples_defaults_missing_enforcement_flag_false(
+        self, tmp_path: Path
+    ) -> None:
+        """Older validation rows without enforcement_related should remain readable."""
+        validation_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_path,
+            [
+                "source_name",
+                "article_date",
+                "url",
+                "canonical_url",
+                "title",
+                "snippet",
+                "relevant",
+                "category",
+                "sub_category",
+                "review_status",
+                "annotation_notes",
+                "collected_at",
+                "finalized_at",
+                "draft_source",
+            ],
+            [
+                {
+                    "source_name": "ynet",
+                    "article_date": "2026-03-01T00:00:00+00:00",
+                    "url": "https://example.com/a",
+                    "canonical_url": "https://example.com/a",
+                    "title": "title a",
+                    "snippet": "snippet a",
+                    "relevant": "True",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-01T00:00:00+00:00",
+                    "finalized_at": "2026-03-02T00:00:00+00:00",
+                    "draft_source": "draft.csv",
+                }
+            ],
+        )
+
+        _articles, labels = _load_validation_examples(validation_path)
+
+        assert labels == [(True, False, "brothel", "closure")]
 
     @pytest.mark.asyncio
     async def test_evaluate_classifier_variants_requires_api_key(self, tmp_path: Path) -> None:
@@ -734,6 +846,7 @@ class TestValidationEvaluate:
                     "title": "title a",
                     "snippet": "snippet a",
                     "relevant": "True",
+                    "enforcement_related": "True",
                     "category": "brothel",
                     "sub_category": "closure",
                     "review_status": "reviewed",
@@ -765,7 +878,7 @@ class TestValidationEvaluate:
     ) -> None:
         """Variants should rank by relevance F1 before category/sub-category metrics."""
         validation_set_path = tmp_path / "validation.csv"
-        header = DEFAULT_VALIDATION_SET_PATH.read_text(encoding="utf-8").strip()
+        header = DEFAULT_VALIDATION_SET_PATH.read_text(encoding="utf-8").splitlines()[0]
         validation_set_path.write_text(
             "\n".join(
                 [
@@ -778,6 +891,7 @@ class TestValidationEvaluate:
                             "https://example.com/a",
                             "title a",
                             "snippet a",
+                            "True",
                             "True",
                             "brothel",
                             "closure",
@@ -796,6 +910,7 @@ class TestValidationEvaluate:
                             "https://example.com/b",
                             "title b",
                             "snippet b",
+                            "False",
                             "False",
                             "not_relevant",
                             "",
@@ -828,12 +943,14 @@ class TestValidationEvaluate:
             "baseline": [
                 ClassificationResult(
                     relevant=False,
+                    enforcement_related=False,
                     category=Category.NOT_RELEVANT,
                     sub_category=None,
                     confidence="high",
                 ),
                 ClassificationResult(
                     relevant=False,
+                    enforcement_related=False,
                     category=Category.NOT_RELEVANT,
                     sub_category=None,
                     confidence="high",
@@ -842,12 +959,14 @@ class TestValidationEvaluate:
             "prompt-tuned": [
                 ClassificationResult(
                     relevant=True,
+                    enforcement_related=True,
                     category=Category.PROSTITUTION,
                     sub_category=None,
                     confidence="high",
                 ),
                 ClassificationResult(
                     relevant=False,
+                    enforcement_related=False,
                     category=Category.NOT_RELEVANT,
                     sub_category=None,
                     confidence="high",
@@ -895,17 +1014,18 @@ class TestValidationEvaluate:
         """Category and sub-category metrics should ignore non-relevant gold rows."""
         metrics = _score_predictions(
             labels=[
-                (True, "brothel", "closure"),
-                (False, "not_relevant", ""),
+                (True, True, "brothel", "closure"),
+                (False, False, "not_relevant", ""),
             ],
             predictions=[
-                (True, "brothel", "closure"),
-                (False, "brothel", "closure"),
+                (True, True, "brothel", "closure"),
+                (False, False, "brothel", "closure"),
             ],
             variant=ClassifierVariantSpec(name="baseline"),
             model="claude-sonnet-4-20250514",
         )
 
+        assert metrics.enforcement_accuracy_relevant_only == 1.0
         assert metrics.category_accuracy_relevant_only == 1.0
         assert metrics.subcategory_accuracy_relevant_only == 1.0
 
@@ -913,16 +1033,17 @@ class TestValidationEvaluate:
         """Category and sub-category accuracy should not award credit to irrelevant predictions."""
         metrics = _score_predictions(
             labels=[
-                (True, "brothel", "closure"),
+                (True, True, "brothel", "closure"),
             ],
             predictions=[
-                (False, "brothel", "closure"),
+                (False, False, "brothel", "closure"),
             ],
             variant=ClassifierVariantSpec(name="baseline"),
             model="claude-sonnet-4-20250514",
         )
 
         assert metrics.relevance_f1 == 0.0
+        assert metrics.enforcement_f1_relevant_only == 0.0
         assert metrics.category_accuracy_relevant_only == 0.0
         assert metrics.subcategory_accuracy_relevant_only == 0.0
 
@@ -930,12 +1051,12 @@ class TestValidationEvaluate:
         """Scoring should count false positives and exact matches correctly."""
         metrics = _score_predictions(
             labels=[
-                (False, "not_relevant", ""),
-                (True, "brothel", "closure"),
+                (False, False, "not_relevant", ""),
+                (True, True, "brothel", "closure"),
             ],
             predictions=[
-                (True, "brothel", "closure"),
-                (True, "brothel", "closure"),
+                (True, False, "brothel", "closure"),
+                (True, True, "brothel", "closure"),
             ],
             variant=ClassifierVariantSpec(name="baseline"),
             model="claude-sonnet-4-20250514",
@@ -946,6 +1067,63 @@ class TestValidationEvaluate:
         assert metrics.fn == 0
         assert metrics.tn == 0
         assert metrics.overall_exact_match == 0.5
+
+    def test_score_predictions_tracks_enforcement_metrics_for_relevant_examples(self) -> None:
+        """Enforcement metrics should be computed on the relevant subset."""
+        metrics = _score_predictions(
+            labels=[
+                (True, True, "brothel", "closure"),
+                (True, False, "prostitution", ""),
+            ],
+            predictions=[
+                (True, False, "brothel", "closure"),
+                (True, False, "prostitution", ""),
+            ],
+            variant=ClassifierVariantSpec(name="baseline"),
+            model="claude-sonnet-4-20250514",
+        )
+
+        assert metrics.enforcement_precision_relevant_only == 0.0
+        assert metrics.enforcement_recall_relevant_only == 0.0
+        assert metrics.enforcement_f1_relevant_only == 0.0
+        assert metrics.enforcement_accuracy_relevant_only == 0.5
+
+    def test_score_predictions_ignores_enforcement_when_prediction_is_irrelevant(self) -> None:
+        """Irrelevant predictions should not receive enforcement credit."""
+        metrics = _score_predictions(
+            labels=[
+                (True, True, "trafficking", "rescue"),
+            ],
+            predictions=[
+                (False, True, "not_relevant", ""),
+            ],
+            variant=ClassifierVariantSpec(name="baseline"),
+            model="claude-sonnet-4-20250514",
+        )
+
+        assert metrics.fn == 1
+        assert metrics.enforcement_precision_relevant_only == 0.0
+        assert metrics.enforcement_recall_relevant_only == 0.0
+        assert metrics.enforcement_f1_relevant_only == 0.0
+        assert metrics.enforcement_accuracy_relevant_only == 0.0
+
+    def test_score_predictions_counts_enforcement_false_positive_on_relevant_rows(self) -> None:
+        """Predicted enforcement should count as FP on relevant rows when gold is non-enforcement."""
+        metrics = _score_predictions(
+            labels=[
+                (True, False, "prostitution", ""),
+            ],
+            predictions=[
+                (True, True, "prostitution", ""),
+            ],
+            variant=ClassifierVariantSpec(name="baseline"),
+            model="claude-sonnet-4-20250514",
+        )
+
+        assert metrics.enforcement_precision_relevant_only == 0.0
+        assert metrics.enforcement_recall_relevant_only == 0.0
+        assert metrics.enforcement_f1_relevant_only == 0.0
+        assert metrics.enforcement_accuracy_relevant_only == 0.0
 
     def test_run_validation_evaluate_delegates(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

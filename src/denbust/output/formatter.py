@@ -85,6 +85,11 @@ def format_category(category: Category, sub_category: SubCategory | None) -> str
     return cat_name
 
 
+def format_scope_label(enforcement_related: bool) -> str:
+    """Format the dataset/report scope label for an item."""
+    return "Enforcement-related" if enforcement_related else "Non-enforcement topical"
+
+
 def format_unified_item(item: UnifiedItem) -> str:
     """Format a unified item for CLI output.
 
@@ -102,6 +107,7 @@ def format_unified_item(item: UnifiedItem) -> str:
     lines = [
         f"{icon} {item.headline}",
         f"תאריך: {date_str}",
+        f"סוג דיווח: {format_scope_label(item.enforcement_related)}",
         f"קטגוריה: {category_str}",
         "",
         f"תקציר: {item.summary[:300]}{'...' if len(item.summary) > 300 else ''}",

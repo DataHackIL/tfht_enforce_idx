@@ -1,0 +1,14 @@
+{
+  "url": "https://www.mako.co.il/men-men_news/Article-7af9db4351b1d91027.htm",
+  "title": "בני זוג שעלו מברזיל הפעילו רשת זנות בארץ",
+  "snippet": "כתבה על בני זוג שעלו מברזיל והפעילו רשת זנות בישראל",
+  "date": "2026-03-27T05:43:57+00:00",
+  "source_name": "mako",
+  "expected_classification": {
+    "relevant": true,
+    "enforcement_related": true,
+    "category": "prostitution",
+    "sub_category": "arrest",
+    "confidence": "high"
+  }
+}

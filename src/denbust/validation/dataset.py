@@ -44,6 +44,7 @@ def _serialize_validation_rows(rows: list[ValidationSetRow]) -> list[dict[str, s
             "title": row.title,
             "snippet": row.snippet,
             "relevant": str(row.relevant),
+            "enforcement_related": str(row.enforcement_related),
             "category": row.category,
             "sub_category": row.sub_category,
             "review_status": row.review_status,
@@ -65,6 +66,7 @@ def _parse_existing_validation_row(raw_row: dict[str, str]) -> ValidationSetRow:
         title=raw_row["title"],
         snippet=raw_row["snippet"],
         relevant=parse_bool(raw_row["relevant"]),
+        enforcement_related=parse_bool(raw_row.get("enforcement_related", "False")),
         category=normalize_category_value(raw_row["category"]),
         sub_category=normalize_subcategory_value(raw_row["sub_category"]),
         review_status=normalize_review_status(raw_row["review_status"]) or "reviewed",
@@ -77,6 +79,7 @@ def _parse_existing_validation_row(raw_row: dict[str, str]) -> ValidationSetRow:
 
 def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> ValidationSetRow:
     relevant = parse_bool(raw_row["relevant"])
+    enforcement_related = parse_bool(raw_row.get("enforcement_related", "False"))
     category_value = normalize_category_value(raw_row["category"])
     sub_category_value = normalize_subcategory_value(raw_row["sub_category"])
 
@@ -84,16 +87,21 @@ def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Val
         category = Category(category_value)
         if category == Category.NOT_RELEVANT:
             raise ValueError("Reviewed relevant rows cannot use category 'not_relevant'")
-        if not sub_category_value:
-            raise ValueError("Reviewed relevant rows require a sub_category")
-        sub_category = SubCategory(sub_category_value)
-        allowed = ALLOWED_SUBCATEGORIES_BY_CATEGORY[category]
-        if sub_category not in allowed:
+        sub_category = None
+        if sub_category_value:
+            sub_category = SubCategory(sub_category_value)
+            allowed = ALLOWED_SUBCATEGORIES_BY_CATEGORY[category]
+            if sub_category not in allowed:
+                raise ValueError(
+                    f"Invalid sub_category '{sub_category.value}' for category '{category.value}'"
+                )
+        elif enforcement_related:
             raise ValueError(
-                f"Invalid sub_category '{sub_category.value}' for category '{category.value}'"
+                "Reviewed enforcement-related rows must include a non-empty sub_category"
             )
     else:
         category = Category.NOT_RELEVANT
+        enforcement_related = False
         sub_category = None
 
     finalized_at = datetime.now(UTC)
@@ -105,6 +113,7 @@ def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Val
         title=raw_row["title"],
         snippet=raw_row["snippet"],
         relevant=relevant,
+        enforcement_related=enforcement_related,
         category=category.value,
         sub_category=sub_category.value if sub_category is not None else "",
         review_status="reviewed",

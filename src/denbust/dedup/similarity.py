@@ -171,6 +171,7 @@ class Deduplicator:
             summary=primary.article.snippet,
             sources=sources,
             date=primary.article.date,
+            enforcement_related=primary.classification.enforcement_related,
             category=primary.classification.category,
             sub_category=primary.classification.sub_category,
             canonical_url=primary.article.url,

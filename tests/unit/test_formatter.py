@@ -9,6 +9,7 @@ from denbust.data_models import Category, SourceReference, SubCategory, UnifiedI
 from denbust.output.formatter import (
     format_category,
     format_items,
+    format_scope_label,
     format_unified_item,
     get_icon,
     print_items,
@@ -58,6 +59,18 @@ class TestFormatCategory:
         assert result == "סרסור » מעצר"
 
 
+class TestFormatScopeLabel:
+    """Tests for the report scope label."""
+
+    def test_enforcement_scope_label(self) -> None:
+        """Enforcement items should be labeled explicitly."""
+        assert format_scope_label(True) == "Enforcement-related"
+
+    def test_non_enforcement_scope_label(self) -> None:
+        """Non-enforcement topical items should be labeled explicitly."""
+        assert format_scope_label(False) == "Non-enforcement topical"
+
+
 class TestFormatUnifiedItem:
     """Tests for format_unified_item function."""
 
@@ -73,6 +86,7 @@ class TestFormatUnifiedItem:
                 ),
             ],
             date=datetime(2026, 2, 15, tzinfo=UTC),
+            enforcement_related=True,
             category=Category.BROTHEL,
             sub_category=SubCategory.CLOSURE,
         )
@@ -81,6 +95,7 @@ class TestFormatUnifiedItem:
 
         assert "פשיטה על בית בושת בתל אביב" in output
         assert "2026-02-15" in output
+        assert "Enforcement-related" in output
         assert "בית בושת » סגירה" in output
         assert "ynet" in output
         assert "https://ynet.co.il/article/1" in output
@@ -105,6 +120,7 @@ class TestFormatUnifiedItem:
                 ),
             ],
             date=datetime(2026, 2, 15, tzinfo=UTC),
+            enforcement_related=False,
             category=Category.ENFORCEMENT,
             sub_category=SubCategory.OPERATION,
         )
@@ -114,6 +130,7 @@ class TestFormatUnifiedItem:
         assert "ynet" in output
         assert "walla" in output
         assert "mako" in output
+        assert "Non-enforcement topical" in output
 
 
 class TestFormatItems:

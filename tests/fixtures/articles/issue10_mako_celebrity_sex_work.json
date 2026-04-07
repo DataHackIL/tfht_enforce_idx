@@ -1,0 +1,14 @@
+{
+  "url": "https://www.mako.co.il/music-news/world/Article-b6d8dc4b6d2ec91026.htm?Partner=searchResults",
+  "title": "אני מממנת את הקריירה שלי משירותי מין",
+  "snippet": "הווידוי המפתיע של הזמרת",
+  "date": "2026-03-14T13:40:17+00:00",
+  "source_name": "mako",
+  "expected_classification": {
+    "relevant": false,
+    "enforcement_related": false,
+    "category": "not_relevant",
+    "sub_category": null,
+    "confidence": "high"
+  }
+}

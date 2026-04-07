@@ -22,6 +22,7 @@ def build_item() -> UnifiedItem:
             )
         ],
         date=datetime(2026, 2, 15, tzinfo=UTC),
+        enforcement_related=True,
         category=Category.BROTHEL,
         sub_category=SubCategory.CLOSURE,
     )
@@ -56,6 +57,7 @@ class TestSendEmailReport:
         assert message["To"] == "ops@example.com"
         assert "denbust report" in message["Subject"]
         assert "Test headline" in message.get_content()
+        assert "Enforcement-related" in message.get_content()
 
     @patch("denbust.output.email.smtplib.SMTP")
     def test_send_email_without_tls_or_login(self, mock_smtp_cls: MagicMock) -> None:

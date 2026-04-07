@@ -1,0 +1,27 @@
+name: classifier_issue_48
+description: >
+  Verify that the issue-48 classifier changes improve handling of the tracked
+  false-negative enforcement cases and the tracked false-positive celebrity case.
+runtime_config: agents/news/local.yaml
+output_root: .live_checks
+cases:
+  - id: issue45_walla_solicitation_extortion
+    type: fixture_article
+    fixture: tests/fixtures/articles/issue48_walla_solicitation_extortion.json
+    notes: false-negative regression from issues #45 and #37
+  - id: issue39_walla_public_shelter_brothel
+    type: fixture_article
+    fixture: tests/fixtures/articles/issue48_walla_public_shelter_brothel.json
+    notes: false-negative regression from issues #36, #37, and #39
+  - id: issue39_mako_brazil_prostitution_network
+    type: fixture_article
+    fixture: tests/fixtures/articles/issue48_mako_brazil_prostitution_network.json
+    notes: false-negative regression from issues #36, #37, and #39
+  - id: issue45_haaretz_trafficking
+    type: fixture_article
+    fixture: tests/fixtures/articles/issue48_haaretz_trafficking_regression.json
+    notes: false-negative regression from issues #39 and #45
+  - id: issue10_mako_celebrity_profile
+    type: fixture_article
+    fixture: tests/fixtures/articles/issue10_mako_celebrity_sex_work.json
+    notes: false-positive regression from issue #10

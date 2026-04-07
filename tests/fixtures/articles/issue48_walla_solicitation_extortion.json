@@ -1,0 +1,14 @@
+{
+  "url": "https://news.walla.co.il/item/3824626",
+  "title": "\"שידול לזנות\": עידן דביר הוא עו\"ד החשוד בסחיטה מינית של חיילות",
+  "snippet": "כתבה על עורך דין החשוד בסחיטה מינית של חיילות ובשידול לזנות תמורת ייצוג",
+  "date": "2026-04-06T06:01:06+00:00",
+  "source_name": "walla",
+  "expected_classification": {
+    "relevant": true,
+    "enforcement_related": true,
+    "category": "prostitution",
+    "sub_category": "arrest",
+    "confidence": "high"
+  }
+}
