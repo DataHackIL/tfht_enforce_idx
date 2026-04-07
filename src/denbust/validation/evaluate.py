@@ -250,9 +250,7 @@ def _score_predictions(
         if (index_precision + index_recall)
         else 0.0
     )
-    index_accuracy = (
-        (index_tp + index_tn) / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
-    )
+    index_accuracy = (index_tp + index_tn) / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
     taxonomy_category_accuracy = (
         taxonomy_category_matches / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
     )

@@ -95,9 +95,7 @@ class TaxonomyDefinition(BaseModel):
         """Render a compact prompt block for the classifier."""
         lines: list[str] = []
         for category in self.categories:
-            options = " | ".join(
-                f"{leaf.id} ({leaf.label_he})" for leaf in category.subcategories
-            )
+            options = " | ".join(f"{leaf.id} ({leaf.label_he})" for leaf in category.subcategories)
             lines.append(f"- {category.id} ({category.label_he}) -> {options}")
         return "\n".join(lines)
 

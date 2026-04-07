@@ -75,7 +75,9 @@ def _infer_city(address: str) -> str:
     return parts[-1] if parts else ""
 
 
-def _infer_taxonomy_leaf(event_label: str, relevant_details: str, status_text: str) -> tuple[str, str] | None:
+def _infer_taxonomy_leaf(
+    event_label: str, relevant_details: str, status_text: str
+) -> tuple[str, str] | None:
     combined = " ".join([event_label, relevant_details, status_text]).casefold()
     if "ערעור" in combined and "צו" in combined:
         return "brothels", "closure_appeal"
@@ -84,7 +86,7 @@ def _infer_taxonomy_leaf(event_label: str, relevant_details: str, status_text: s
     if "סחר" in combined and ("בני אדם" in combined or "נשים" in combined):
         if "עבדות" in combined:
             return "human_trafficking", "trafficking_slavery_conditions"
-        if any(token in combined for token in ("ברזיל", "מחו\"ל", "ייבוא", "הוסגר", "סרביה")):
+        if any(token in combined for token in ("ברזיל", 'מחו"ל', "ייבוא", "הוסגר", "סרביה")):
             return "human_trafficking", "trafficking_cross_border_prostitution"
         if "נשים" in combined:
             return "human_trafficking", "trafficking_women"
@@ -159,7 +161,9 @@ def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], l
 
             urls = _extract_urls(source_info)
             if not urls:
-                warnings.append(f"row {row_index} month {month}: skipped because no source URL was found")
+                warnings.append(
+                    f"row {row_index} month {month}: skipped because no source URL was found"
+                )
                 continue
 
             inferred = _infer_taxonomy_leaf(event_label, relevant_details, status_text)
@@ -171,7 +175,9 @@ def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], l
 
             day = _parse_day(raw_day)
             if day is None:
-                warnings.append(f"row {row_index} month {month}: skipped because date parsing failed")
+                warnings.append(
+                    f"row {row_index} month {month}: skipped because date parsing failed"
+                )
                 continue
 
             taxonomy_category_id, taxonomy_subcategory_id = inferred
