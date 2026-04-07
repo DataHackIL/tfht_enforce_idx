@@ -26,6 +26,12 @@ Open issues only for actionable engineering problems or suspicious regressions, 
 
 Do not open issues for normal low-signal days with no likely bug.
 
+If source_diagnostics is present, use it as supporting evidence for source-health judgments.
+Prefer it when deciding whether a zero-result or source-health problem is likely caused by
+selector drift, redirects, stale feeds, or keyword/date filtering. Do not duplicate findings that
+are already obvious from the other artifacts unless source_diagnostics adds materially clearer
+attribution.
+
 Return JSON only:
 {{
   "issues": [
@@ -43,6 +49,9 @@ run_snapshot:
 
 debug_summary:
 {debug_summary_json}
+
+source_diagnostics:
+{source_diagnostics_json}
 
 debug_log:
 {debug_log_json}
@@ -62,6 +71,7 @@ class ReviewArtifacts(BaseModel):
     debug_log_path: Path
     run_snapshot: dict[str, Any]
     debug_summary: dict[str, Any]
+    source_diagnostics: dict[str, Any] | None = None
     debug_log: dict[str, Any]
 
 
@@ -91,6 +101,17 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object in {path}")
     return data
+
+
+def _load_optional_json(path: Path | None) -> dict[str, Any] | None:
+    """Load an optional JSON file, returning None when unavailable or unreadable."""
+    if path is None or not path.exists():
+        return None
+    try:
+        return _load_json(path)
+    except (OSError, json.JSONDecodeError, ValueError):
+        print(f"Skipping unreadable optional JSON artifact: {path}")
+        return None
 
 
 def issue_marker(fingerprint: str) -> str:
@@ -142,6 +163,7 @@ def latest_daily_review_artifacts(
     dataset_name: str = "news_items",
     job_name: str = "ingest",
     workflow_name: str = "daily-state-run",
+    source_diagnostics_path: Path | None = None,
 ) -> ReviewArtifacts:
     """Find the latest daily-ingest artifacts from the state repo."""
     runs_dir = state_root / dataset_name / job_name / "runs"
@@ -167,6 +189,7 @@ def latest_daily_review_artifacts(
             debug_log_path=debug_log_path,
             run_snapshot=_load_json(run_snapshot_path),
             debug_summary=debug_summary,
+            source_diagnostics=_load_optional_json(source_diagnostics_path),
             debug_log=_load_json(debug_log_path),
         )
 
@@ -193,6 +216,12 @@ class AnthropicDailyReviewer:
             ),
             debug_summary_json=json.dumps(
                 _compact_for_prompt(artifacts.debug_summary),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            source_diagnostics_json=json.dumps(
+                _compact_for_prompt(artifacts.source_diagnostics),
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -346,11 +375,13 @@ def review_latest_daily_run(
     workflow_name: str = "daily-state-run",
     model: str = "claude-sonnet-4-20250514",
     labels: list[str] | None = None,
+    source_diagnostics_path: Path | None = None,
 ) -> int:
     """Review the latest daily run and create any missing issues."""
     artifacts = latest_daily_review_artifacts(
         state_root=state_root,
         workflow_name=workflow_name,
+        source_diagnostics_path=source_diagnostics_path,
     )
     reviewer = AnthropicDailyReviewer(api_key=anthropic_api_key, model=model)
     review = reviewer.review(artifacts)
@@ -385,6 +416,8 @@ def main() -> None:
     model = raw_model or "claude-sonnet-4-20250514"
     raw_labels = os.getenv("DENBUST_REVIEW_ISSUE_LABELS", "")
     labels = [label.strip() for label in raw_labels.split(",") if label.strip()]
+    raw_source_diagnostics_path = os.getenv("DENBUST_SOURCE_DIAGNOSTICS_PATH", "").strip()
+    source_diagnostics_path = Path(raw_source_diagnostics_path) if raw_source_diagnostics_path else None
 
     if not repository:
         raise SystemExit("GITHUB_REPOSITORY is required for daily review.")
@@ -401,6 +434,7 @@ def main() -> None:
         workflow_name=workflow_name,
         model=model,
         labels=labels,
+        source_diagnostics_path=source_diagnostics_path,
     )
     print(f"Daily review created {created} issue(s).")
 
