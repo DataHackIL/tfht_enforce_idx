@@ -146,7 +146,10 @@ def _score_predictions(
         else 0.0
     )
     enforcement_f1 = (
-        2 * enforcement_precision * enforcement_recall / (enforcement_precision + enforcement_recall)
+        2
+        * enforcement_precision
+        * enforcement_recall
+        / (enforcement_precision + enforcement_recall)
         if (enforcement_precision + enforcement_recall)
         else 0.0
     )

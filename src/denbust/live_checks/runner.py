@@ -138,7 +138,9 @@ def _normalize_fixture_datetime(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _load_fixture_article(path: Path) -> tuple[RawArticle, ExpectedClassification | None, dict[str, object]]:
+def _load_fixture_article(
+    path: Path,
+) -> tuple[RawArticle, ExpectedClassification | None, dict[str, object]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     article = RawArticle(
         url=HttpUrl(payload["url"]),
@@ -149,7 +151,9 @@ def _load_fixture_article(path: Path) -> tuple[RawArticle, ExpectedClassificatio
     )
     expected_payload = payload.get("expected_classification")
     expected = (
-        ExpectedClassification.model_validate(expected_payload) if expected_payload is not None else None
+        ExpectedClassification.model_validate(expected_payload)
+        if expected_payload is not None
+        else None
     )
     return article, expected, payload
 
@@ -162,7 +166,9 @@ def load_live_check_scenario(path: Path) -> LiveCheckScenario:
     return LiveCheckScenario.model_validate(data)
 
 
-def _build_output_dir(repo_root: Path, output_root: str, scenario_name: str, started_at: datetime) -> Path:
+def _build_output_dir(
+    repo_root: Path, output_root: str, scenario_name: str, started_at: datetime
+) -> Path:
     stamp = started_at.astimezone(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     return repo_root / output_root / scenario_name / stamp
 
@@ -356,7 +362,9 @@ async def _execute_live_source_article_case(
         )
     elif case.match_title_contains is not None:
         needle = case.match_title_contains.casefold()
-        selected = next((article for article in articles if needle in article.title.casefold()), None)
+        selected = next(
+            (article for article in articles if needle in article.title.casefold()), None
+        )
 
     if selected is None:
         return CaseResult(

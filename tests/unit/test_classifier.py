@@ -412,11 +412,11 @@ class TestClassifyPassesSystemPrompt:
                 return_value=MagicMock(
                     content=[
                         TextBlock(
-                        type="text",
-                        text='{"relevant": true, "enforcement_related": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
-                    )
-                ]
-            )
+                            type="text",
+                            text='{"relevant": true, "enforcement_related": true, "category": "trafficking", "sub_category": "rescue", "confidence": "high"}',
+                        )
+                    ]
+                )
             )
         )
         article = RawArticle(
@@ -442,11 +442,11 @@ class TestClassifyPassesSystemPrompt:
                 return_value=MagicMock(
                     content=[
                         TextBlock(
-                        type="text",
-                        text='{"relevant": true, "enforcement_related": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}',
-                    )
-                ]
-            )
+                            type="text",
+                            text='{"relevant": true, "enforcement_related": true, "category": "brothel", "sub_category": "closure", "confidence": "high"}',
+                        )
+                    ]
+                )
             )
         )
         article = RawArticle(
@@ -535,7 +535,9 @@ class TestClassifyPassesSystemPrompt:
         assert result.sub_category == sub_category
 
     @pytest.mark.asyncio
-    async def test_classify_non_enforcement_topical_story_returns_relevant_without_subcategory(self) -> None:
+    async def test_classify_non_enforcement_topical_story_returns_relevant_without_subcategory(
+        self,
+    ) -> None:
         """Relevant topical stories may be kept even when they are not enforcement events."""
         classifier = Classifier(api_key="test-key")
         classifier._client.messages = MagicMock(
@@ -582,9 +584,7 @@ class TestClassifyPassesSystemPrompt:
             )
         )
         article = RawArticle(
-            url=HttpUrl(
-                "https://www.mako.co.il/music-news/world/Article-b6d8dc4b6d2ec91026.htm"
-            ),
+            url=HttpUrl("https://www.mako.co.il/music-news/world/Article-b6d8dc4b6d2ec91026.htm"),
             title="אני מממנת את הקריירה שלי משירותי מין",
             snippet="הווידוי המפתיע של הזמרת",
             date=datetime(2026, 3, 14, tzinfo=UTC),

@@ -2933,6 +2933,7 @@ class TestMaarivScraper:
         assert len(values) == len({value.casefold() for value in values})
         assert "זנות" in values
         assert "חשד לבית בושת" in values
+
     def test_parse_article_item_rejects_non_article_links(self) -> None:
         """Generic links that are not article URLs should be ignored."""
         scraper = MaarivScraper()
@@ -3283,7 +3284,9 @@ class TestRSSSource:
                 entries=entries,
             ),
         )
-        monkeypatch.setattr("denbust.sources.rss.effective_keywords_for_source", fake_effective_keywords)
+        monkeypatch.setattr(
+            "denbust.sources.rss.effective_keywords_for_source", fake_effective_keywords
+        )
 
         articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
 
@@ -3371,6 +3374,7 @@ class TestRSSSource:
         values = effective_keywords_for_source("generic-rss", ["זנות", " ", "זנות"])
 
         assert values == ["זנות"]
+
     @respx.mock
     @pytest.mark.asyncio
     async def test_handles_feed_error(self) -> None:

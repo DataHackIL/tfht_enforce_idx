@@ -654,7 +654,9 @@ class TestValidationFinalize:
             ],
         )
 
-        result = finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
+        result = finalize_validation_set(
+            input_path=draft_path, validation_set_path=tmp_path / "out.csv"
+        )
         rows = read_csv_rows(result.validation_set_path)
 
         assert rows[0]["relevant"] == "True"
