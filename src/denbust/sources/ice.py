@@ -142,9 +142,11 @@ class IceScraper(Source):
     def _find_results_article(self, soup: BeautifulSoup) -> Tag | None:
         """Locate the primary ICE search results container."""
         heading = soup.find(
-            lambda tag: isinstance(tag, Tag)
-            and tag.name == "h1"
-            and "תוצאות חיפוש" in tag.get_text(" ", strip=True)
+            lambda tag: (
+                isinstance(tag, Tag)
+                and tag.name == "h1"
+                and "תוצאות חיפוש" in tag.get_text(" ", strip=True)
+            )
         )
         if not heading:
             return None

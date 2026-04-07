@@ -52,7 +52,10 @@ def matches_keywords_for_source(
 ) -> bool:
     """Check whether text matches the effective keyword set for an RSS source."""
     text = f"{title} {snippet}".casefold()
-    return any(keyword.casefold() in text for keyword in effective_keywords_for_source(source_name, keywords))
+    return any(
+        keyword.casefold() in text
+        for keyword in effective_keywords_for_source(source_name, keywords)
+    )
 
 
 class RSSSource(Source):
