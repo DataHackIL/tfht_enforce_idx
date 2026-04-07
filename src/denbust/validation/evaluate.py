@@ -203,15 +203,19 @@ def _score_predictions(
             if predicted_label.taxonomy_subcategory_id == true_label.taxonomy_subcategory_id:
                 taxonomy_subcategory_matches += 1
 
-        if (
+        exact_match = (
             predicted_label.relevant == true_label.relevant
             and predicted_enforcement_related == true_label.enforcement_related
             and predicted_label.category == true_label.category
             and predicted_label.sub_category == true_label.sub_category
-            and predicted_label.taxonomy_category_id == true_label.taxonomy_category_id
-            and predicted_label.taxonomy_subcategory_id == true_label.taxonomy_subcategory_id
-            and predicted_label.index_relevant == true_label.index_relevant
-        ):
+        )
+        if true_label.taxonomy_category_id and true_label.taxonomy_subcategory_id:
+            exact_match = exact_match and (
+                predicted_label.taxonomy_category_id == true_label.taxonomy_category_id
+                and predicted_label.taxonomy_subcategory_id == true_label.taxonomy_subcategory_id
+                and predicted_label.index_relevant == true_label.index_relevant
+            )
+        if exact_match:
             exact_matches += 1
 
     total = len(labels)

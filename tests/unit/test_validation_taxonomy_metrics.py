@@ -159,3 +159,36 @@ def test_taxonomy_index_metrics_cover_fp_fn_and_tn_branches() -> None:
     assert metrics.index_relevance_precision_taxonomy_labeled == 0.0
     assert metrics.index_relevance_recall_taxonomy_labeled == 0.0
     assert metrics.index_relevance_accuracy_taxonomy_labeled == 1 / 3
+
+
+def test_exact_match_ignores_predicted_taxonomy_on_legacy_labels() -> None:
+    metrics = _score_predictions(
+        labels=[
+            ValidationLabel(
+                relevant=True,
+                enforcement_related=False,
+                category="prostitution",
+                sub_category="",
+                index_relevant=False,
+                taxonomy_version="",
+                taxonomy_category_id="",
+                taxonomy_subcategory_id="",
+            )
+        ],
+        predictions=[
+            ValidationLabel(
+                relevant=True,
+                enforcement_related=False,
+                category="prostitution",
+                sub_category="",
+                index_relevant=True,
+                taxonomy_version="1",
+                taxonomy_category_id="pimping_prostitution",
+                taxonomy_subcategory_id="soliciting_prostitution",
+            )
+        ],
+        variant=ClassifierVariantSpec(name="baseline"),
+        model="claude-sonnet-4-20250514",
+    )
+
+    assert metrics.overall_exact_match == 1.0

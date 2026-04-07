@@ -79,7 +79,7 @@ Legacy coarse mapping reference:
 Rules:
 - Do not invent taxonomy ids. Use only ids that appear in the table.
 - If the article is not relevant, use enforcement_related=false, taxonomy_category_id=null, and taxonomy_subcategory_id=null.
-- If the article is relevant but the best TFHT leaf is unclear, return relevant=true, enforcement_related=false, taxonomy_category_id=null, and taxonomy_subcategory_id=null.
+- If the article is relevant but the best TFHT leaf is unclear, return relevant=true, enforcement_related=false, taxonomy_category_id=null, taxonomy_subcategory_id=null, and include the best legacy coarse category in category.
 - enforcement_related is independent from index_relevant. Do not guess index_relevant; it is derived downstream.
 - Celebrity, lifestyle, profile, or entertainment stories about sex work are not relevant unless they are themselves about a concrete Israeli enforcement or legal/public-safety event.
 - Foreign or generic commentary stories with no Israeli monitored-angle are not relevant.
@@ -92,7 +92,7 @@ Article:
 
 Respond with JSON only, no explanation.
 If relevant and taxonomy is known: {{"relevant": true, "enforcement_related": true, "taxonomy_category_id": "...", "taxonomy_subcategory_id": "...", "confidence": "..."}}
-If relevant but taxonomy is unclear: {{"relevant": true, "enforcement_related": false, "taxonomy_category_id": null, "taxonomy_subcategory_id": null, "confidence": "low"}}
+If relevant but taxonomy is unclear: {{"relevant": true, "enforcement_related": false, "category": "...", "sub_category": null, "taxonomy_category_id": null, "taxonomy_subcategory_id": null, "confidence": "low"}}
 If not relevant: {{"relevant": false, "enforcement_related": false, "taxonomy_category_id": null, "taxonomy_subcategory_id": null, "confidence": "high"}}""".format(
         taxonomy_table=taxonomy.prompt_table(),
         title="{title}",
@@ -226,6 +226,12 @@ class Classifier:
                             sub_category,
                         )
                         sub_category = None
+                if relevant and category == Category.NOT_RELEVANT:
+                    logger.warning(
+                        "Classifier returned relevant=true without a usable taxonomy leaf or legacy category"
+                    )
+                    relevant = False
+                    enforcement_related = False
 
             confidence = data.get("confidence", "medium")
             if confidence not in ("high", "medium", "low"):

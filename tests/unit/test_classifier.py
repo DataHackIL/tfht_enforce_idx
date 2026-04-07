@@ -147,6 +147,43 @@ class TestClassifierParsing:
 
         assert result.confidence == "medium"
 
+    def test_parse_relevant_without_taxonomy_uses_legacy_category(self) -> None:
+        """Relevant null-taxonomy responses should stay internally consistent."""
+        classifier = Classifier(api_key="test-key")
+
+        response = (
+            '{"relevant": true, "enforcement_related": false, '
+            '"category": "prostitution", "sub_category": null, '
+            '"taxonomy_category_id": null, "taxonomy_subcategory_id": null, '
+            '"confidence": "low"}'
+        )
+        result = classifier._parse_response(response)
+
+        assert result.relevant is True
+        assert result.enforcement_related is False
+        assert result.category == Category.PROSTITUTION
+        assert result.sub_category is None
+        assert result.taxonomy_category_id is None
+        assert result.taxonomy_subcategory_id is None
+
+    def test_parse_relevant_without_taxonomy_or_legacy_category_downgrades_to_not_relevant(
+        self,
+    ) -> None:
+        """Relevant=true without either taxonomy ids or a usable coarse category should be rejected."""
+        classifier = Classifier(api_key="test-key")
+
+        response = (
+            '{"relevant": true, "enforcement_related": false, '
+            '"taxonomy_category_id": null, "taxonomy_subcategory_id": null, '
+            '"confidence": "low"}'
+        )
+        result = classifier._parse_response(response)
+
+        assert result.relevant is False
+        assert result.enforcement_related is False
+        assert result.category == Category.NOT_RELEVANT
+        assert result.sub_category is None
+
 
 class TestClassifierRuntime:
     """Tests for classifier runtime behavior."""
@@ -365,6 +402,7 @@ class TestClassificationPromptContent:
     def test_prompt_describes_relevant_non_enforcement_outputs(self) -> None:
         """Prompt should allow topical non-enforcement coverage with a null subcategory."""
         assert "relevant=true, enforcement_related=false" in CLASSIFICATION_PROMPT
+        assert "include the best legacy coarse category in category" in CLASSIFICATION_PROMPT
 
     def test_prompt_excludes_lifestyle_and_profile_stories(self) -> None:
         """Prompt should explicitly exclude the out-of-scope celebrity/profile class."""
