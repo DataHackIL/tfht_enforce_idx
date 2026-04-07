@@ -663,6 +663,42 @@ class TestValidationFinalize:
         assert rows[0]["enforcement_related"] == "False"
         assert rows[0]["sub_category"] == ""
 
+    def test_finalize_validation_set_requires_subcategory_for_enforcement_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Reviewed enforcement-related rows must include a sub-category."""
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "category": "brothel",
+                    "sub_category": "",
+                    "review_status": "reviewed",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        with pytest.raises(ValueError, match="must include a non-empty sub_category"):
+            finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
+
     def test_run_validation_finalize_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The finalize wrapper should forward its arguments to the core function."""
         captured: dict[str, object] = {}
@@ -1051,6 +1087,43 @@ class TestValidationEvaluate:
         assert metrics.enforcement_recall_relevant_only == 0.0
         assert metrics.enforcement_f1_relevant_only == 0.0
         assert metrics.enforcement_accuracy_relevant_only == 0.5
+
+    def test_score_predictions_ignores_enforcement_when_prediction_is_irrelevant(self) -> None:
+        """Irrelevant predictions should not receive enforcement credit."""
+        metrics = _score_predictions(
+            labels=[
+                (True, True, "trafficking", "rescue"),
+            ],
+            predictions=[
+                (False, True, "not_relevant", ""),
+            ],
+            variant=ClassifierVariantSpec(name="baseline"),
+            model="claude-sonnet-4-20250514",
+        )
+
+        assert metrics.fn == 1
+        assert metrics.enforcement_precision_relevant_only == 0.0
+        assert metrics.enforcement_recall_relevant_only == 0.0
+        assert metrics.enforcement_f1_relevant_only == 0.0
+        assert metrics.enforcement_accuracy_relevant_only == 0.0
+
+    def test_score_predictions_counts_enforcement_false_positive_on_relevant_rows(self) -> None:
+        """Predicted enforcement should count as FP on relevant rows when gold is non-enforcement."""
+        metrics = _score_predictions(
+            labels=[
+                (True, False, "prostitution", ""),
+            ],
+            predictions=[
+                (True, True, "prostitution", ""),
+            ],
+            variant=ClassifierVariantSpec(name="baseline"),
+            model="claude-sonnet-4-20250514",
+        )
+
+        assert metrics.enforcement_precision_relevant_only == 0.0
+        assert metrics.enforcement_recall_relevant_only == 0.0
+        assert metrics.enforcement_f1_relevant_only == 0.0
+        assert metrics.enforcement_accuracy_relevant_only == 0.0
 
     def test_run_validation_evaluate_delegates(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

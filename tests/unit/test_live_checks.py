@@ -350,7 +350,8 @@ class TestLiveChecks:
         assert (output_dir / "artifacts" / "walla-live.candidates.json").exists()
 
     def test_gitignore_includes_live_checks_directory(self) -> None:
-        gitignore = Path(".gitignore").read_text(encoding="utf-8")
+        repo_root = _find_repo_root(Path(__file__).resolve().parent)
+        gitignore = (repo_root / ".gitignore").read_text(encoding="utf-8")
         assert ".live_checks/" in gitignore
 
     def test_helper_paths_and_datetime_normalization(self, tmp_path: Path) -> None:
@@ -503,6 +504,7 @@ class TestLiveChecks:
             ),
             match_url="https://example.com/article?x=1",
             artifact_capture_url="https://example.com/raw",
+            artifact_filename="../escaped.html",
         )
 
         result = await __import__(
@@ -517,7 +519,65 @@ class TestLiveChecks:
 
         assert result.passed is True
         assert len(result.artifact_paths) == 2
-        assert any(path.endswith(".html") for path in result.artifact_paths)
+        assert any(path.endswith("/escaped.html") for path in result.artifact_paths)
+        assert not any(".." in path for path in result.artifact_paths)
+
+    @pytest.mark.asyncio
+    async def test_live_source_artifact_filename_falls_back_for_dot_segments(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        class FakeResponse:
+            text = "<html>ok</html>"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class FakeClient:
+            async def __aenter__(self) -> FakeClient:
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            async def get(self, target_url: str) -> FakeResponse:
+                assert target_url == "https://example.com/raw"
+                return FakeResponse()
+
+        monkeypatch.setattr("denbust.live_checks.runner.httpx.AsyncClient", lambda **_: FakeClient())
+
+        case = LiveSourceArticleCaseConfig(
+            id="live-dot",
+            type="live_source_article",
+            source_name="walla",
+            expected=ExpectedClassification(
+                relevant=True,
+                enforcement_related=True,
+                category="brothel",
+                sub_category="closure",
+            ),
+            match_title_contains="בית בושת",
+            artifact_capture_url="https://example.com/raw",
+            artifact_filename="..",
+        )
+        article = RawArticle(
+            url=HttpUrl("https://example.com/live"),
+            title="פשיטה על בית בושת",
+            snippet="המשטרה פשטה",
+            date=datetime(2026, 4, 7, tzinfo=UTC),
+            source_name="walla",
+        )
+
+        result = await __import__("denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"])._execute_live_source_article_case(  # type: ignore[attr-defined]
+            case,
+            classifier=FakeClassifier(_build_matching_classification()),
+            sources_by_name={"walla": FakeSource("walla", [article])},
+            artifacts_dir=tmp_path,
+            runtime_config=Config(keywords=["זנות"]),
+        )
+
+        assert any(path.endswith("/live-dot.html") for path in result.artifact_paths)
 
     @pytest.mark.asyncio
     async def test_live_source_case_failure_branches(

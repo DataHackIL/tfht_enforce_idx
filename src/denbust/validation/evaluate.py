@@ -97,6 +97,8 @@ def _score_predictions(
         predicted_category,
         predicted_sub_category,
     ) in zip(labels, predictions, strict=True):
+        predicted_enforcement_related = predicted_relevant and predicted_enforcement_related
+
         if true_relevant and predicted_relevant:
             tp += 1
         elif not true_relevant and predicted_relevant:

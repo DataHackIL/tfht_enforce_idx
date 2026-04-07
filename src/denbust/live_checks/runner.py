@@ -380,9 +380,12 @@ async def _execute_live_source_article_case(
 
     if case.artifact_capture_url is not None:
         filename = case.artifact_filename or f"{case.id}.html"
+        sanitized_filename = Path(filename).name
+        if sanitized_filename in {"", ".", ".."}:
+            sanitized_filename = f"{case.id}.html"
         captured_path = await _capture_live_source_payload(
             target_url=case.artifact_capture_url,
-            artifact_path=artifacts_dir / filename,
+            artifact_path=artifacts_dir / sanitized_filename,
         )
         artifact_paths.append(captured_path)
 

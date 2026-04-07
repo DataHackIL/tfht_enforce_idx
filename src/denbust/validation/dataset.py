@@ -95,6 +95,10 @@ def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Val
                 raise ValueError(
                     f"Invalid sub_category '{sub_category.value}' for category '{category.value}'"
                 )
+        elif enforcement_related:
+            raise ValueError(
+                "Reviewed enforcement-related rows must include a non-empty sub_category"
+            )
     else:
         category = Category.NOT_RELEVANT
         enforcement_related = False
