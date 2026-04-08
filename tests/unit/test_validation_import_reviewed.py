@@ -358,5 +358,8 @@ def test_import_reviewed_table_generic_adapter_rejects_invalid_reviewed_labels(
 
     assert result.imported_rows == 0
     assert result.skipped_rows == 2
-    assert any("index_relevant does not match the packaged taxonomy" in warning for warning in result.warnings)
+    assert any(
+        "index_relevant does not match the packaged taxonomy" in warning
+        for warning in result.warnings
+    )
     assert any("title is required" in warning for warning in result.warnings)
