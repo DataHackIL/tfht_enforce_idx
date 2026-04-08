@@ -264,7 +264,9 @@ def test_import_missing_news_items_csv_uses_canonical_url_for_default_annotation
     assert annotations[0].annotation_id == annotations[1].annotation_id
 
 
-def test_parse_annotation_rows_logs_warning_for_invalid_payload(caplog: pytest.LogCaptureFixture) -> None:
+def test_parse_annotation_rows_logs_warning_for_invalid_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level("WARNING")
 
     rows = parse_news_item_corrections([{"summary_one_sentence": "missing identity"}])

@@ -421,9 +421,7 @@ def _normalize_missing_item_row(row: dict[str, str | None]) -> dict[str, Any]:
     source_url = _string_value(normalized, "source_url", "url")
     if not source_url:
         raise ValueError("source_url is required")
-    canonical_url = canonicalize_news_url(
-        _string_value(normalized, "canonical_url") or source_url
-    )
+    canonical_url = canonicalize_news_url(_string_value(normalized, "canonical_url") or source_url)
     return {
         "annotation_id": _string_value(normalized, "annotation_id", "id")
         or build_news_item_id(canonical_url),
