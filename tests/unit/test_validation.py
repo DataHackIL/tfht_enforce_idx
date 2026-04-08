@@ -23,7 +23,6 @@ from denbust.validation.collect import (
     select_promising_candidates,
 )
 from denbust.validation.common import (
-    DEFAULT_VALIDATION_SET_PATH,
     DRAFT_COLUMNS,
     VALIDATION_SET_COLUMNS,
     canonicalize_csv_url,
@@ -824,6 +823,206 @@ class TestValidationFinalize:
 
         assert rows[0]["taxonomy_version"] == "1"
 
+    def test_finalize_validation_set_persists_expected_fields_and_annotation_source(
+        self, tmp_path: Path
+    ) -> None:
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_index_relevant": "True",
+                    "suggested_taxonomy_version": "1",
+                    "suggested_taxonomy_category_id": "brothels",
+                    "suggested_taxonomy_subcategory_id": "administrative_closure",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "closure",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": "True",
+                    "taxonomy_version": "1",
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "administrative_closure",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_source": "  manual table  ",
+                    "expected_month_bucket": " 2026-03 ",
+                    "expected_city": " תל אביב ",
+                    "expected_status": " closed ",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        result = finalize_validation_set(
+            input_path=draft_path, validation_set_path=tmp_path / "out.csv"
+        )
+        rows = read_csv_rows(result.validation_set_path)
+
+        assert rows[0]["annotation_source"] == "manual table"
+        assert rows[0]["expected_month_bucket"] == "2026-03"
+        assert rows[0]["expected_city"] == "תל אביב"
+        assert rows[0]["expected_status"] == "closed"
+
+    def test_finalize_validation_set_accepts_blank_expected_fields(self, tmp_path: Path) -> None:
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "False",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "False",
+                    "category": "brothel",
+                    "sub_category": "",
+                    "review_status": "reviewed",
+                    "annotation_source": " ",
+                    "expected_month_bucket": " ",
+                    "expected_city": " ",
+                    "expected_status": " ",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        result = finalize_validation_set(
+            input_path=draft_path, validation_set_path=tmp_path / "out.csv"
+        )
+        rows = read_csv_rows(result.validation_set_path)
+
+        assert rows[0]["annotation_source"] == ""
+        assert rows[0]["expected_month_bucket"] == ""
+        assert rows[0]["expected_city"] == ""
+        assert rows[0]["expected_status"] == ""
+
+    def test_finalize_validation_set_round_trips_legacy_and_newer_rows(
+        self, tmp_path: Path
+    ) -> None:
+        validation_set_path = tmp_path / "classifier_validation.csv"
+        write_csv_rows(
+            validation_set_path,
+            [
+                "source_name",
+                "article_date",
+                "url",
+                "canonical_url",
+                "title",
+                "snippet",
+                "relevant",
+                "enforcement_related",
+                "category",
+                "sub_category",
+                "review_status",
+                "annotation_notes",
+                "collected_at",
+                "finalized_at",
+                "draft_source",
+            ],
+            [
+                {
+                    "source_name": "ynet",
+                    "article_date": "2026-03-01T00:00:00+00:00",
+                    "url": "https://example.com/a",
+                    "canonical_url": "https://example.com/a",
+                    "title": "legacy row",
+                    "snippet": "legacy snippet",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-01T00:00:00+00:00",
+                    "finalized_at": "2026-03-02T00:00:00+00:00",
+                    "draft_source": "legacy.csv",
+                }
+            ],
+        )
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "new row",
+                    "snippet": "new snippet",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_index_relevant": "True",
+                    "suggested_taxonomy_version": "1",
+                    "suggested_taxonomy_category_id": "brothels",
+                    "suggested_taxonomy_subcategory_id": "administrative_closure",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "closure",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": "True",
+                    "taxonomy_version": "1",
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "administrative_closure",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_source": "manual table",
+                    "expected_month_bucket": "2026-03",
+                    "expected_city": "חיפה",
+                    "expected_status": "closed",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        result = finalize_validation_set(
+            input_path=draft_path,
+            validation_set_path=validation_set_path,
+        )
+        rows = read_csv_rows(result.validation_set_path)
+
+        assert result.total_rows == 2
+        rows_by_source = {row["source_name"]: row for row in rows}
+        assert rows_by_source["ynet"]["expected_month_bucket"] == ""
+        assert rows_by_source["ynet"]["expected_city"] == ""
+        assert rows_by_source["ynet"]["expected_status"] == ""
+        assert rows_by_source["mako"]["taxonomy_category_id"] == "brothels"
+        assert rows_by_source["mako"]["taxonomy_subcategory_id"] == "administrative_closure"
+        assert rows_by_source["mako"]["expected_month_bucket"] == "2026-03"
+        assert rows_by_source["mako"]["expected_city"] == "חיפה"
+        assert rows_by_source["mako"]["expected_status"] == "closed"
+
     def test_run_validation_finalize_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The finalize wrapper should forward its arguments to the core function."""
         captured: dict[str, object] = {}
@@ -955,6 +1154,51 @@ class TestValidationEvaluate:
 
         assert labels == [(True, False, "brothel", "closure")]
 
+    def test_load_validation_examples_accepts_expanded_schema_rows(self, tmp_path: Path) -> None:
+        validation_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                {
+                    "source_name": "ynet",
+                    "article_date": "2026-03-01T00:00:00+00:00",
+                    "url": "https://example.com/a",
+                    "canonical_url": "https://example.com/a",
+                    "title": "title a",
+                    "snippet": "snippet a",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": "True",
+                    "taxonomy_version": "1",
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "administrative_closure",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_source": "manual table",
+                    "expected_month_bucket": "2026-03",
+                    "expected_city": "חיפה",
+                    "expected_status": "closed",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-01T00:00:00+00:00",
+                    "finalized_at": "2026-03-02T00:00:00+00:00",
+                    "draft_source": "draft.csv",
+                }
+            ],
+        )
+
+        _articles, labels = _load_validation_examples(validation_path)
+
+        assert labels[0].index_relevant is True
+        assert labels[0].taxonomy_version == "1"
+        assert labels[0].taxonomy_category_id == "brothels"
+        assert labels[0].taxonomy_subcategory_id == "administrative_closure"
+
     @pytest.mark.asyncio
     async def test_evaluate_classifier_variants_requires_api_key(self, tmp_path: Path) -> None:
         """Evaluation should fail fast without Anthropic credentials."""
@@ -1003,52 +1247,69 @@ class TestValidationEvaluate:
     ) -> None:
         """Variants should rank by relevance F1 before category/sub-category metrics."""
         validation_set_path = tmp_path / "validation.csv"
-        header = DEFAULT_VALIDATION_SET_PATH.read_text(encoding="utf-8").splitlines()[0]
-        validation_set_path.write_text(
-            "\n".join(
-                [
-                    header,
-                    ",".join(
-                        [
-                            "ynet",
-                            "2026-03-01T00:00:00+00:00",
-                            "https://example.com/a",
-                            "https://example.com/a",
-                            "title a",
-                            "snippet a",
-                            "True",
-                            "True",
-                            "brothel",
-                            "closure",
-                            "reviewed",
-                            "",
-                            "2026-03-01T00:00:00+00:00",
-                            "2026-03-02T00:00:00+00:00",
-                            "draft.csv",
-                        ]
-                    ),
-                    ",".join(
-                        [
-                            "mako",
-                            "2026-03-02T00:00:00+00:00",
-                            "https://example.com/b",
-                            "https://example.com/b",
-                            "title b",
-                            "snippet b",
-                            "False",
-                            "False",
-                            "not_relevant",
-                            "",
-                            "reviewed",
-                            "",
-                            "2026-03-02T00:00:00+00:00",
-                            "2026-03-03T00:00:00+00:00",
-                            "draft.csv",
-                        ]
-                    ),
-                ]
-            ),
-            encoding="utf-8",
+        write_csv_rows(
+            validation_set_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                {
+                    "source_name": "ynet",
+                    "article_date": "2026-03-01T00:00:00+00:00",
+                    "url": "https://example.com/a",
+                    "canonical_url": "https://example.com/a",
+                    "title": "title a",
+                    "snippet": "snippet a",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": "False",
+                    "taxonomy_version": "",
+                    "taxonomy_category_id": "",
+                    "taxonomy_subcategory_id": "",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_source": "",
+                    "expected_month_bucket": "",
+                    "expected_city": "",
+                    "expected_status": "",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-01T00:00:00+00:00",
+                    "finalized_at": "2026-03-02T00:00:00+00:00",
+                    "draft_source": "draft.csv",
+                },
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-02T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "relevant": "False",
+                    "enforcement_related": "False",
+                    "index_relevant": "False",
+                    "taxonomy_version": "",
+                    "taxonomy_category_id": "",
+                    "taxonomy_subcategory_id": "",
+                    "category": "not_relevant",
+                    "sub_category": "",
+                    "review_status": "reviewed",
+                    "annotation_source": "",
+                    "expected_month_bucket": "",
+                    "expected_city": "",
+                    "expected_status": "",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-02T00:00:00+00:00",
+                    "finalized_at": "2026-03-03T00:00:00+00:00",
+                    "draft_source": "draft.csv",
+                },
+            ],
         )
         variants_path = tmp_path / "variants.yaml"
         variants_path.write_text(
