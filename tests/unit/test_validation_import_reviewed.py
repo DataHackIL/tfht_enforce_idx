@@ -308,13 +308,21 @@ def test_import_reviewed_table_normalizes_generic_reviewed_examples_xlsx(tmp_pat
     sheet["B2"] = "כותרת"
     sheet["C2"] = "תקציר"
     sheet["D2"] = "2026-04-03T00:00:00+00:00"
-    sheet["E2"] = "True"
-    sheet["F2"] = "True"
-    sheet["G2"] = "True"
+    sheet["E2"] = True
+    sheet["F2"] = True
+    sheet["G2"] = True
     sheet["H2"] = "brothels"
     sheet["I2"] = "administrative_closure"
     sheet["J2"] = "brothel"
     sheet["K2"] = "closure"
+    sheet["A3"] = "https://example.com/xlsx-false"
+    sheet["B3"] = "כותרת שלילית"
+    sheet["C3"] = "תקציר שלילי"
+    sheet["D3"] = "2026-04-04T00:00:00+00:00"
+    sheet["E3"] = False
+    sheet["F3"] = False
+    sheet["G3"] = False
+    sheet["J3"] = "not_relevant"
     workbook_path = tmp_path / "reviewed_examples.xlsx"
     workbook.save(workbook_path)
 
@@ -324,9 +332,14 @@ def test_import_reviewed_table_normalizes_generic_reviewed_examples_xlsx(tmp_pat
     )
 
     rows = read_csv_rows(result.output_path)
-    assert result.imported_rows == 1
+    assert result.imported_rows == 2
     assert rows[0]["canonical_url"] == "https://example.com/xlsx"
     assert rows[0]["source_name"] == "example"
+    assert rows[1]["canonical_url"] == "https://example.com/xlsx-false"
+    assert rows[1]["relevant"] == "False"
+    assert rows[1]["enforcement_related"] == "False"
+    assert rows[1]["index_relevant"] == "False"
+    assert rows[1]["category"] == "not_relevant"
 
 
 def test_import_reviewed_table_generic_adapter_rejects_invalid_reviewed_labels(

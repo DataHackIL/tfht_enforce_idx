@@ -102,7 +102,7 @@ def _parse_existing_validation_row(raw_row: dict[str, str]) -> ValidationSetRow:
     )
 
 
-def _validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> ValidationSetRow:
+def validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> ValidationSetRow:
     taxonomy = default_taxonomy()
     relevant = parse_bool(raw_row["relevant"])
     enforcement_related = parse_bool(raw_row.get("enforcement_related", "False") or "False")
@@ -213,7 +213,7 @@ def finalize_validation_set(
     added_rows: list[ValidationSetRow] = []
     skipped_duplicates = 0
     for raw_row in reviewed_rows:
-        validated = _validate_reviewed_row(raw_row, draft_source=str(input_path))
+        validated = validate_reviewed_row(raw_row, draft_source=str(input_path))
         key = (validated.source_name, validated.canonical_url)
         if key in existing_keys:
             skipped_duplicates += 1

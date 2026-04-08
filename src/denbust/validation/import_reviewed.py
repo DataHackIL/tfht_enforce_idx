@@ -6,13 +6,14 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.taxonomy import default_taxonomy
 from denbust.validation.collect import serialize_draft_rows
 from denbust.validation.common import DRAFT_COLUMNS, write_csv_rows
-from denbust.validation.dataset import _validate_reviewed_row
+from denbust.validation.dataset import validate_reviewed_row
 from denbust.validation.models import ValidationDraftRow
 
 TFHT_MANUAL_TRACKING_V1 = "tfht_manual_tracking_v1"
@@ -118,7 +119,9 @@ def _infer_taxonomy_leaf(
 
 def _normalize_headers(row: dict[str, object]) -> dict[str, str]:
     return {
-        re.sub(r"[^a-z0-9]+", "_", str(key).strip().casefold()).strip("_"): str(value or "").strip()
+        re.sub(r"[^a-z0-9]+", "_", str(key).strip().casefold()).strip("_"): (
+            "" if value is None else str(value).strip()
+        )
         for key, value in row.items()
         if key is not None
     }
@@ -132,6 +135,18 @@ def _string_value(normalized: dict[str, str], *keys: str) -> str:
     return ""
 
 
+def _load_workbook(input_path: Path) -> Any:
+    from openpyxl import load_workbook  # type: ignore[import-untyped]
+
+    return load_workbook(input_path, data_only=True)
+
+
+def _load_workbook_values(input_path: Path) -> list[tuple[object, ...]]:
+    workbook = _load_workbook(input_path)
+    sheet = workbook.active
+    return list(sheet.iter_rows(values_only=True))
+
+
 def _read_tabular_rows(input_path: Path) -> list[dict[str, object]]:
     suffix = input_path.suffix.casefold()
     if suffix == ".csv":
@@ -142,11 +157,7 @@ def _read_tabular_rows(input_path: Path) -> list[dict[str, object]]:
             return [dict(row) for row in reader]
 
     if suffix in {".xlsx", ".xlsm"}:
-        from openpyxl import load_workbook  # type: ignore[import-untyped]
-
-        workbook = load_workbook(input_path, data_only=True)
-        sheet = workbook.active
-        rows = list(sheet.iter_rows(values_only=True))
+        rows = _load_workbook_values(input_path)
         if not rows:
             return []
         headers = [str(value or "").strip() for value in rows[0]]
@@ -254,15 +265,13 @@ def _normalize_reviewed_examples_row(
         "annotation_notes": _string_value(normalized, "annotation_notes", "notes"),
         "collected_at": _string_value(normalized, "collected_at") or collected_at.isoformat(),
     }
-    _validate_reviewed_row(draft_row, draft_source="reviewed_examples_import")
+    validate_reviewed_row(draft_row, draft_source="reviewed_examples_import")
     return draft_row
 
 
 def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], list[str]]:
-    from openpyxl import load_workbook
-
     taxonomy = default_taxonomy()
-    workbook = load_workbook(input_path, data_only=True)
+    workbook = _load_workbook(input_path)
     if "מדד האכיפה" not in workbook.sheetnames:
         raise ValueError("Workbook is missing the 'מדד האכיפה' sheet")
     sheet = workbook["מדד האכיפה"]
