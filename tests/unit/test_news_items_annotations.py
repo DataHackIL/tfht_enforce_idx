@@ -16,6 +16,7 @@ from denbust.news_items.annotations import (
     apply_manual_annotations,
     import_missing_news_items_csv,
     import_news_item_corrections_csv,
+    parse_news_item_corrections,
 )
 from denbust.news_items.ingest import build_operational_records
 from denbust.news_items.models import NewsItemEnrichment, NewsItemOperationalRecord
@@ -240,6 +241,38 @@ def test_import_missing_news_items_csv_requires_valid_taxonomy(tmp_path: Path) -
     assert len(warnings) == 1
 
 
+def test_import_missing_news_items_csv_uses_canonical_url_for_default_annotation_id(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "missing_tracking.csv"
+    input_path.write_text(
+        "\n".join(
+            [
+                "Source URL,Title,Event Date,Source Name,TFHT Category ID,TFHT Subcategory ID",
+                "https://example.com/item?utm_source=one,כתבה,2026-04-01T00:00:00Z,ynet,brothels,administrative_closure",
+                "https://example.com/item?utm_source=two,כתבה,2026-04-01T00:00:00Z,ynet,brothels,administrative_closure",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    annotations, warnings = import_missing_news_items_csv(input_path)
+
+    assert warnings == []
+    assert len(annotations) == 2
+    assert annotations[0].canonical_url == annotations[1].canonical_url
+    assert annotations[0].annotation_id == annotations[1].annotation_id
+
+
+def test_parse_annotation_rows_logs_warning_for_invalid_payload(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("WARNING")
+
+    rows = parse_news_item_corrections([{"summary_one_sentence": "missing identity"}])
+
+    assert rows == []
+    assert "Skipping invalid annotation row" in caplog.text
+
+
 def test_supabase_store_supports_corrections_and_missing_item_tables() -> None:
     class FakeResponse:
         def __init__(self, payload: object) -> None:
@@ -283,8 +316,71 @@ def test_supabase_store_supports_corrections_and_missing_item_tables() -> None:
     assert missing_items == [{"annotation_id": "missing-1"}]
     correction_call = client.calls[0]
     missing_call = client.calls[1]
-    assert correction_call["params"] == {"on_conflict": "dataset_name,record_id,canonical_url"}
+    assert correction_call["params"] == {"on_conflict": "dataset_name,record_id"}
     assert missing_call["params"] == {"on_conflict": "dataset_name,annotation_id"}
+
+
+def test_supabase_store_splits_correction_upserts_by_stable_key() -> None:
+    class FakeResponse:
+        def __init__(self) -> None:
+            pass
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> object:
+            return []
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def request(self, method: str, url: str, **kwargs: object) -> FakeResponse:
+            self.calls.append({"method": method, "url": url, **kwargs})
+            return FakeResponse()
+
+        def close(self) -> None:
+            return None
+
+    client = FakeClient()
+    store = SupabaseOperationalStore(
+        base_url="https://example.supabase.co",
+        service_role_key="secret",
+        config=Config(operational={"provider": "supabase"}).operational,
+        client=client,
+    )
+
+    store.upsert_news_item_corrections(
+        "news_items",
+        [
+            {"record_id": "row-1", "summary_one_sentence": "by id"},
+            {"canonical_url": "https://example.com/item", "summary_one_sentence": "by url"},
+        ],
+    )
+
+    assert len(client.calls) == 2
+    assert client.calls[0]["params"] == {"on_conflict": "dataset_name,record_id"}
+    assert client.calls[1]["params"] == {"on_conflict": "dataset_name,canonical_url"}
+
+
+def test_supabase_store_rejects_correction_without_stable_key() -> None:
+    class FakeClient:
+        def request(self, method: str, url: str, **kwargs: object) -> object:
+            del method, url, kwargs
+            raise AssertionError("request should not be called")
+
+        def close(self) -> None:
+            return None
+
+    store = SupabaseOperationalStore(
+        base_url="https://example.supabase.co",
+        service_role_key="secret",
+        config=Config(operational={"provider": "supabase"}).operational,
+        client=FakeClient(),
+    )
+
+    with pytest.raises(ValueError, match="non-empty record_id or canonical_url"):
+        store.upsert_news_item_corrections("news_items", [{"annotation_notes": "missing key"}])
 
 
 def test_supabase_store_returns_empty_lists_for_non_list_annotation_payloads() -> None:

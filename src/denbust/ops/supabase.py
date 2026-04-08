@@ -125,12 +125,25 @@ class SupabaseOperationalStore(OperationalStore):
     ) -> None:
         if not records:
             return
-        self._request(
-            "POST",
-            f"/rest/v1/{self._config.news_items_corrections_table}",
-            params={"on_conflict": "dataset_name,record_id,canonical_url"},
-            json=[{"dataset_name": dataset_name, **dict(record)} for record in records],
-            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        record_id_records: list[Mapping[str, Any]] = []
+        canonical_url_records: list[Mapping[str, Any]] = []
+        for record in records:
+            if self._has_non_empty_value(record, "record_id"):
+                record_id_records.append(record)
+                continue
+            if self._has_non_empty_value(record, "canonical_url"):
+                canonical_url_records.append(record)
+                continue
+            raise ValueError("news item correction requires a non-empty record_id or canonical_url")
+        self._upsert_news_item_corrections_batch(
+            dataset_name,
+            record_id_records,
+            conflict_target="dataset_name,record_id",
+        )
+        self._upsert_news_item_corrections_batch(
+            dataset_name,
+            canonical_url_records,
+            conflict_target="dataset_name,canonical_url",
         )
 
     def upsert_missing_news_items(
@@ -144,6 +157,31 @@ class SupabaseOperationalStore(OperationalStore):
             "POST",
             f"/rest/v1/{self._config.news_items_missing_items_table}",
             params={"on_conflict": "dataset_name,annotation_id"},
+            json=[{"dataset_name": dataset_name, **dict(record)} for record in records],
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+
+    def _has_non_empty_value(self, record: Mapping[str, Any], key: str) -> bool:
+        value = record.get(key)
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
+    def _upsert_news_item_corrections_batch(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+        *,
+        conflict_target: str,
+    ) -> None:
+        if not records:
+            return
+        self._request(
+            "POST",
+            f"/rest/v1/{self._config.news_items_corrections_table}",
+            params={"on_conflict": conflict_target},
             json=[{"dataset_name": dataset_name, **dict(record)} for record in records],
             extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ _CSV_TRUE_VALUES = {"1", "true", "yes", "y", "on"}
 _CSV_FALSE_VALUES = {"0", "false", "no", "n", "off"}
 _ModelType = TypeVar("_ModelType", bound=BaseModel)
 _EnumType = TypeVar("_EnumType", bound=StrEnum)
+logger = logging.getLogger(__name__)
 
 
 class MissingItemPromotionStatus(StrEnum):
@@ -306,8 +308,8 @@ def _validated_rows(
     for row in rows:
         try:
             validated.append(model_type.model_validate(row))
-        except Exception:
-            continue
+        except Exception as exc:
+            logger.warning("Skipping invalid annotation row %s: %s", row, exc)
     return validated
 
 
@@ -419,11 +421,14 @@ def _normalize_missing_item_row(row: dict[str, str | None]) -> dict[str, Any]:
     source_url = _string_value(normalized, "source_url", "url")
     if not source_url:
         raise ValueError("source_url is required")
+    canonical_url = canonicalize_news_url(
+        _string_value(normalized, "canonical_url") or source_url
+    )
     return {
         "annotation_id": _string_value(normalized, "annotation_id", "id")
-        or build_news_item_id(source_url),
+        or build_news_item_id(canonical_url),
         "source_url": source_url,
-        "canonical_url": _string_value(normalized, "canonical_url"),
+        "canonical_url": canonical_url,
         "title": _string_value(normalized, "title"),
         "event_date": _required_datetime(
             normalized,
