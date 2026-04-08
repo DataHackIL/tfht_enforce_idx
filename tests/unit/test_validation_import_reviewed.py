@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook
 
 from denbust.validation.common import read_csv_rows
-from denbust.validation.import_reviewed import TFHT_MANUAL_TRACKING_V1, import_reviewed_table
+from denbust.validation.import_reviewed import (
+    TFHT_MANUAL_TRACKING_V1,
+    _default_output_path,
+    _infer_city,
+    _infer_taxonomy_leaf,
+    _parse_day,
+    _source_name_for_url,
+    import_reviewed_table,
+)
 
 
 def _build_manual_tracking_workbook(path: Path) -> None:
@@ -92,3 +101,137 @@ def test_import_reviewed_table_rejects_unknown_format(tmp_path: Path) -> None:
         assert "Unsupported reviewed-table format" in str(error)
     else:
         raise AssertionError("Expected unsupported format to raise ValueError")
+
+
+def test_import_reviewed_table_rejects_missing_file(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.xlsx"
+
+    with pytest.raises(FileNotFoundError, match="Reviewed table not found"):
+        import_reviewed_table(input_path=missing, format_name=TFHT_MANUAL_TRACKING_V1)
+
+
+def test_helper_functions_cover_parsing_and_taxonomy_inference() -> None:
+    assert _default_output_path(Path("/tmp/manual.xlsx"), TFHT_MANUAL_TRACKING_V1).name == (
+        "manual_tfht_manual_tracking_v1_draft.csv"
+    )
+    assert _source_name_for_url("https://www.maariv.co.il/news/law/article-1") == "maariv"
+    assert _infer_city("רחוב ביאליק 1, אשקלון") == "אשקלון"
+    assert _infer_city("") == ""
+
+    assert _parse_day(None) is None
+    assert _parse_day("") is None
+    assert _parse_day(8) == 8
+    assert _parse_day(8.0) == 8
+    assert _parse_day("  ") is None
+    assert _parse_day("12/03") == 12
+    assert _parse_day("יום שני") is None
+
+    assert _infer_taxonomy_leaf("ערעור על צו", "", "") == ("brothels", "closure_appeal")
+    assert _infer_taxonomy_leaf("סגירה מנהלית", "", "") == (
+        "brothels",
+        "administrative_closure",
+    )
+    assert _infer_taxonomy_leaf("סחר בבני אדם", "עבדות", "") == (
+        "human_trafficking",
+        "trafficking_slavery_conditions",
+    )
+    assert _infer_taxonomy_leaf('סחר בבני אדם', 'נשים מברזיל הוסגר', '') == (
+        "human_trafficking",
+        "trafficking_cross_border_prostitution",
+    )
+    assert _infer_taxonomy_leaf("סחר בנשים", "", "") == ("human_trafficking", "trafficking_women")
+    assert _infer_taxonomy_leaf("סחר בבני אדם", "", "") == (
+        "human_trafficking",
+        "trafficking_sexual_exploitation",
+    )
+    assert _infer_taxonomy_leaf("כתב אישום", "בית בושת", "") == (
+        "brothels",
+        "brothel_indictment",
+    )
+    assert _infer_taxonomy_leaf("קנס לזנאי", "", "") == ("brothels", "client_fine")
+    assert _infer_taxonomy_leaf("שידול לזנות", "", "") == (
+        "pimping_prostitution",
+        "soliciting_prostitution",
+    )
+    assert _infer_taxonomy_leaf("הבאת אדם לידי זנות", "", "") == (
+        "pimping_prostitution",
+        "bringing_into_prostitution",
+    )
+    assert _infer_taxonomy_leaf("סרסרות", "", "") == ("pimping_prostitution", "pimping")
+    assert _infer_taxonomy_leaf("זנות מקוונת", "", "") == (
+        "pimping_prostitution",
+        "online_prostitution",
+    )
+    assert _infer_taxonomy_leaf("השכרת מקום", "", "") == ("brothels", "renting_brothel")
+    assert _infer_taxonomy_leaf("פרסום", "זנות", "") == ("brothels", "advertising_prostitution")
+    assert _infer_taxonomy_leaf("דירה דיסקרטית", "", "") == ("brothels", "keeping_brothel")
+    assert _infer_taxonomy_leaf("מעצר חשודה", "אין מידע מספק", "") is None
+
+
+def test_import_reviewed_table_rejects_missing_sheet(tmp_path: Path) -> None:
+    workbook = Workbook()
+    workbook.active.title = "not-it"
+    workbook_path = tmp_path / "missing_sheet.xlsx"
+    workbook.save(workbook_path)
+
+    with pytest.raises(ValueError, match="missing the 'מדד האכיפה' sheet"):
+        import_reviewed_table(input_path=workbook_path, format_name=TFHT_MANUAL_TRACKING_V1)
+
+
+def test_import_reviewed_table_rejects_missing_year(tmp_path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "מדד האכיפה"
+    sheet["B3"] = "ינואר"
+    sheet["B4"] = "תאריך"
+    workbook_path = tmp_path / "missing_year.xlsx"
+    workbook.save(workbook_path)
+
+    with pytest.raises(ValueError, match="Could not determine year"):
+        import_reviewed_table(input_path=workbook_path, format_name=TFHT_MANUAL_TRACKING_V1)
+
+
+def test_import_reviewed_table_skips_rows_for_missing_url_bad_taxonomy_and_bad_date(
+    tmp_path: Path,
+) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "מדד האכיפה"
+    sheet["B2"] = 2026
+    sheet["B3"] = "ינואר"
+    for index, value in enumerate(
+        ["תאריך", "כתובת", "אירוע", "פרטים רלוונטיים", "סטטוס", "מקור מידע"], start=2
+    ):
+        sheet.cell(4, index, value)
+
+    sheet["B5"] = 1
+    sheet["C5"] = "תל אביב"
+    sheet["D5"] = "סרסרות"
+    sheet["E5"] = "פרטים"
+    sheet["F5"] = ""
+    sheet["G5"] = ""
+
+    sheet["B6"] = 2
+    sheet["C6"] = "ירושלים"
+    sheet["D6"] = "מעצר חשודה"
+    sheet["E6"] = "אין מידע מספק"
+    sheet["F6"] = ""
+    sheet["G6"] = "https://example.com/a"
+
+    sheet["B7"] = "יום שני"
+    sheet["C7"] = "חיפה"
+    sheet["D7"] = "סרסרות"
+    sheet["E7"] = "פרטים"
+    sheet["F7"] = ""
+    sheet["G7"] = "https://example.com/b"
+
+    workbook_path = tmp_path / "skips.xlsx"
+    workbook.save(workbook_path)
+
+    result = import_reviewed_table(input_path=workbook_path, format_name=TFHT_MANUAL_TRACKING_V1)
+
+    assert result.imported_rows == 0
+    assert result.skipped_rows == 3
+    assert any("no source URL was found" in warning for warning in result.warnings)
+    assert any("taxonomy inference failed" in warning for warning in result.warnings)
+    assert any("date parsing failed" in warning for warning in result.warnings)

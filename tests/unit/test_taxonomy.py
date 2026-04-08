@@ -1,8 +1,16 @@
 """Unit tests for packaged TFHT taxonomy assets."""
 
+import pytest
+
 from denbust.classifier.relevance import Classifier
 from denbust.data_models import Category, SubCategory
-from denbust.taxonomy import default_taxonomy, taxonomy_examples_csv_text
+from denbust.taxonomy import (
+    CategoryDefinition,
+    SubcategoryDefinition,
+    TaxonomyDefinition,
+    default_taxonomy,
+    taxonomy_examples_csv_text,
+)
 
 
 def test_default_taxonomy_contains_expected_index_relevant_flags() -> None:
@@ -60,3 +68,63 @@ def test_classifier_rejects_invalid_taxonomy_pair() -> None:
     assert result.taxonomy_category_id is None
     assert result.taxonomy_subcategory_id is None
     assert result.category == Category.NOT_RELEVANT
+
+
+def test_taxonomy_lookup_errors_and_prompt_table() -> None:
+    taxonomy = default_taxonomy()
+
+    with pytest.raises(KeyError, match="Unknown taxonomy category"):
+        taxonomy.category("missing")
+    with pytest.raises(KeyError, match="Unknown taxonomy subcategory"):
+        taxonomy.subcategory("brothels", "missing")
+
+    prompt_table = taxonomy.prompt_table()
+    assert "- brothels (בתי בושת) -> " in prompt_table
+    assert "administrative_closure" in prompt_table
+    assert "closure_appeal" in prompt_table
+
+
+def test_taxonomy_validate_unique_ids_rejects_duplicates() -> None:
+    duplicate_category = TaxonomyDefinition(
+        version="1",
+        categories=[
+            CategoryDefinition(id="dup", label_he="א", subcategories=[]),
+            CategoryDefinition(id="dup", label_he="ב", subcategories=[]),
+        ],
+    )
+    with pytest.raises(ValueError, match="duplicate category ids"):
+        duplicate_category.validate_unique_ids()
+
+    duplicate_subcategory = TaxonomyDefinition(
+        version="1",
+        categories=[
+            CategoryDefinition(
+                id="cat_a",
+                label_he="א",
+                subcategories=[
+                    SubcategoryDefinition(
+                        id="dup_leaf",
+                        label_he="עלה א",
+                        index_relevant=True,
+                        legacy_category=Category.BROTHEL,
+                        legacy_sub_category=SubCategory.CLOSURE,
+                    )
+                ],
+            ),
+            CategoryDefinition(
+                id="cat_b",
+                label_he="ב",
+                subcategories=[
+                    SubcategoryDefinition(
+                        id="dup_leaf",
+                        label_he="עלה ב",
+                        index_relevant=False,
+                        legacy_category=Category.PROSTITUTION,
+                        legacy_sub_category=SubCategory.FINE,
+                    )
+                ],
+            ),
+        ],
+    )
+    with pytest.raises(ValueError, match="duplicate subcategory ids"):
+        duplicate_subcategory.validate_unique_ids()
