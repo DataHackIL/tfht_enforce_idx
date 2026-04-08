@@ -19,6 +19,7 @@ from denbust.validation.evaluate import (
 )
 from denbust.validation.import_reviewed import (
     TFHT_MANUAL_TRACKING_V1,
+    VALIDATION_REVIEWED_EXAMPLES_V1,
     ReviewedTableImportResult,
     import_reviewed_table,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "RELAXED_VALIDATION_KEYWORDS",
     "ReviewedTableImportResult",
     "TFHT_MANUAL_TRACKING_V1",
+    "VALIDATION_REVIEWED_EXAMPLES_V1",
     "ValidationCollectResult",
     "ValidationEvaluateResult",
     "ValidationFinalizeResult",

@@ -7,12 +7,14 @@ This note breaks Milestone 3 from [CHATGPT_26_04_PLAN.md](/Users/shaypalachy/clo
 - Expand the permanent validation CSV and typed models to carry taxonomy-aware labels plus optional expected output fields.
 - Keep finalize/evaluate backward-compatible with older validation rows that do not yet have the new columns.
 - Migrate the tracked `validation/news_items/classifier_validation.csv` asset to the new header shape.
+- Status: merged.
 
 ## PR 3.2 — import reviewed manual example tables
 
-- Add the reviewed-examples import path into the validation subsystem.
-- Normalize occasional manually generated example tables into the existing reviewed/finalize flow.
-- Preserve provenance such as `annotation_source` while validating taxonomy fields against the packaged TFHT taxonomy.
+- Add a generic reviewed-examples import adapter into the validation subsystem.
+- Keep the existing TFHT manual-tracking workbook adapter, but add support for occasional manually generated CSV/XLSX reviewed-example tables.
+- Normalize those tables into the existing reviewed/finalize flow, including taxonomy validation, canonical-URL dedupe, and provenance such as `annotation_source`.
+- Status: current next PR.
 
 ## PR 3.3 — stage-wise validation metrics
 
