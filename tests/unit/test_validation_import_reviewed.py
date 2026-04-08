@@ -135,7 +135,7 @@ def test_helper_functions_cover_parsing_and_taxonomy_inference() -> None:
         "human_trafficking",
         "trafficking_slavery_conditions",
     )
-    assert _infer_taxonomy_leaf('סחר בבני אדם', 'נשים מברזיל הוסגר', '') == (
+    assert _infer_taxonomy_leaf("סחר בבני אדם", "נשים מברזיל הוסגר", "") == (
         "human_trafficking",
         "trafficking_cross_border_prostitution",
     )
