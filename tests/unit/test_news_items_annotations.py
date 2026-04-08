@@ -356,9 +356,7 @@ def test_import_news_item_annotation_csv_helpers_cover_validation_edges(
     )
     corrections, warnings = import_news_item_corrections_csv(bad_enum)
     assert corrections == []
-    assert warnings == [
-        "row 2: skipped because 'not-a-category' is not a valid Category"
-    ]
+    assert warnings == ["row 2: skipped because 'not-a-category' is not a valid Category"]
 
 
 def test_annotation_helper_parsers_cover_boolean_datetime_and_enum_edges() -> None:
