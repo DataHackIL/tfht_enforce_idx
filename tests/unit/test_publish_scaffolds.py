@@ -112,3 +112,36 @@ def test_local_json_operational_store_noop_record_methods(tmp_path: Path) -> Non
     assert store.fetch_missing_news_items("news_items") == [{"annotation_id": "missing-1"}]
     store.mark_publication_state("news_items", ["1"], "published")
     assert store.fetch_records("news_items")[0]["publication_status"] == "published"
+
+
+def test_local_json_operational_store_annotation_upsert_skips_missing_identity(
+    tmp_path: Path,
+) -> None:
+    """Annotation upserts should ignore rows without any configured identity field."""
+    store = LocalJsonOperationalStore(tmp_path / "ops")
+
+    store.upsert_news_item_corrections("news_items", [{"summary_one_sentence": "ignored"}])
+    store.upsert_missing_news_items("news_items", [{"title": "ignored"}])
+
+    assert store.fetch_news_item_corrections("news_items") == []
+    assert store.fetch_missing_news_items("news_items") == []
+
+
+def test_local_json_operational_store_annotation_upsert_merges_existing_rows(
+    tmp_path: Path,
+) -> None:
+    """Annotation upserts should merge payloads when identity fields match."""
+    store = LocalJsonOperationalStore(tmp_path / "ops")
+
+    store.upsert_news_item_corrections(
+        "news_items",
+        [{"record_id": "row-1", "annotation_notes": "first"}],
+    )
+    store.upsert_news_item_corrections(
+        "news_items",
+        [{"record_id": "row-1", "manual_city": "Haifa"}],
+    )
+
+    assert store.fetch_news_item_corrections("news_items") == [
+        {"record_id": "row-1", "annotation_notes": "first", "manual_city": "Haifa"}
+    ]

@@ -331,7 +331,7 @@ class TestCli:
         )
         monkeypatch.setattr(
             "denbust.news_items.annotations.import_news_item_corrections_csv",
-            lambda _path: ([_FakeImportRow({"record_id": "row-1"})], []),
+            lambda _path: ([_FakeImportRow({"record_id": "row-1"})], ["row 2 skipped"]),
         )
 
         result = runner.invoke(app, ["news-items-import-corrections", "--input", "corrections.csv"])
@@ -340,6 +340,23 @@ class TestCli:
         assert captured["dataset_name"] == "news_items"
         assert captured["records"] == [{"record_id": "row-1"}]
         assert captured["closed"] is True
+        assert "warning: row 2 skipped" in result.stderr
+
+    def test_news_items_import_corrections_rejects_unsupported_format(self) -> None:
+        """news-items-import-corrections should reject unsupported import formats."""
+        result = runner.invoke(
+            app,
+            [
+                "news-items-import-corrections",
+                "--input",
+                "corrections.csv",
+                "--format",
+                "unknown_format",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Unsupported corrections format: unknown_format" in result.stderr
 
     def test_news_items_import_missing_items_forwards_rows_to_operational_store(
         self, monkeypatch: pytest.MonkeyPatch
@@ -367,7 +384,7 @@ class TestCli:
         )
         monkeypatch.setattr(
             "denbust.news_items.annotations.import_missing_news_items_csv",
-            lambda _path: ([_FakeImportRow({"annotation_id": "missing-1"})], []),
+            lambda _path: ([_FakeImportRow({"annotation_id": "missing-1"})], ["row 3 skipped"]),
         )
 
         result = runner.invoke(app, ["news-items-import-missing-items", "--input", "missing.csv"])
@@ -376,6 +393,23 @@ class TestCli:
         assert captured["dataset_name"] == "news_items"
         assert captured["records"] == [{"annotation_id": "missing-1"}]
         assert captured["closed"] is True
+        assert "warning: row 3 skipped" in result.stderr
+
+    def test_news_items_import_missing_items_rejects_unsupported_format(self) -> None:
+        """news-items-import-missing-items should reject unsupported import formats."""
+        result = runner.invoke(
+            app,
+            [
+                "news-items-import-missing-items",
+                "--input",
+                "missing.csv",
+                "--format",
+                "unknown_format",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Unsupported missing-items format: unknown_format" in result.stderr
 
     def test_validation_commands_use_canonical_default_constants(self) -> None:
         """CLI defaults should reuse the shared tracked validation asset paths."""

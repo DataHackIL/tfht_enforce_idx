@@ -285,3 +285,59 @@ def test_supabase_store_supports_corrections_and_missing_item_tables() -> None:
     missing_call = client.calls[1]
     assert correction_call["params"] == {"on_conflict": "dataset_name,record_id,canonical_url"}
     assert missing_call["params"] == {"on_conflict": "dataset_name,annotation_id"}
+
+
+def test_supabase_store_returns_empty_lists_for_non_list_annotation_payloads() -> None:
+    class FakeResponse:
+        def __init__(self, payload: object) -> None:
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> object:
+            return self._payload
+
+    class FakeClient:
+        def request(self, method: str, url: str, **kwargs: object) -> FakeResponse:
+            del method, url, kwargs
+            return FakeResponse({"unexpected": True})
+
+        def close(self) -> None:
+            return None
+
+    store = SupabaseOperationalStore(
+        base_url="https://example.supabase.co",
+        service_role_key="secret",
+        config=Config(operational={"provider": "supabase"}).operational,
+        client=FakeClient(),
+    )
+
+    assert store.fetch_news_item_corrections("news_items") == []
+    assert store.fetch_missing_news_items("news_items") == []
+
+
+def test_supabase_store_annotation_upserts_return_early_for_empty_payloads() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def request(self, method: str, url: str, **kwargs: object) -> object:
+            self.calls.append({"method": method, "url": url, **kwargs})
+            raise AssertionError("request should not be called for empty upserts")
+
+        def close(self) -> None:
+            return None
+
+    client = FakeClient()
+    store = SupabaseOperationalStore(
+        base_url="https://example.supabase.co",
+        service_role_key="secret",
+        config=Config(operational={"provider": "supabase"}).operational,
+        client=client,
+    )
+
+    store.upsert_news_item_corrections("news_items", [])
+    store.upsert_missing_news_items("news_items", [])
+
+    assert client.calls == []
