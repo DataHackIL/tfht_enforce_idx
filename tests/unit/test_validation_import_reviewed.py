@@ -363,3 +363,59 @@ def test_import_reviewed_table_generic_adapter_rejects_invalid_reviewed_labels(
         for warning in result.warnings
     )
     assert any("title is required" in warning for warning in result.warnings)
+
+
+def test_import_reviewed_table_generic_adapter_handles_empty_xlsx(tmp_path: Path) -> None:
+    workbook = Workbook()
+    workbook_path = tmp_path / "empty_reviewed_examples.xlsx"
+    workbook.save(workbook_path)
+
+    result = import_reviewed_table(
+        input_path=workbook_path,
+        format_name=VALIDATION_REVIEWED_EXAMPLES_V1,
+    )
+
+    rows = read_csv_rows(result.output_path)
+    assert result.imported_rows == 0
+    assert result.skipped_rows == 0
+    assert result.warnings == []
+    assert rows == []
+
+
+def test_import_reviewed_table_generic_adapter_rejects_unsupported_file_type(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "reviewed_examples.txt"
+    input_path.write_text("placeholder", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unsupported reviewed examples file type"):
+        import_reviewed_table(
+            input_path=input_path,
+            format_name=VALIDATION_REVIEWED_EXAMPLES_V1,
+        )
+
+
+def test_import_reviewed_table_generic_adapter_requires_url_and_article_date(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "reviewed_examples_missing_fields.csv"
+    input_path.write_text(
+        "\n".join(
+            [
+                "URL,Title,Article Date,Relevant,Enforcement Related,Category,Review Status",
+                ",כתבה ללא URL,2026-04-01T00:00:00+00:00,False,False,not_relevant,reviewed",
+                "https://example.com/missing-date,כתבה ללא תאריך,,False,False,not_relevant,reviewed",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = import_reviewed_table(
+        input_path=input_path,
+        format_name=VALIDATION_REVIEWED_EXAMPLES_V1,
+    )
+
+    assert result.imported_rows == 0
+    assert result.skipped_rows == 2
+    assert any("url is required" in warning for warning in result.warnings)
+    assert any("article_date is required" in warning for warning in result.warnings)
