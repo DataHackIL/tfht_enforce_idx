@@ -57,6 +57,9 @@ class NewsItemPublicRecord(BaseModel):
     geography_country: str = "Israel"
     geography_region: str | None = None
     geography_city: str | None = None
+    manual_address: str | None = None
+    manual_event_label: str | None = None
+    manual_status: str | None = None
     organizations_mentioned: list[str] = Field(default_factory=list)
     topic_tags: list[str] = Field(default_factory=list)
     rights_class: RightsClass = RightsClass.METADATA_ONLY
@@ -64,6 +67,8 @@ class NewsItemPublicRecord(BaseModel):
     review_status: ReviewStatus = ReviewStatus.NONE
     publication_status: PublicationStatus = PublicationStatus.APPROVED
     takedown_status: TakedownStatus = TakedownStatus.NONE
+    manually_overridden: bool = False
+    annotation_source: str | None = None
     event_candidate_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -79,6 +84,11 @@ class NewsItemOperationalRecord(NewsItemPublicRecord):
     suppression_reason: str | None = None
     summary_generation_model: str | None = None
     privacy_reason: str | None = None
+    manual_city: str | None = None
+    manually_reviewed: bool = False
+    reviewer: str | None = None
+    reviewed_at: datetime | None = None
+    annotation_notes: str | None = None
 
     def to_public_record(self, *, release_version: str) -> NewsItemPublicRecord:
         """Project an operational record to its public metadata-only representation."""
@@ -90,6 +100,11 @@ class NewsItemOperationalRecord(NewsItemPublicRecord):
             "suppression_reason",
             "summary_generation_model",
             "privacy_reason",
+            "manual_city",
+            "manually_reviewed",
+            "reviewer",
+            "reviewed_at",
+            "annotation_notes",
         ):
             data.pop(field_name, None)
         data["release_version"] = release_version

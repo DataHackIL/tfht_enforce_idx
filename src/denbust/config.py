@@ -127,6 +127,8 @@ class OperationalConfig(BaseModel):
     release_runs_table: str = "release_runs"
     backup_runs_table: str = "backup_runs"
     suppression_rules_table: str = "suppression_rules"
+    news_items_corrections_table: str = "news_items_corrections"
+    news_items_missing_items_table: str = "news_items_missing_items"
 
 
 class ReleaseConfig(BaseModel):

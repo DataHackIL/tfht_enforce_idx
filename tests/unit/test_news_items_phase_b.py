@@ -1055,6 +1055,24 @@ async def test_release_publication_dir_and_release_job_mark_published(
             del dataset_name
             return []
 
+        def fetch_news_item_corrections(self, dataset_name: str) -> list[dict[str, Any]]:
+            del dataset_name
+            return []
+
+        def fetch_missing_news_items(self, dataset_name: str) -> list[dict[str, Any]]:
+            del dataset_name
+            return []
+
+        def upsert_news_item_corrections(
+            self, dataset_name: str, records: list[dict[str, Any]]
+        ) -> None:
+            del dataset_name, records
+
+        def upsert_missing_news_items(
+            self, dataset_name: str, records: list[dict[str, Any]]
+        ) -> None:
+            del dataset_name, records
+
     store = FakeStore()
     manifest = ReleaseManifest(dataset_name="news_items", release_version="2026-03-19", row_count=1)
 
