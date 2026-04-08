@@ -263,6 +263,90 @@ def validation_import_reviewed_table(
         typer.echo(f"warning: {warning}", err=True)
 
 
+@app.command("news-items-import-corrections")
+def news_items_import_corrections(
+    input_path: Annotated[
+        Path,
+        typer.Option("--input", "-i", help="Path to a manual corrections CSV"),
+    ],
+    format_name: Annotated[
+        str,
+        typer.Option("--format", help="Correction import format adapter to use"),
+    ] = "news_items_corrections_csv_v1",
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+) -> None:
+    """Import manual news_items corrections into the configured operational store."""
+    from denbust.config import load_config
+    from denbust.news_items.annotations import (
+        NEWS_ITEMS_CORRECTIONS_CSV_V1,
+        import_news_item_corrections_csv,
+    )
+    from denbust.ops.factory import create_operational_store
+
+    if format_name != NEWS_ITEMS_CORRECTIONS_CSV_V1:
+        raise typer.BadParameter(f"Unsupported corrections format: {format_name}")
+
+    config_path = config or Path("agents/news/local.yaml")
+    loaded_config = load_config(config_path)
+    corrections, warnings = import_news_item_corrections_csv(input_path)
+    store = create_operational_store(loaded_config)
+    try:
+        store.upsert_news_item_corrections(
+            loaded_config.dataset_name.value,
+            [row.model_dump(mode="json") for row in corrections],
+        )
+    finally:
+        store.close()
+    typer.echo(f"Imported {len(corrections)} correction row(s) from {input_path}")
+    for warning in warnings:
+        typer.echo(f"warning: {warning}", err=True)
+
+
+@app.command("news-items-import-missing-items")
+def news_items_import_missing_items(
+    input_path: Annotated[
+        Path,
+        typer.Option("--input", "-i", help="Path to a missing-items CSV"),
+    ],
+    format_name: Annotated[
+        str,
+        typer.Option("--format", help="Missing-items import format adapter to use"),
+    ] = "news_items_missing_items_csv_v1",
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+) -> None:
+    """Import manually curated missing news_items rows into the operational store."""
+    from denbust.config import load_config
+    from denbust.news_items.annotations import (
+        NEWS_ITEMS_MISSING_ITEMS_CSV_V1,
+        import_missing_news_items_csv,
+    )
+    from denbust.ops.factory import create_operational_store
+
+    if format_name != NEWS_ITEMS_MISSING_ITEMS_CSV_V1:
+        raise typer.BadParameter(f"Unsupported missing-items format: {format_name}")
+
+    config_path = config or Path("agents/news/local.yaml")
+    loaded_config = load_config(config_path)
+    missing_items, warnings = import_missing_news_items_csv(input_path)
+    store = create_operational_store(loaded_config)
+    try:
+        store.upsert_missing_news_items(
+            loaded_config.dataset_name.value,
+            [row.model_dump(mode="json") for row in missing_items],
+        )
+    finally:
+        store.close()
+    typer.echo(f"Imported {len(missing_items)} missing-item row(s) from {input_path}")
+    for warning in warnings:
+        typer.echo(f"warning: {warning}", err=True)
+
+
 @app.command("validation-evaluate")
 def validation_evaluate(
     validation_set: Annotated[

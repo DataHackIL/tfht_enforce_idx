@@ -17,11 +17,24 @@ from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
+from denbust.news_items.annotations import (
+    apply_manual_annotations,
+    parse_missing_news_items,
+    parse_news_item_corrections,
+)
 from denbust.news_items.backup import execute_latest_backup
-from denbust.news_items.ingest import build_operational_records, summarize_privacy_mix
+from denbust.news_items.ingest import (
+    build_operational_records,
+    parse_suppression_rules,
+    summarize_privacy_mix,
+)
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.news_items.publication import publish_release_bundle
-from denbust.news_items.release import NewsItemsReleaseBuilder, select_releasable_records
+from denbust.news_items.release import (
+    NewsItemsReleaseBuilder,
+    parse_operational_records,
+    select_releasable_records,
+)
 from denbust.ops.factory import create_operational_store
 from denbust.ops.storage import OperationalStore
 from denbust.output.email import send_email_report
@@ -655,10 +668,24 @@ async def run_news_items_release_job(
     result = _build_run_snapshot(config, config_path=config_path, days=config.days)
     store = operational_store or create_operational_store(config)
     builder = NewsItemsReleaseBuilder(config=config)
-    rows = store.fetch_records(config.dataset_name.value)
+    dataset_name = config.dataset_name.value
+    rows = store.fetch_records(dataset_name)
+    corrected_rows = [
+        record.model_dump(mode="json")
+        for record in apply_manual_annotations(
+            parse_operational_records(rows),
+            corrections=parse_news_item_corrections(
+                store.fetch_news_item_corrections(dataset_name)
+            ),
+            missing_items=parse_missing_news_items(
+                store.fetch_missing_news_items(dataset_name)
+            ),
+            suppression_rules=parse_suppression_rules(store.fetch_suppression_rules(dataset_name)),
+        )
+    ]
     manifest = builder.build_release_bundle(
         publication_dir=config.state_paths.publication_dir,
-        rows=rows,
+        rows=corrected_rows,
     )
     published_targets = publish_release_bundle(
         config=config,
@@ -671,10 +698,13 @@ async def run_news_items_release_job(
         result.warnings.append(f"published_targets={','.join(published_targets)}")
         public_ids = [
             row.id
-            for row in select_releasable_records(rows, release_version=manifest.release_version)
+            for row in select_releasable_records(
+                corrected_rows,
+                release_version=manifest.release_version,
+            )
         ]
         store.mark_publication_state(
-            config.dataset_name.value,
+            dataset_name,
             public_ids,
             "published",
         )

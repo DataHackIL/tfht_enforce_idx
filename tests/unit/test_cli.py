@@ -15,6 +15,15 @@ from denbust.models.common import DatasetName, JobName
 runner = CliRunner()
 
 
+class _FakeImportRow:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def model_dump(self, *, mode: str = "json") -> dict[str, object]:
+        del mode
+        return self._payload
+
+
 class TestCli:
     """Tests for the Typer CLI entrypoint."""
 
@@ -295,6 +304,78 @@ class TestCli:
         }
         assert "Wrote 2 reviewed rows to reviewed.csv" in result.stdout
         assert "warning: row 7 skipped" in result.stderr
+
+    def test_news_items_import_corrections_forwards_rows_to_operational_store(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """news-items-import-corrections should persist imported correction rows."""
+        captured: dict[str, object] = {}
+
+        class FakeStore:
+            def upsert_news_item_corrections(
+                self, dataset_name: str, records: list[dict[str, object]]
+            ) -> None:
+                captured["dataset_name"] = dataset_name
+                captured["records"] = records
+
+            def close(self) -> None:
+                captured["closed"] = True
+
+        monkeypatch.setattr(
+            "denbust.config.load_config",
+            lambda _path: type("Cfg", (), {"dataset_name": DatasetName.NEWS_ITEMS})(),
+        )
+        monkeypatch.setattr(
+            "denbust.ops.factory.create_operational_store",
+            lambda _config: FakeStore(),
+        )
+        monkeypatch.setattr(
+            "denbust.news_items.annotations.import_news_item_corrections_csv",
+            lambda _path: ([_FakeImportRow({"record_id": "row-1"})], []),
+        )
+
+        result = runner.invoke(app, ["news-items-import-corrections", "--input", "corrections.csv"])
+
+        assert result.exit_code == 0
+        assert captured["dataset_name"] == "news_items"
+        assert captured["records"] == [{"record_id": "row-1"}]
+        assert captured["closed"] is True
+
+    def test_news_items_import_missing_items_forwards_rows_to_operational_store(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """news-items-import-missing-items should persist imported missing-item rows."""
+        captured: dict[str, object] = {}
+
+        class FakeStore:
+            def upsert_missing_news_items(
+                self, dataset_name: str, records: list[dict[str, object]]
+            ) -> None:
+                captured["dataset_name"] = dataset_name
+                captured["records"] = records
+
+            def close(self) -> None:
+                captured["closed"] = True
+
+        monkeypatch.setattr(
+            "denbust.config.load_config",
+            lambda _path: type("Cfg", (), {"dataset_name": DatasetName.NEWS_ITEMS})(),
+        )
+        monkeypatch.setattr(
+            "denbust.ops.factory.create_operational_store",
+            lambda _config: FakeStore(),
+        )
+        monkeypatch.setattr(
+            "denbust.news_items.annotations.import_missing_news_items_csv",
+            lambda _path: ([_FakeImportRow({"annotation_id": "missing-1"})], []),
+        )
+
+        result = runner.invoke(app, ["news-items-import-missing-items", "--input", "missing.csv"])
+
+        assert result.exit_code == 0
+        assert captured["dataset_name"] == "news_items"
+        assert captured["records"] == [{"annotation_id": "missing-1"}]
+        assert captured["closed"] is True
 
     def test_validation_commands_use_canonical_default_constants(self) -> None:
         """CLI defaults should reuse the shared tracked validation asset paths."""

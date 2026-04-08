@@ -76,7 +76,11 @@ def test_null_operational_store_methods_are_noops() -> None:
 
     store.write_run_metadata(RunSnapshot(config_name="test-config"))
     store.upsert_records("news_items", [{"id": "1"}])
+    store.upsert_news_item_corrections("news_items", [{"record_id": "1"}])
+    store.upsert_missing_news_items("news_items", [{"annotation_id": "missing-1"}])
     assert store.fetch_records("news_items", limit=5) == []
+    assert store.fetch_news_item_corrections("news_items") == []
+    assert store.fetch_missing_news_items("news_items") == []
     store.mark_publication_state("news_items", ["1"], "published")
 
 
@@ -102,5 +106,9 @@ def test_local_json_operational_store_noop_record_methods(tmp_path: Path) -> Non
             "publication_datetime": "2026-03-18T00:00:00Z",
         }
     ]
+    store.upsert_news_item_corrections("news_items", [{"record_id": "row-1"}])
+    store.upsert_missing_news_items("news_items", [{"annotation_id": "missing-1"}])
+    assert store.fetch_news_item_corrections("news_items") == [{"record_id": "row-1"}]
+    assert store.fetch_missing_news_items("news_items") == [{"annotation_id": "missing-1"}]
     store.mark_publication_state("news_items", ["1"], "published")
     assert store.fetch_records("news_items")[0]["publication_status"] == "published"

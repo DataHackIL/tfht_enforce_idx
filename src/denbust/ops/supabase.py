@@ -88,6 +88,66 @@ class SupabaseOperationalStore(OperationalStore):
             return [dict(item) for item in payload if isinstance(item, dict)]
         return []
 
+    def fetch_news_item_corrections(self, dataset_name: str) -> list[dict[str, Any]]:
+        response = self._request(
+            "GET",
+            f"/rest/v1/{self._config.news_items_corrections_table}",
+            params={
+                "select": "*",
+                "dataset_name": f"eq.{dataset_name}",
+                "order": "reviewed_at.desc.nullslast",
+            },
+        )
+        payload = response.json()
+        if isinstance(payload, list):
+            return [dict(item) for item in payload if isinstance(item, dict)]
+        return []
+
+    def fetch_missing_news_items(self, dataset_name: str) -> list[dict[str, Any]]:
+        response = self._request(
+            "GET",
+            f"/rest/v1/{self._config.news_items_missing_items_table}",
+            params={
+                "select": "*",
+                "dataset_name": f"eq.{dataset_name}",
+                "order": "event_date.desc",
+            },
+        )
+        payload = response.json()
+        if isinstance(payload, list):
+            return [dict(item) for item in payload if isinstance(item, dict)]
+        return []
+
+    def upsert_news_item_corrections(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        if not records:
+            return
+        self._request(
+            "POST",
+            f"/rest/v1/{self._config.news_items_corrections_table}",
+            params={"on_conflict": "dataset_name,record_id,canonical_url"},
+            json=[{"dataset_name": dataset_name, **dict(record)} for record in records],
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+
+    def upsert_missing_news_items(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        if not records:
+            return
+        self._request(
+            "POST",
+            f"/rest/v1/{self._config.news_items_missing_items_table}",
+            params={"on_conflict": "dataset_name,annotation_id"},
+            json=[{"dataset_name": dataset_name, **dict(record)} for record in records],
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+
     def mark_publication_state(
         self,
         dataset_name: str,

@@ -36,6 +36,30 @@ class OperationalStore(ABC):
         """Fetch suppression or takedown rules for a dataset."""
 
     @abstractmethod
+    def fetch_news_item_corrections(self, dataset_name: str) -> list[dict[str, Any]]:
+        """Fetch manual correction rows for a dataset."""
+
+    @abstractmethod
+    def fetch_missing_news_items(self, dataset_name: str) -> list[dict[str, Any]]:
+        """Fetch manually annotated missing items for a dataset."""
+
+    @abstractmethod
+    def upsert_news_item_corrections(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Upsert manual corrections for a dataset."""
+
+    @abstractmethod
+    def upsert_missing_news_items(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Upsert missing-item annotations for a dataset."""
+
+    @abstractmethod
     def mark_publication_state(
         self,
         dataset_name: str,
@@ -65,6 +89,28 @@ class NullOperationalStore(OperationalStore):
         del dataset_name
         return []
 
+    def fetch_news_item_corrections(self, dataset_name: str) -> list[dict[str, Any]]:
+        del dataset_name
+        return []
+
+    def fetch_missing_news_items(self, dataset_name: str) -> list[dict[str, Any]]:
+        del dataset_name
+        return []
+
+    def upsert_news_item_corrections(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        del dataset_name, records
+
+    def upsert_missing_news_items(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        del dataset_name, records
+
     def mark_publication_state(
         self,
         dataset_name: str,
@@ -92,6 +138,14 @@ class LocalJsonOperationalStore(OperationalStore):
     def suppression_rules_path(self, dataset_name: str) -> Path:
         """Path to the JSON file containing suppression rules."""
         return self.root_dir / f"{dataset_name}_suppression_rules.json"
+
+    def corrections_path(self, dataset_name: str) -> Path:
+        """Path to the JSON file containing manual corrections."""
+        return self.root_dir / f"{dataset_name}_corrections.json"
+
+    def missing_items_path(self, dataset_name: str) -> Path:
+        """Path to the JSON file containing missing-item annotations."""
+        return self.root_dir / f"{dataset_name}_missing_items.json"
 
     def write_run_metadata(self, snapshot: RunSnapshot) -> None:
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +188,34 @@ class LocalJsonOperationalStore(OperationalStore):
     def fetch_suppression_rules(self, dataset_name: str) -> list[dict[str, Any]]:
         return self._read_json(self.suppression_rules_path(dataset_name))
 
+    def fetch_news_item_corrections(self, dataset_name: str) -> list[dict[str, Any]]:
+        return self._read_json(self.corrections_path(dataset_name))
+
+    def fetch_missing_news_items(self, dataset_name: str) -> list[dict[str, Any]]:
+        return self._read_json(self.missing_items_path(dataset_name))
+
+    def upsert_news_item_corrections(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        self._upsert_annotation_rows(
+            self.corrections_path(dataset_name),
+            records,
+            identity_fields=("record_id", "canonical_url"),
+        )
+
+    def upsert_missing_news_items(
+        self,
+        dataset_name: str,
+        records: Sequence[Mapping[str, Any]],
+    ) -> None:
+        self._upsert_annotation_rows(
+            self.missing_items_path(dataset_name),
+            records,
+            identity_fields=("annotation_id", "canonical_url"),
+        )
+
     def mark_publication_state(
         self,
         dataset_name: str,
@@ -168,3 +250,43 @@ class LocalJsonOperationalStore(OperationalStore):
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(rows, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
+
+    def _upsert_annotation_rows(
+        self,
+        path: Path,
+        records: Sequence[Mapping[str, Any]],
+        *,
+        identity_fields: tuple[str, ...],
+    ) -> None:
+        existing = self._read_json(path)
+        rows = [dict(row) for row in existing]
+        for incoming_record in records:
+            payload = dict(incoming_record)
+            if not any(payload.get(field_name) for field_name in identity_fields):
+                continue
+            match_index = next(
+                (
+                    index
+                    for index, current in enumerate(rows)
+                    if any(
+                        payload.get(field_name)
+                        and payload.get(field_name) == current.get(field_name)
+                        for field_name in identity_fields
+                    )
+                ),
+                None,
+            )
+            if match_index is None:
+                rows.append(payload)
+            else:
+                rows[match_index] = {**rows[match_index], **payload}
+        rows.sort(
+            key=lambda row: str(
+                row.get("reviewed_at")
+                or row.get("event_date")
+                or row.get("publication_datetime")
+                or ""
+            ),
+            reverse=True,
+        )
+        self._write_json(path, rows)

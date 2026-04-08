@@ -8,10 +8,14 @@ from datetime import UTC, datetime
 from denbust.config import Config
 from denbust.data_models import UnifiedItem
 from denbust.models.policies import PrivacyRisk
+from denbust.news_items.annotations import (
+    apply_manual_annotations,
+    parse_missing_news_items,
+    parse_news_item_corrections,
+)
 from denbust.news_items.enrich import NewsItemEnricher, fallback_enrichment
 from denbust.news_items.models import NewsItemOperationalRecord, SuppressionRule
 from denbust.news_items.policy import (
-    apply_suppression,
     derive_publication_status,
     derive_review_status,
     infer_privacy_risk,
@@ -59,6 +63,12 @@ async def build_operational_records(
     suppression_rules = parse_suppression_rules(
         operational_store.fetch_suppression_rules(config.dataset_name.value)
     )
+    corrections = parse_news_item_corrections(
+        operational_store.fetch_news_item_corrections(config.dataset_name.value)
+    )
+    missing_items = parse_missing_news_items(
+        operational_store.fetch_missing_news_items(config.dataset_name.value)
+    )
     enricher = (
         NewsItemEnricher(api_key=config.anthropic_api_key, model=config.classifier.model)
         if config.anthropic_api_key
@@ -91,9 +101,14 @@ async def build_operational_records(
             summary_generation_model=enricher.model_name if enricher is not None else None,
             privacy_reason=privacy_reason,
         )
-        records.append(apply_suppression(record, suppression_rules))
+        records.append(record)
 
-    return records
+    return apply_manual_annotations(
+        records,
+        corrections=corrections,
+        missing_items=missing_items,
+        suppression_rules=suppression_rules,
+    )
 
 
 def summarize_privacy_mix(records: list[NewsItemOperationalRecord]) -> dict[PrivacyRisk, int]:
