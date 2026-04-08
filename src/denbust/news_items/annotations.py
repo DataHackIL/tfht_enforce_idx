@@ -274,8 +274,6 @@ def _apply_taxonomy_compatibility(
         )
     if not taxonomy_category_id:
         return
-    if taxonomy_subcategory_id is None:
-        raise ValueError("taxonomy_subcategory_id is required when taxonomy_category_id is set")
 
     taxonomy = default_taxonomy()
     if not taxonomy.has_pair(taxonomy_category_id, taxonomy_subcategory_id):

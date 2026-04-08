@@ -13,6 +13,10 @@ from denbust.models.policies import PublicationStatus, TakedownStatus
 from denbust.news_items.annotations import (
     MissingNewsItemAnnotation,
     NewsItemCorrection,
+    _enum_value,
+    _normalize_missing_item_row,
+    _optional_bool,
+    _required_datetime,
     apply_manual_annotations,
     import_missing_news_items_csv,
     import_news_item_corrections_csv,
@@ -120,6 +124,32 @@ def test_apply_manual_annotations_can_suppress_irrelevant_manual_correction() ->
     assert rows[0].publication_status is PublicationStatus.SUPPRESSED
     assert rows[0].takedown_status is TakedownStatus.SUPPRESSED
     assert rows[0].suppression_reason == "manual annotation marked item outside dataset scope"
+
+
+def test_apply_manual_annotations_skips_duplicate_promoted_missing_item() -> None:
+    record = _build_record()
+    annotation = MissingNewsItemAnnotation.model_validate(
+        {
+            "annotation_id": "missing-duplicate",
+            "source_url": record.canonical_url,
+            "canonical_url": record.canonical_url,
+            "title": "אותו פריט בדיוק",
+            "event_date": "2026-04-03T08:00:00Z",
+            "source_name": "mako",
+            "taxonomy_category_id": "brothels",
+            "taxonomy_subcategory_id": "administrative_closure",
+        }
+    )
+
+    rows = apply_manual_annotations(
+        [record],
+        corrections=[],
+        missing_items=[annotation],
+        suppression_rules=[],
+    )
+
+    assert len(rows) == 1
+    assert rows[0].id == record.id
 
 
 @pytest.mark.asyncio
@@ -262,6 +292,158 @@ def test_import_missing_news_items_csv_uses_canonical_url_for_default_annotation
     assert len(annotations) == 2
     assert annotations[0].canonical_url == annotations[1].canonical_url
     assert annotations[0].annotation_id == annotations[1].annotation_id
+
+
+def test_import_news_item_annotation_csv_helpers_cover_validation_edges(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(FileNotFoundError, match="Annotation CSV not found"):
+        import_news_item_corrections_csv(tmp_path / "missing.csv")
+
+    missing_source_url = tmp_path / "missing_source_url.csv"
+    missing_source_url.write_text(
+        "\n".join(
+            [
+                "Title,Event Date,Source Name,TFHT Category ID,TFHT Subcategory ID",
+                "כתבה,2026-04-01T00:00:00Z,ynet,brothels,administrative_closure",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    annotations, warnings = import_missing_news_items_csv(missing_source_url)
+    assert annotations == []
+    assert warnings == ["row 2: skipped because source_url is required"]
+
+    bad_bool = tmp_path / "bad_bool.csv"
+    bad_bool.write_text(
+        "\n".join(
+            [
+                "URL,Record ID,Relevant",
+                "https://example.com/item,row-1,maybe",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    corrections, warnings = import_news_item_corrections_csv(bad_bool)
+    assert corrections == []
+    assert warnings == ["row 2: skipped because relevant must be a boolean value"]
+
+    missing_event_date = tmp_path / "missing_event_date.csv"
+    missing_event_date.write_text(
+        "\n".join(
+            [
+                "Source URL,Title,Source Name,TFHT Category ID,TFHT Subcategory ID",
+                "https://example.com/item,כתבה,ynet,brothels,administrative_closure",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    annotations, warnings = import_missing_news_items_csv(missing_event_date)
+    assert annotations == []
+    assert warnings == [
+        "row 2: skipped because one of event_date, article_date, publication_datetime is required"
+    ]
+
+    bad_enum = tmp_path / "bad_enum.csv"
+    bad_enum.write_text(
+        "\n".join(
+            [
+                "URL,Record ID,Category",
+                "https://example.com/item,row-1,not-a-category",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    corrections, warnings = import_news_item_corrections_csv(bad_enum)
+    assert corrections == []
+    assert warnings == [
+        "row 2: skipped because 'not-a-category' is not a valid Category"
+    ]
+
+
+def test_annotation_helper_parsers_cover_boolean_datetime_and_enum_edges() -> None:
+    assert _optional_bool({"active": "false"}, "active") is False
+
+    with pytest.raises(ValueError, match="active must be a boolean value"):
+        _optional_bool({"active": "nope"}, "active")
+
+    with pytest.raises(
+        ValueError,
+        match="one of event_date, article_date is required",
+    ):
+        _required_datetime({}, "event_date", "article_date")
+
+    with pytest.raises(ValueError, match="not-a-category"):
+        _enum_value(Category, "not-a-category")
+
+
+def test_missing_item_annotation_requires_title() -> None:
+    with pytest.raises(ValueError, match="requires a title"):
+        MissingNewsItemAnnotation.model_validate(
+            {
+                "annotation_id": "missing-1",
+                "source_url": "https://example.com/item",
+                "title": "   ",
+                "event_date": "2026-04-01T00:00:00Z",
+                "source_name": "ynet",
+                "taxonomy_category_id": "brothels",
+                "taxonomy_subcategory_id": "administrative_closure",
+            }
+        )
+
+
+def test_annotation_models_require_full_taxonomy_pair() -> None:
+    with pytest.raises(
+        ValueError,
+        match="taxonomy_category_id and taxonomy_subcategory_id must be provided together",
+    ):
+        NewsItemCorrection.model_validate(
+            {
+                "record_id": "row-1",
+                "taxonomy_category_id": "brothels",
+            }
+        )
+
+
+def test_annotation_models_reject_category_mismatch_with_taxonomy() -> None:
+    with pytest.raises(
+        ValueError,
+        match="Provided category does not match taxonomy compatibility mapping",
+    ):
+        NewsItemCorrection.model_validate(
+            {
+                "record_id": "row-1",
+                "taxonomy_category_id": "brothels",
+                "taxonomy_subcategory_id": "administrative_closure",
+                "category": Category.PIMPING,
+            }
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Provided sub_category does not match taxonomy compatibility mapping",
+    ):
+        NewsItemCorrection.model_validate(
+            {
+                "record_id": "row-1",
+                "taxonomy_category_id": "brothels",
+                "taxonomy_subcategory_id": "administrative_closure",
+                "sub_category": SubCategory.ARREST,
+            }
+        )
+
+
+def test_normalize_missing_item_row_requires_source_url() -> None:
+    with pytest.raises(ValueError, match="source_url is required"):
+        _normalize_missing_item_row(
+            {
+                "Title": "כתבה",
+                "Event Date": "2026-04-01T00:00:00Z",
+                "Source Name": "ynet",
+                "TFHT Category ID": "brothels",
+                "TFHT Subcategory ID": "administrative_closure",
+            }
+        )
 
 
 def test_parse_annotation_rows_logs_warning_for_invalid_payload(
