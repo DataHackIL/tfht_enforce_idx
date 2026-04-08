@@ -248,6 +248,54 @@ class TestCli:
         assert captured["input_path"] == Path("draft.csv")
         assert captured["validation_set_path"] == Path("validation.csv")
 
+    def test_validation_import_reviewed_table_forwards_flags(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """validation-import-reviewed-table should forward the reviewed-table adapter args."""
+        captured: dict[str, object] = {}
+
+        def fake_import_reviewed_table(
+            *,
+            input_path: Path,
+            format_name: str,
+            output_path: Path | None = None,
+        ) -> object:
+            captured["input_path"] = input_path
+            captured["format_name"] = format_name
+            captured["output_path"] = output_path
+
+            class Result:
+                imported_rows = 2
+                skipped_rows = 1
+                output_path = Path("reviewed.csv")
+                warnings = ["row 7 skipped"]
+
+            return Result()
+
+        monkeypatch.setattr("denbust.validation.import_reviewed_table", fake_import_reviewed_table)
+
+        result = runner.invoke(
+            app,
+            [
+                "validation-import-reviewed-table",
+                "--input",
+                "docs/manual.xlsx",
+                "--format",
+                "tfht_manual_tracking_v1",
+                "--output",
+                "out.csv",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured == {
+            "input_path": Path("docs/manual.xlsx"),
+            "format_name": "tfht_manual_tracking_v1",
+            "output_path": Path("out.csv"),
+        }
+        assert "Wrote 2 reviewed rows to reviewed.csv" in result.stdout
+        assert "warning: row 7 skipped" in result.stderr
+
     def test_validation_commands_use_canonical_default_constants(self) -> None:
         """CLI defaults should reuse the shared tracked validation asset paths."""
         from denbust.validation import common as validation_common

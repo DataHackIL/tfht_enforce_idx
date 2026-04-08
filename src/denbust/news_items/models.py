@@ -47,6 +47,10 @@ class NewsItemPublicRecord(BaseModel):
     retrieval_datetime: datetime
     language: str = "he"
     title: str
+    taxonomy_version: str | None = None
+    taxonomy_category_id: str | None = None
+    taxonomy_subcategory_id: str | None = None
+    index_relevant: bool = False
     category: Category
     sub_category: SubCategory | None = None
     summary_one_sentence: str
@@ -131,6 +135,10 @@ class NewsItemOperationalRecord(NewsItemPublicRecord):
             publication_datetime=item.date,
             retrieval_datetime=retrieval_datetime,
             title=title,
+            taxonomy_version=item.taxonomy_version,
+            taxonomy_category_id=item.taxonomy_category_id,
+            taxonomy_subcategory_id=item.taxonomy_subcategory_id,
+            index_relevant=item.index_relevant,
             category=item.category,
             sub_category=item.sub_category,
             summary_one_sentence=enrichment.summary_one_sentence,
@@ -151,6 +159,24 @@ class NewsItemOperationalRecord(NewsItemPublicRecord):
             summary_generation_model=summary_generation_model,
             privacy_reason=privacy_reason or enrichment.privacy_reason,
         )
+
+
+class NewsItemEventScaffoldRecord(BaseModel):
+    """Future website/report-facing event row scaffold."""
+
+    id: str
+    month_key: str
+    event_date: datetime
+    city: str | None = None
+    address_text: str | None = None
+    event_label: str
+    relevant_details: str
+    status_text: str | None = None
+    source_urls: list[str] = Field(default_factory=list)
+    taxonomy_version: str | None = None
+    taxonomy_category_id: str | None = None
+    taxonomy_subcategory_id: str | None = None
+    index_relevant: bool = False
 
 
 class SuppressionRule(BaseModel):

@@ -71,7 +71,12 @@ def sanitize_summary_one_sentence(candidate: str, fallback: str) -> str:
 def fallback_enrichment(item: UnifiedItem) -> NewsItemEnrichment:
     """Build a deterministic fallback enrichment when the LLM path fails."""
     fallback_summary = sanitize_summary_one_sentence(item.summary or item.headline, item.headline)
-    base_tags = [item.category.value.replace("_", "-")]
+    base_tags = []
+    if item.taxonomy_category_id:
+        base_tags.append(item.taxonomy_category_id.replace("_", "-"))
+    if item.taxonomy_subcategory_id:
+        base_tags.append(item.taxonomy_subcategory_id.replace("_", "-"))
+    base_tags.append(item.category.value.replace("_", "-"))
     if item.sub_category:
         base_tags.append(item.sub_category.value.replace("_", "-"))
     return NewsItemEnrichment(

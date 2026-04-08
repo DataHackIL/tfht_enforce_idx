@@ -72,6 +72,12 @@ def _serialized_row(row: NewsItemPublicRecord) -> dict[str, Any]:
     for key, value in list(payload.items()):
         if isinstance(value, list):
             payload[key] = json.dumps(value, ensure_ascii=False)
+        elif isinstance(value, bool):
+            payload[key] = str(value)
+        elif value is None:
+            payload[key] = ""
+        elif not isinstance(value, str):
+            payload[key] = str(value)
     return payload
 
 

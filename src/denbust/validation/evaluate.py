@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,11 +32,64 @@ from denbust.validation.models import (
 
 
 @dataclass(frozen=True)
+class ValidationLabel:
+    """Expected labels for one validation example."""
+
+    relevant: bool
+    enforcement_related: bool
+    category: str
+    sub_category: str
+    index_relevant: bool
+    taxonomy_version: str
+    taxonomy_category_id: str
+    taxonomy_subcategory_id: str
+
+    def __eq__(self, other: object) -> bool:
+        """Support legacy tuple comparisons in older tests."""
+        if isinstance(other, ValidationLabel):
+            return (
+                self.relevant == other.relevant
+                and self.enforcement_related == other.enforcement_related
+                and self.category == other.category
+                and self.sub_category == other.sub_category
+                and self.index_relevant == other.index_relevant
+                and self.taxonomy_version == other.taxonomy_version
+                and self.taxonomy_category_id == other.taxonomy_category_id
+                and self.taxonomy_subcategory_id == other.taxonomy_subcategory_id
+            )
+        if isinstance(other, tuple) and len(other) == 4:
+            return (
+                self.relevant,
+                self.enforcement_related,
+                self.category,
+                self.sub_category,
+            ) == other
+        return False
+
+
+@dataclass(frozen=True)
 class ValidationEvaluateResult:
     """Result of evaluating classifier variants."""
 
     output_path: Path
     rankings: list[VariantMetrics]
+
+
+def _coerce_label(value: ValidationLabel | tuple[bool, bool, str, str]) -> ValidationLabel:
+    """Support legacy tuple-based test inputs as well as typed labels."""
+    if isinstance(value, ValidationLabel):
+        return value
+    relevant, enforcement_related, category, sub_category = value
+    return ValidationLabel(
+        relevant=relevant,
+        enforcement_related=enforcement_related,
+        category=category,
+        sub_category=sub_category,
+        index_relevant=False,
+        taxonomy_version="",
+        taxonomy_category_id="",
+        taxonomy_subcategory_id="",
+    )
 
 
 def _load_variant_matrix(path: Path) -> ClassifierVariantMatrix:
@@ -49,9 +103,7 @@ def _load_variant_matrix(path: Path) -> ClassifierVariantMatrix:
     return matrix
 
 
-def _load_validation_examples(
-    path: Path,
-) -> tuple[list[RawArticle], list[tuple[bool, bool, str, str]]]:
+def _load_validation_examples(path: Path) -> tuple[list[RawArticle], list[ValidationLabel]]:
     if not path.exists():
         raise FileNotFoundError(f"Validation set not found: {path}")
     rows = read_csv_rows(path)
@@ -59,7 +111,7 @@ def _load_validation_examples(
         raise ValueError("Validation set is empty")
 
     articles: list[RawArticle] = []
-    labels: list[tuple[bool, bool, str, str]] = []
+    labels: list[ValidationLabel] = []
     for row in rows:
         article = RawArticle(
             url=HttpUrl(row["url"].strip()),
@@ -68,18 +120,25 @@ def _load_validation_examples(
             date=parse_datetime(row["article_date"]),
             source_name=row["source_name"].strip(),
         )
-        relevant = parse_bool(row["relevant"])
-        enforcement_related = parse_bool(row.get("enforcement_related", "False"))
-        category = Category(row["category"].strip())
-        sub_category = row["sub_category"].strip()
         articles.append(article)
-        labels.append((relevant, enforcement_related, category.value, sub_category))
+        labels.append(
+            ValidationLabel(
+                relevant=parse_bool(row["relevant"]),
+                enforcement_related=parse_bool(row.get("enforcement_related", "False") or "False"),
+                category=Category(row["category"].strip()).value,
+                sub_category=row["sub_category"].strip(),
+                index_relevant=parse_bool(row.get("index_relevant", "False") or "False"),
+                taxonomy_version=row.get("taxonomy_version", "").strip(),
+                taxonomy_category_id=row.get("taxonomy_category_id", "").strip(),
+                taxonomy_subcategory_id=row.get("taxonomy_subcategory_id", "").strip(),
+            )
+        )
     return articles, labels
 
 
 def _score_predictions(
-    labels: list[tuple[bool, bool, str, str]],
-    predictions: list[tuple[bool, bool, str, str]],
+    labels: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
+    predictions: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
     *,
     variant: ClassifierVariantSpec,
     model: str,
@@ -91,45 +150,72 @@ def _score_predictions(
     subcategory_matches = 0
     exact_matches = 0
 
-    for (true_relevant, true_enforcement_related, true_category, true_sub_category), (
-        predicted_relevant,
-        predicted_enforcement_related,
-        predicted_category,
-        predicted_sub_category,
-    ) in zip(labels, predictions, strict=True):
-        predicted_enforcement_related = predicted_relevant and predicted_enforcement_related
+    taxonomy_labeled_rows = 0
+    taxonomy_category_matches = 0
+    taxonomy_subcategory_matches = 0
+    index_tp = index_fp = index_fn = index_tn = 0
 
-        if true_relevant and predicted_relevant:
+    for raw_true_label, raw_predicted_label in zip(labels, predictions, strict=True):
+        true_label = _coerce_label(raw_true_label)
+        predicted_label = _coerce_label(raw_predicted_label)
+        predicted_enforcement_related = (
+            predicted_label.relevant and predicted_label.enforcement_related
+        )
+
+        if true_label.relevant and predicted_label.relevant:
             tp += 1
-        elif not true_relevant and predicted_relevant:
+        elif not true_label.relevant and predicted_label.relevant:
             fp += 1
-        elif true_relevant and not predicted_relevant:
+        elif true_label.relevant and not predicted_label.relevant:
             fn += 1
         else:
             tn += 1
 
-        if true_relevant:
+        if true_label.relevant:
             relevant_rows += 1
-            if true_enforcement_related and predicted_enforcement_related:
+            if true_label.enforcement_related and predicted_enforcement_related:
                 enforcement_tp += 1
-            elif not true_enforcement_related and predicted_enforcement_related:
+            elif not true_label.enforcement_related and predicted_enforcement_related:
                 enforcement_fp += 1
-            elif true_enforcement_related and not predicted_enforcement_related:
+            elif true_label.enforcement_related and not predicted_enforcement_related:
                 enforcement_fn += 1
             else:
                 enforcement_tn += 1
-            if predicted_relevant:
-                if predicted_category == true_category:
+            if predicted_label.relevant:
+                if predicted_label.category == true_label.category:
                     category_matches += 1
-                if predicted_sub_category == true_sub_category:
+                if predicted_label.sub_category == true_label.sub_category:
                     subcategory_matches += 1
 
-        if (
-            predicted_relevant == true_relevant
-            and predicted_enforcement_related == true_enforcement_related
-            and predicted_category == true_category
-            and predicted_sub_category == true_sub_category
-        ):
+        if true_label.taxonomy_category_id and true_label.taxonomy_subcategory_id:
+            taxonomy_labeled_rows += 1
+            if predicted_label.index_relevant and true_label.index_relevant:
+                index_tp += 1
+            elif predicted_label.index_relevant and not true_label.index_relevant:
+                index_fp += 1
+            elif not predicted_label.index_relevant and true_label.index_relevant:
+                index_fn += 1
+            else:
+                index_tn += 1
+
+            if predicted_label.taxonomy_category_id == true_label.taxonomy_category_id:
+                taxonomy_category_matches += 1
+            if predicted_label.taxonomy_subcategory_id == true_label.taxonomy_subcategory_id:
+                taxonomy_subcategory_matches += 1
+
+        exact_match = (
+            predicted_label.relevant == true_label.relevant
+            and predicted_enforcement_related == true_label.enforcement_related
+            and predicted_label.category == true_label.category
+            and predicted_label.sub_category == true_label.sub_category
+        )
+        if true_label.taxonomy_category_id and true_label.taxonomy_subcategory_id:
+            exact_match = exact_match and (
+                predicted_label.taxonomy_category_id == true_label.taxonomy_category_id
+                and predicted_label.taxonomy_subcategory_id == true_label.taxonomy_subcategory_id
+                and predicted_label.index_relevant == true_label.index_relevant
+            )
+        if exact_match:
             exact_matches += 1
 
     total = len(labels)
@@ -162,6 +248,21 @@ def _score_predictions(
     subcategory_accuracy = subcategory_matches / relevant_rows if relevant_rows else 0.0
     overall_exact_match = exact_matches / total if total else 0.0
 
+    index_precision = index_tp / (index_tp + index_fp) if (index_tp + index_fp) else 0.0
+    index_recall = index_tp / (index_tp + index_fn) if (index_tp + index_fn) else 0.0
+    index_f1 = (
+        2 * index_precision * index_recall / (index_precision + index_recall)
+        if (index_precision + index_recall)
+        else 0.0
+    )
+    index_accuracy = (index_tp + index_tn) / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
+    taxonomy_category_accuracy = (
+        taxonomy_category_matches / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
+    )
+    taxonomy_subcategory_accuracy = (
+        taxonomy_subcategory_matches / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
+    )
+
     return VariantMetrics(
         name=variant.name,
         description=variant.description,
@@ -176,12 +277,19 @@ def _score_predictions(
         enforcement_accuracy_relevant_only=enforcement_accuracy,
         category_accuracy_relevant_only=category_accuracy,
         subcategory_accuracy_relevant_only=subcategory_accuracy,
+        index_relevance_precision_taxonomy_labeled=index_precision,
+        index_relevance_recall_taxonomy_labeled=index_recall,
+        index_relevance_f1_taxonomy_labeled=index_f1,
+        index_relevance_accuracy_taxonomy_labeled=index_accuracy,
+        taxonomy_category_accuracy_taxonomy_labeled=taxonomy_category_accuracy,
+        taxonomy_subcategory_accuracy_taxonomy_labeled=taxonomy_subcategory_accuracy,
         overall_exact_match=overall_exact_match,
         tp=tp,
         fp=fp,
         fn=fn,
         tn=tn,
         total_examples=total,
+        taxonomy_labeled_examples=taxonomy_labeled_rows,
     )
 
 
@@ -191,8 +299,8 @@ def _sort_rankings(metrics: list[VariantMetrics]) -> list[VariantMetrics]:
         key=lambda item: (
             -item.relevance_f1,
             -item.enforcement_f1_relevant_only,
-            -item.category_accuracy_relevant_only,
-            -item.subcategory_accuracy_relevant_only,
+            -item.taxonomy_subcategory_accuracy_taxonomy_labeled,
+            -item.index_relevance_f1_taxonomy_labeled,
             -item.overall_exact_match,
             item.name,
         ),
@@ -237,13 +345,17 @@ async def evaluate_classifier_variants(
         )
         classified_articles = await classifier.classify_batch(articles)
         predictions = [
-            (
-                item.classification.relevant,
-                item.classification.enforcement_related,
-                item.classification.category.value,
-                item.classification.sub_category.value
+            ValidationLabel(
+                relevant=item.classification.relevant,
+                enforcement_related=item.classification.enforcement_related,
+                category=item.classification.category.value,
+                sub_category=item.classification.sub_category.value
                 if item.classification.sub_category is not None
                 else "",
+                index_relevant=item.classification.index_relevant,
+                taxonomy_version=item.classification.taxonomy_version or "",
+                taxonomy_category_id=item.classification.taxonomy_category_id or "",
+                taxonomy_subcategory_id=item.classification.taxonomy_subcategory_id or "",
             )
             for item in classified_articles
         ]
@@ -273,32 +385,22 @@ def render_rankings_table(metrics: list[VariantMetrics]) -> str:
         "rank",
         "name",
         "rel_f1",
-        "rel_acc",
         "enf_f1",
-        "enf_acc",
-        "cat_acc",
-        "subcat_acc",
+        "tax_sub",
+        "index_f1",
         "exact",
-        "tp",
-        "fp",
-        "fn",
-        "tn",
+        "tax_n",
     )
     rows = [
         [
             str(index),
             metric.name,
             f"{metric.relevance_f1:.3f}",
-            f"{metric.relevance_accuracy:.3f}",
             f"{metric.enforcement_f1_relevant_only:.3f}",
-            f"{metric.enforcement_accuracy_relevant_only:.3f}",
-            f"{metric.category_accuracy_relevant_only:.3f}",
-            f"{metric.subcategory_accuracy_relevant_only:.3f}",
+            f"{metric.taxonomy_subcategory_accuracy_taxonomy_labeled:.3f}",
+            f"{metric.index_relevance_f1_taxonomy_labeled:.3f}",
             f"{metric.overall_exact_match:.3f}",
-            str(metric.tp),
-            str(metric.fp),
-            str(metric.fn),
-            str(metric.tn),
+            str(metric.taxonomy_labeled_examples),
         ]
         for index, metric in enumerate(metrics, start=1)
     ]

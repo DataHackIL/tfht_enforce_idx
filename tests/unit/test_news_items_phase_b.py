@@ -52,6 +52,7 @@ from denbust.news_items.publication import (
 from denbust.news_items.release import (
     NewsItemsReleaseBuilder,
     _schema_markdown,
+    _serialized_row,
     parse_operational_records,
     select_releasable_records,
 )
@@ -173,6 +174,22 @@ def test_news_items_release_builder_writes_release_bundle(tmp_path: Path) -> Non
     manifest_sha = hashlib.sha256((release_dir / "MANIFEST.json").read_bytes()).hexdigest()
     checksums = (release_dir / "checksums.txt").read_text(encoding="utf-8")
     assert f"{manifest_sha}  MANIFEST.json" in checksums
+
+
+def test_serialized_row_stringifies_non_string_scalars() -> None:
+    row = build_record().model_copy(
+        update={
+            "source_count": 3,
+            "index_relevant": True,
+            "taxonomy_version": None,
+        }
+    )
+
+    payload = _serialized_row(row)
+
+    assert payload["source_count"] == "3"
+    assert payload["index_relevant"] == "True"
+    assert payload["taxonomy_version"] == ""
 
 
 def test_execute_latest_backup_returns_empty_manifest_when_no_targets(tmp_path: Path) -> None:
@@ -355,6 +372,24 @@ def test_fallback_enrichment_deduplicates_tags() -> None:
 
     assert enrichment.summary_one_sentence.endswith(".")
     assert enrichment.topic_tags == ["brothel", "closure"]
+
+
+def test_fallback_enrichment_includes_taxonomy_tags() -> None:
+    item = build_unified_item().model_copy(
+        update={
+            "taxonomy_category_id": "human_trafficking",
+            "taxonomy_subcategory_id": "trafficking_cross_border_prostitution",
+        }
+    )
+
+    enrichment = fallback_enrichment(item)
+
+    assert enrichment.topic_tags == [
+        "human-trafficking",
+        "trafficking-cross-border-prostitution",
+        "brothel",
+        "closure",
+    ]
 
 
 def test_deduplicate_strings_skips_blank_values() -> None:

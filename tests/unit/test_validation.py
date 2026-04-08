@@ -699,6 +699,131 @@ class TestValidationFinalize:
         with pytest.raises(ValueError, match="must include a non-empty sub_category"):
             finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
 
+    @pytest.mark.parametrize(
+        (
+            "taxonomy_category_id",
+            "taxonomy_subcategory_id",
+            "taxonomy_version",
+            "index_relevant",
+            "match",
+        ),
+        [
+            ("brothels", "", "1", "True", "must include both category and subcategory ids"),
+            ("brothels", "not_a_leaf", "1", "True", "Invalid taxonomy pair"),
+            ("brothels", "administrative_closure", "999", "True", "Unsupported taxonomy version"),
+            (
+                "brothels",
+                "administrative_closure",
+                "1",
+                "False",
+                "index_relevant does not match the packaged taxonomy",
+            ),
+        ],
+    )
+    def test_finalize_validation_set_rejects_invalid_taxonomy_metadata(
+        self,
+        tmp_path: Path,
+        taxonomy_category_id: str,
+        taxonomy_subcategory_id: str,
+        taxonomy_version: str,
+        index_relevant: str,
+        match: str,
+    ) -> None:
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_index_relevant": index_relevant,
+                    "suggested_taxonomy_version": taxonomy_version,
+                    "suggested_taxonomy_category_id": taxonomy_category_id,
+                    "suggested_taxonomy_subcategory_id": taxonomy_subcategory_id,
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "closure",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": index_relevant,
+                    "taxonomy_version": taxonomy_version,
+                    "taxonomy_category_id": taxonomy_category_id,
+                    "taxonomy_subcategory_id": taxonomy_subcategory_id,
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_source": "tfht_manual_tracking_v1",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        with pytest.raises(ValueError, match=match):
+            finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
+
+    def test_finalize_validation_set_normalizes_valid_taxonomy_version(
+        self, tmp_path: Path
+    ) -> None:
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_index_relevant": "True",
+                    "suggested_taxonomy_version": "",
+                    "suggested_taxonomy_category_id": "brothels",
+                    "suggested_taxonomy_subcategory_id": "administrative_closure",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "closure",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": "True",
+                    "taxonomy_version": "",
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "administrative_closure",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_source": "tfht_manual_tracking_v1",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        result = finalize_validation_set(
+            input_path=draft_path, validation_set_path=tmp_path / "out.csv"
+        )
+        rows = read_csv_rows(result.validation_set_path)
+
+        assert rows[0]["taxonomy_version"] == "1"
+
     def test_run_validation_finalize_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The finalize wrapper should forward its arguments to the core function."""
         captured: dict[str, object] = {}

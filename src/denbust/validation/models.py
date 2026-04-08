@@ -18,14 +18,27 @@ class ValidationDraftRow(BaseModel):
     snippet: str
     suggested_relevant: bool
     suggested_enforcement_related: bool = False
+    suggested_index_relevant: bool = False
+    suggested_taxonomy_version: str = ""
+    suggested_taxonomy_category_id: str = ""
+    suggested_taxonomy_subcategory_id: str = ""
     suggested_category: str
     suggested_sub_category: str = ""
     suggested_confidence: str
     relevant: bool
     enforcement_related: bool = False
+    index_relevant: bool = False
+    taxonomy_version: str = ""
+    taxonomy_category_id: str = ""
+    taxonomy_subcategory_id: str = ""
     category: str
     sub_category: str = ""
     review_status: str = "pending"
+    annotation_source: str = ""
+    manual_city: str = ""
+    manual_address: str = ""
+    manual_event_label: str = ""
+    manual_status: str = ""
     annotation_notes: str = ""
     collected_at: datetime
 
@@ -41,9 +54,18 @@ class ValidationSetRow(BaseModel):
     snippet: str
     relevant: bool
     enforcement_related: bool = False
+    index_relevant: bool = False
+    taxonomy_version: str = ""
+    taxonomy_category_id: str = ""
+    taxonomy_subcategory_id: str = ""
     category: str
     sub_category: str = ""
     review_status: str = "reviewed"
+    annotation_source: str = ""
+    manual_city: str = ""
+    manual_address: str = ""
+    manual_event_label: str = ""
+    manual_status: str = ""
     annotation_notes: str = ""
     collected_at: datetime
     finalized_at: datetime
@@ -88,9 +110,16 @@ class VariantMetrics(BaseModel):
     enforcement_accuracy_relevant_only: float
     category_accuracy_relevant_only: float
     subcategory_accuracy_relevant_only: float
+    index_relevance_precision_taxonomy_labeled: float = 0.0
+    index_relevance_recall_taxonomy_labeled: float = 0.0
+    index_relevance_f1_taxonomy_labeled: float = 0.0
+    index_relevance_accuracy_taxonomy_labeled: float = 0.0
+    taxonomy_category_accuracy_taxonomy_labeled: float = 0.0
+    taxonomy_subcategory_accuracy_taxonomy_labeled: float = 0.0
     overall_exact_match: float
     tp: int
     fp: int
     fn: int
     tn: int
     total_examples: int
+    taxonomy_labeled_examples: int = 0
