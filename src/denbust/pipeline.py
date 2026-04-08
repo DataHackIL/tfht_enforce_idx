@@ -677,9 +677,7 @@ async def run_news_items_release_job(
             corrections=parse_news_item_corrections(
                 store.fetch_news_item_corrections(dataset_name)
             ),
-            missing_items=parse_missing_news_items(
-                store.fetch_missing_news_items(dataset_name)
-            ),
+            missing_items=parse_missing_news_items(store.fetch_missing_news_items(dataset_name)),
             suppression_rules=parse_suppression_rules(store.fetch_suppression_rules(dataset_name)),
         )
     ]

@@ -239,7 +239,9 @@ def apply_manual_annotations(
     return rows
 
 
-def import_news_item_corrections_csv(input_path: Path) -> tuple[list[NewsItemCorrection], list[str]]:
+def import_news_item_corrections_csv(
+    input_path: Path,
+) -> tuple[list[NewsItemCorrection], list[str]]:
     """Read a corrections CSV into typed correction rows."""
     return _import_csv_rows(
         input_path,
@@ -265,7 +267,9 @@ def _apply_taxonomy_compatibility(
     taxonomy_category_id = model.taxonomy_category_id
     taxonomy_subcategory_id = model.taxonomy_subcategory_id
     if bool(taxonomy_category_id) != bool(taxonomy_subcategory_id):
-        raise ValueError("taxonomy_category_id and taxonomy_subcategory_id must be provided together")
+        raise ValueError(
+            "taxonomy_category_id and taxonomy_subcategory_id must be provided together"
+        )
     if not taxonomy_category_id:
         return
     if taxonomy_subcategory_id is None:
@@ -273,10 +277,7 @@ def _apply_taxonomy_compatibility(
 
     taxonomy = default_taxonomy()
     if not taxonomy.has_pair(taxonomy_category_id, taxonomy_subcategory_id):
-        raise ValueError(
-            "Unknown taxonomy pair: "
-            f"{taxonomy_category_id}/{taxonomy_subcategory_id}"
-        )
+        raise ValueError(f"Unknown taxonomy pair: {taxonomy_category_id}/{taxonomy_subcategory_id}")
     legacy_category, legacy_sub_category = taxonomy.legacy_mapping(
         taxonomy_category_id,
         taxonomy_subcategory_id,
@@ -419,7 +420,8 @@ def _normalize_missing_item_row(row: dict[str, str | None]) -> dict[str, Any]:
     if not source_url:
         raise ValueError("source_url is required")
     return {
-        "annotation_id": _string_value(normalized, "annotation_id", "id") or build_news_item_id(source_url),
+        "annotation_id": _string_value(normalized, "annotation_id", "id")
+        or build_news_item_id(source_url),
         "source_url": source_url,
         "canonical_url": _string_value(normalized, "canonical_url"),
         "title": _string_value(normalized, "title"),
@@ -429,7 +431,8 @@ def _normalize_missing_item_row(row: dict[str, str | None]) -> dict[str, Any]:
             "article_date",
             "publication_datetime",
         ),
-        "source_name": _string_value(normalized, "source_name") or source_domain_from_url(source_url),
+        "source_name": _string_value(normalized, "source_name")
+        or source_domain_from_url(source_url),
         "taxonomy_version": _string_value(normalized, "taxonomy_version"),
         "taxonomy_category_id": _string_value(
             normalized, "taxonomy_category_id", "category_id", "tfht_category_id"
