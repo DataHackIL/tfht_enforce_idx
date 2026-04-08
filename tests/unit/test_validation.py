@@ -39,6 +39,7 @@ from denbust.validation.common import (
 )
 from denbust.validation.dataset import (
     ValidationFinalizeResult,
+    _parse_existing_validation_row,
     finalize_validation_set,
     run_validation_finalize,
 )
@@ -1054,6 +1055,41 @@ class TestValidationFinalize:
             "validation_set_path": Path("validation.csv"),
         }
         assert result.validation_set_path == Path("validation.csv")
+
+    def test_parse_existing_validation_row_trims_annotation_source(self) -> None:
+        row = _parse_existing_validation_row(
+            {
+                "source_name": "ynet",
+                "article_date": "2026-03-01T00:00:00+00:00",
+                "url": "https://example.com/a",
+                "canonical_url": "https://example.com/a",
+                "title": "title a",
+                "snippet": "snippet a",
+                "relevant": "True",
+                "enforcement_related": "True",
+                "index_relevant": "False",
+                "taxonomy_version": "",
+                "taxonomy_category_id": "",
+                "taxonomy_subcategory_id": "",
+                "category": "brothel",
+                "sub_category": "closure",
+                "review_status": "reviewed",
+                "annotation_source": "  manual table  ",
+                "expected_month_bucket": "",
+                "expected_city": "",
+                "expected_status": "",
+                "manual_city": "",
+                "manual_address": "",
+                "manual_event_label": "",
+                "manual_status": "",
+                "annotation_notes": "",
+                "collected_at": "2026-03-01T00:00:00+00:00",
+                "finalized_at": "2026-03-02T00:00:00+00:00",
+                "draft_source": "draft.csv",
+            }
+        )
+
+        assert row.annotation_source == "manual table"
 
 
 class TestValidationEvaluate:

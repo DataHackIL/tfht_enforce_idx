@@ -87,7 +87,7 @@ def _parse_existing_validation_row(raw_row: dict[str, str]) -> ValidationSetRow:
         category=normalize_category_value(raw_row["category"]),
         sub_category=normalize_subcategory_value(raw_row["sub_category"]),
         review_status=normalize_review_status(raw_row["review_status"]) or "reviewed",
-        annotation_source=raw_row.get("annotation_source", ""),
+        annotation_source=raw_row.get("annotation_source", "").strip(),
         expected_month_bucket=raw_row.get("expected_month_bucket", "").strip(),
         expected_city=raw_row.get("expected_city", "").strip(),
         expected_status=raw_row.get("expected_status", "").strip(),
