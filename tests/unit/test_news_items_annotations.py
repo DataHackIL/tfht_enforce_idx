@@ -365,6 +365,42 @@ def test_supabase_store_splits_correction_upserts_by_stable_key() -> None:
     assert client.calls[1]["params"] == {"on_conflict": "dataset_name,canonical_url"}
 
 
+def test_supabase_store_treats_non_string_record_id_as_present() -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> object:
+            return []
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def request(self, method: str, url: str, **kwargs: object) -> FakeResponse:
+            self.calls.append({"method": method, "url": url, **kwargs})
+            return FakeResponse()
+
+        def close(self) -> None:
+            return None
+
+    client = FakeClient()
+    store = SupabaseOperationalStore(
+        base_url="https://example.supabase.co",
+        service_role_key="secret",
+        config=Config(operational={"provider": "supabase"}).operational,
+        client=client,
+    )
+
+    store.upsert_news_item_corrections(
+        "news_items",
+        [{"record_id": 123, "summary_one_sentence": "numeric id"}],
+    )
+
+    assert len(client.calls) == 1
+    assert client.calls[0]["params"] == {"on_conflict": "dataset_name,record_id"}
+
+
 def test_supabase_store_rejects_correction_without_stable_key() -> None:
     class FakeClient:
         def request(self, method: str, url: str, **kwargs: object) -> object:
