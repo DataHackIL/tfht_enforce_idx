@@ -275,6 +275,7 @@ def _apply_taxonomy_compatibility(
     if not taxonomy_category_id:
         return
 
+    assert taxonomy_subcategory_id is not None
     taxonomy = default_taxonomy()
     if not taxonomy.has_pair(taxonomy_category_id, taxonomy_subcategory_id):
         raise ValueError(f"Unknown taxonomy pair: {taxonomy_category_id}/{taxonomy_subcategory_id}")
