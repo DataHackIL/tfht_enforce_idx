@@ -129,12 +129,8 @@ class VariantMetrics(BaseModel):
     description: str | None = None
     model: str
     relevance_stage: BinaryStageMetrics = Field(default_factory=BinaryStageMetrics)
-    enforcement_stage_relevant_only: BinaryStageMetrics = Field(
-        default_factory=BinaryStageMetrics
-    )
-    category_stage_relevant_only: AccuracyStageMetrics = Field(
-        default_factory=AccuracyStageMetrics
-    )
+    enforcement_stage_relevant_only: BinaryStageMetrics = Field(default_factory=BinaryStageMetrics)
+    category_stage_relevant_only: AccuracyStageMetrics = Field(default_factory=AccuracyStageMetrics)
     subcategory_stage_relevant_only: AccuracyStageMetrics = Field(
         default_factory=AccuracyStageMetrics
     )
