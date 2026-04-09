@@ -14,7 +14,7 @@ This note breaks Milestone 3 from [CHATGPT_26_04_PLAN.md](/Users/shaypalachy/clo
 - Add a generic reviewed-examples import adapter into the validation subsystem.
 - Keep the existing TFHT manual-tracking workbook adapter, but add support for occasional manually generated CSV/XLSX reviewed-example tables.
 - Normalize those tables into the existing reviewed/finalize flow, including taxonomy validation, canonical-URL dedupe, and provenance such as `annotation_source`.
-- Status: current next PR.
+- Status: merged.
 
 ## PR 3.3 — stage-wise validation metrics
 
@@ -24,6 +24,7 @@ This note breaks Milestone 3 from [CHATGPT_26_04_PLAN.md](/Users/shaypalachy/clo
   - taxonomy category / subcategory
   - index relevance
 - Keep legacy rows usable, while making taxonomy-aware metrics conditional on taxonomy-labeled examples.
+- Status: current next PR.
 
 ## PR 3.4 — typology-aware evaluation reports
 

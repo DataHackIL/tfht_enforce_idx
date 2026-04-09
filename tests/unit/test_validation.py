@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1431,6 +1432,13 @@ class TestValidationEvaluate:
 
         assert [metric.name for metric in result.rankings] == ["prompt-tuned", "baseline"]
         assert result.output_path.exists()
+        report = json.loads(result.output_path.read_text(encoding="utf-8"))
+        first = report["rankings"][0]
+        assert first["relevance_stage"]["evaluated_examples"] == 2
+        assert first["enforcement_stage_relevant_only"]["evaluated_examples"] == 1
+        assert first["category_stage_relevant_only"]["evaluated_examples"] == 1
+        assert first["taxonomy_subcategory_stage_taxonomy_labeled"]["evaluated_examples"] == 0
+        assert first["index_relevance_stage_taxonomy_labeled"]["evaluated_examples"] == 0
 
     def test_score_predictions_uses_only_relevant_rows_for_category_metrics(self) -> None:
         """Category and sub-category metrics should ignore non-relevant gold rows."""
@@ -1448,7 +1456,11 @@ class TestValidationEvaluate:
         )
 
         assert metrics.enforcement_accuracy_relevant_only == 1.0
+        assert metrics.category_stage_relevant_only.evaluated_examples == 1
+        assert metrics.category_stage_relevant_only.correct == 1
         assert metrics.category_accuracy_relevant_only == 1.0
+        assert metrics.subcategory_stage_relevant_only.evaluated_examples == 1
+        assert metrics.subcategory_stage_relevant_only.correct == 1
         assert metrics.subcategory_accuracy_relevant_only == 1.0
 
     def test_score_predictions_requires_predicted_relevance_for_category_credit(self) -> None:
@@ -1466,7 +1478,11 @@ class TestValidationEvaluate:
 
         assert metrics.relevance_f1 == 0.0
         assert metrics.enforcement_f1_relevant_only == 0.0
+        assert metrics.category_stage_relevant_only.evaluated_examples == 1
+        assert metrics.category_stage_relevant_only.correct == 0
         assert metrics.category_accuracy_relevant_only == 0.0
+        assert metrics.subcategory_stage_relevant_only.evaluated_examples == 1
+        assert metrics.subcategory_stage_relevant_only.correct == 0
         assert metrics.subcategory_accuracy_relevant_only == 0.0
 
     def test_score_predictions_counts_false_positives(self) -> None:
@@ -1508,6 +1524,11 @@ class TestValidationEvaluate:
         assert metrics.enforcement_precision_relevant_only == 0.0
         assert metrics.enforcement_recall_relevant_only == 0.0
         assert metrics.enforcement_f1_relevant_only == 0.0
+        assert metrics.enforcement_stage_relevant_only.evaluated_examples == 2
+        assert metrics.enforcement_stage_relevant_only.tp == 0
+        assert metrics.enforcement_stage_relevant_only.fp == 0
+        assert metrics.enforcement_stage_relevant_only.fn == 1
+        assert metrics.enforcement_stage_relevant_only.tn == 1
         assert metrics.enforcement_accuracy_relevant_only == 0.5
 
     def test_score_predictions_ignores_enforcement_when_prediction_is_irrelevant(self) -> None:
@@ -1524,6 +1545,8 @@ class TestValidationEvaluate:
         )
 
         assert metrics.fn == 1
+        assert metrics.relevance_stage.evaluated_examples == 1
+        assert metrics.relevance_stage.fn == 1
         assert metrics.enforcement_precision_relevant_only == 0.0
         assert metrics.enforcement_recall_relevant_only == 0.0
         assert metrics.enforcement_f1_relevant_only == 0.0

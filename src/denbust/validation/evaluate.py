@@ -25,6 +25,8 @@ from denbust.validation.common import (
     read_csv_rows,
 )
 from denbust.validation.models import (
+    AccuracyStageMetrics,
+    BinaryStageMetrics,
     ClassifierVariantMatrix,
     ClassifierVariantSpec,
     VariantMetrics,
@@ -136,6 +138,33 @@ def _load_validation_examples(path: Path) -> tuple[list[RawArticle], list[Valida
     return articles, labels
 
 
+def _binary_stage_metrics(*, tp: int, fp: int, fn: int, tn: int) -> BinaryStageMetrics:
+    evaluated_examples = tp + fp + fn + tn
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    accuracy = (tp + tn) / evaluated_examples if evaluated_examples else 0.0
+    return BinaryStageMetrics(
+        evaluated_examples=evaluated_examples,
+        tp=tp,
+        fp=fp,
+        fn=fn,
+        tn=tn,
+        precision=precision,
+        recall=recall,
+        f1=f1,
+        accuracy=accuracy,
+    )
+
+
+def _accuracy_stage_metrics(*, correct: int, evaluated_examples: int) -> AccuracyStageMetrics:
+    return AccuracyStageMetrics(
+        evaluated_examples=evaluated_examples,
+        correct=correct,
+        accuracy=(correct / evaluated_examples) if evaluated_examples else 0.0,
+    )
+
+
 def _score_predictions(
     labels: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
     predictions: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
@@ -219,70 +248,65 @@ def _score_predictions(
             exact_matches += 1
 
     total = len(labels)
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
-    relevance_accuracy = (tp + tn) / total if total else 0.0
-    enforcement_precision = (
-        enforcement_tp / (enforcement_tp + enforcement_fp)
-        if (enforcement_tp + enforcement_fp)
-        else 0.0
+    relevance_stage = _binary_stage_metrics(tp=tp, fp=fp, fn=fn, tn=tn)
+    enforcement_stage = _binary_stage_metrics(
+        tp=enforcement_tp,
+        fp=enforcement_fp,
+        fn=enforcement_fn,
+        tn=enforcement_tn,
     )
-    enforcement_recall = (
-        enforcement_tp / (enforcement_tp + enforcement_fn)
-        if (enforcement_tp + enforcement_fn)
-        else 0.0
+    category_stage = _accuracy_stage_metrics(
+        correct=category_matches,
+        evaluated_examples=relevant_rows,
     )
-    enforcement_f1 = (
-        2
-        * enforcement_precision
-        * enforcement_recall
-        / (enforcement_precision + enforcement_recall)
-        if (enforcement_precision + enforcement_recall)
-        else 0.0
+    subcategory_stage = _accuracy_stage_metrics(
+        correct=subcategory_matches,
+        evaluated_examples=relevant_rows,
     )
-    enforcement_accuracy = (
-        (enforcement_tp + enforcement_tn) / relevant_rows if relevant_rows else 0.0
-    )
-    category_accuracy = category_matches / relevant_rows if relevant_rows else 0.0
-    subcategory_accuracy = subcategory_matches / relevant_rows if relevant_rows else 0.0
     overall_exact_match = exact_matches / total if total else 0.0
 
-    index_precision = index_tp / (index_tp + index_fp) if (index_tp + index_fp) else 0.0
-    index_recall = index_tp / (index_tp + index_fn) if (index_tp + index_fn) else 0.0
-    index_f1 = (
-        2 * index_precision * index_recall / (index_precision + index_recall)
-        if (index_precision + index_recall)
-        else 0.0
+    index_stage = _binary_stage_metrics(
+        tp=index_tp,
+        fp=index_fp,
+        fn=index_fn,
+        tn=index_tn,
     )
-    index_accuracy = (index_tp + index_tn) / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
-    taxonomy_category_accuracy = (
-        taxonomy_category_matches / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
+    taxonomy_category_stage = _accuracy_stage_metrics(
+        correct=taxonomy_category_matches,
+        evaluated_examples=taxonomy_labeled_rows,
     )
-    taxonomy_subcategory_accuracy = (
-        taxonomy_subcategory_matches / taxonomy_labeled_rows if taxonomy_labeled_rows else 0.0
+    taxonomy_subcategory_stage = _accuracy_stage_metrics(
+        correct=taxonomy_subcategory_matches,
+        evaluated_examples=taxonomy_labeled_rows,
     )
 
     return VariantMetrics(
         name=variant.name,
         description=variant.description,
         model=model,
-        relevance_precision=precision,
-        relevance_recall=recall,
-        relevance_f1=f1,
-        relevance_accuracy=relevance_accuracy,
-        enforcement_precision_relevant_only=enforcement_precision,
-        enforcement_recall_relevant_only=enforcement_recall,
-        enforcement_f1_relevant_only=enforcement_f1,
-        enforcement_accuracy_relevant_only=enforcement_accuracy,
-        category_accuracy_relevant_only=category_accuracy,
-        subcategory_accuracy_relevant_only=subcategory_accuracy,
-        index_relevance_precision_taxonomy_labeled=index_precision,
-        index_relevance_recall_taxonomy_labeled=index_recall,
-        index_relevance_f1_taxonomy_labeled=index_f1,
-        index_relevance_accuracy_taxonomy_labeled=index_accuracy,
-        taxonomy_category_accuracy_taxonomy_labeled=taxonomy_category_accuracy,
-        taxonomy_subcategory_accuracy_taxonomy_labeled=taxonomy_subcategory_accuracy,
+        relevance_stage=relevance_stage,
+        enforcement_stage_relevant_only=enforcement_stage,
+        category_stage_relevant_only=category_stage,
+        subcategory_stage_relevant_only=subcategory_stage,
+        taxonomy_category_stage_taxonomy_labeled=taxonomy_category_stage,
+        taxonomy_subcategory_stage_taxonomy_labeled=taxonomy_subcategory_stage,
+        index_relevance_stage_taxonomy_labeled=index_stage,
+        relevance_precision=relevance_stage.precision,
+        relevance_recall=relevance_stage.recall,
+        relevance_f1=relevance_stage.f1,
+        relevance_accuracy=relevance_stage.accuracy,
+        enforcement_precision_relevant_only=enforcement_stage.precision,
+        enforcement_recall_relevant_only=enforcement_stage.recall,
+        enforcement_f1_relevant_only=enforcement_stage.f1,
+        enforcement_accuracy_relevant_only=enforcement_stage.accuracy,
+        category_accuracy_relevant_only=category_stage.accuracy,
+        subcategory_accuracy_relevant_only=subcategory_stage.accuracy,
+        index_relevance_precision_taxonomy_labeled=index_stage.precision,
+        index_relevance_recall_taxonomy_labeled=index_stage.recall,
+        index_relevance_f1_taxonomy_labeled=index_stage.f1,
+        index_relevance_accuracy_taxonomy_labeled=index_stage.accuracy,
+        taxonomy_category_accuracy_taxonomy_labeled=taxonomy_category_stage.accuracy,
+        taxonomy_subcategory_accuracy_taxonomy_labeled=taxonomy_subcategory_stage.accuracy,
         overall_exact_match=overall_exact_match,
         tp=tp,
         fp=fp,
