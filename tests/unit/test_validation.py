@@ -1432,13 +1432,22 @@ class TestValidationEvaluate:
 
         assert [metric.name for metric in result.rankings] == ["prompt-tuned", "baseline"]
         assert result.output_path.exists()
+        assert result.markdown_path.exists()
         report = json.loads(result.output_path.read_text(encoding="utf-8"))
+        assert report["dataset_summary"]["total_examples"] == 2
+        assert report["dataset_summary"]["legacy_only_examples"] == 2
         first = report["rankings"][0]
         assert first["relevance_stage"]["evaluated_examples"] == 2
         assert first["enforcement_stage_relevant_only"]["evaluated_examples"] == 1
         assert first["category_stage_relevant_only"]["evaluated_examples"] == 1
         assert first["taxonomy_subcategory_stage_taxonomy_labeled"]["evaluated_examples"] == 0
         assert first["index_relevance_stage_taxonomy_labeled"]["evaluated_examples"] == 0
+        assert first["legacy_category_breakdown_relevant_only"][0]["label"] == "brothel"
+        markdown = result.markdown_path.read_text(encoding="utf-8")
+        assert "## Dataset Coverage" in markdown
+        assert "Legacy-only examples" in markdown
+        assert "## Validation Set Typology Coverage" in markdown
+        assert "### prompt-tuned" in markdown
 
     def test_score_predictions_uses_only_relevant_rows_for_category_metrics(self) -> None:
         """Category and sub-category metrics should ignore non-relevant gold rows."""
@@ -1588,6 +1597,7 @@ class TestValidationEvaluate:
 
             class Result:
                 output_path = tmp_path / "report.json"
+                markdown_path = tmp_path / "report.md"
                 rankings: list[object] = []
 
             return Result()

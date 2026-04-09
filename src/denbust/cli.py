@@ -373,6 +373,7 @@ def validation_evaluate(
     )
     typer.echo(render_rankings_table(result.rankings))
     typer.echo(f"Saved JSON report to {result.output_path}")
+    typer.echo(f"Saved Markdown report to {result.markdown_path}")
 
 
 @app.command()

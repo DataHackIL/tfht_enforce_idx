@@ -122,6 +122,30 @@ class AccuracyStageMetrics(BaseModel):
     accuracy: float = 0.0
 
 
+class LabelBreakdownMetrics(BaseModel):
+    """Accuracy breakdown for one expected label."""
+
+    label: str
+    evaluated_examples: int = 0
+    correct: int = 0
+    accuracy: float = 0.0
+
+
+class ValidationDatasetSummary(BaseModel):
+    """Composition summary of the validation set used for evaluation."""
+
+    total_examples: int = 0
+    relevant_examples: int = 0
+    legacy_only_examples: int = 0
+    taxonomy_labeled_examples: int = 0
+    legacy_category_counts_relevant_only: list[LabelBreakdownMetrics] = Field(default_factory=list)
+    legacy_subcategory_counts_relevant_only: list[LabelBreakdownMetrics] = Field(
+        default_factory=list
+    )
+    taxonomy_category_counts: list[LabelBreakdownMetrics] = Field(default_factory=list)
+    taxonomy_subcategory_counts: list[LabelBreakdownMetrics] = Field(default_factory=list)
+
+
 class VariantMetrics(BaseModel):
     """Computed metrics for a single classifier variant."""
 
@@ -142,6 +166,18 @@ class VariantMetrics(BaseModel):
     )
     index_relevance_stage_taxonomy_labeled: BinaryStageMetrics = Field(
         default_factory=BinaryStageMetrics
+    )
+    legacy_category_breakdown_relevant_only: list[LabelBreakdownMetrics] = Field(
+        default_factory=list
+    )
+    legacy_subcategory_breakdown_relevant_only: list[LabelBreakdownMetrics] = Field(
+        default_factory=list
+    )
+    taxonomy_category_breakdown_taxonomy_labeled: list[LabelBreakdownMetrics] = Field(
+        default_factory=list
+    )
+    taxonomy_subcategory_breakdown_taxonomy_labeled: list[LabelBreakdownMetrics] = Field(
+        default_factory=list
     )
     relevance_precision: float
     relevance_recall: float
@@ -166,3 +202,13 @@ class VariantMetrics(BaseModel):
     tn: int
     total_examples: int
     taxonomy_labeled_examples: int = 0
+
+
+class ValidationReportPayload(BaseModel):
+    """Serialized payload written to validation evaluation JSON reports."""
+
+    evaluated_at: datetime
+    validation_set_path: str
+    variants_path: str
+    dataset_summary: ValidationDatasetSummary
+    rankings: list[VariantMetrics] = Field(default_factory=list)

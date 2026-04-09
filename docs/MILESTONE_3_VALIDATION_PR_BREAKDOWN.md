@@ -24,13 +24,14 @@ This note breaks Milestone 3 from [CHATGPT_26_04_PLAN.md](/Users/shaypalachy/clo
   - taxonomy category / subcategory
   - index relevance
 - Keep legacy rows usable, while making taxonomy-aware metrics conditional on taxonomy-labeled examples.
-- Status: current next PR.
+- Status: merged.
 
 ## PR 3.4 — typology-aware evaluation reports
 
 - Add richer validation outputs for humans, built on top of PR 3.3 metrics.
 - Include category/subcategory breakdowns and explicit handling of legacy versus taxonomy-labeled examples.
 - Keep this as a reporting/output PR rather than another schema or import PR.
+- Status: current next PR.
 
 ## Sequencing
 

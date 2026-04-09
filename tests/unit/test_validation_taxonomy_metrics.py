@@ -58,6 +58,10 @@ def test_taxonomy_metrics_only_use_taxonomy_labeled_rows() -> None:
     assert metrics.taxonomy_category_stage_taxonomy_labeled.evaluated_examples == 1
     assert metrics.taxonomy_subcategory_stage_taxonomy_labeled.evaluated_examples == 1
     assert metrics.index_relevance_stage_taxonomy_labeled.evaluated_examples == 1
+    assert metrics.taxonomy_category_breakdown_taxonomy_labeled[0].label == "brothels"
+    assert metrics.taxonomy_subcategory_breakdown_taxonomy_labeled[0].label == (
+        "administrative_closure"
+    )
     assert metrics.taxonomy_category_accuracy_taxonomy_labeled == 1.0
     assert metrics.taxonomy_subcategory_accuracy_taxonomy_labeled == 1.0
     assert metrics.index_relevance_f1_taxonomy_labeled == 1.0

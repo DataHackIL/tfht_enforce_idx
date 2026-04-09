@@ -588,6 +588,7 @@ class TestCli:
 
             class Result:
                 output_path = Path("report.json")
+                markdown_path = Path("report.md")
                 rankings: list[object] = []
 
             return Result()
@@ -609,3 +610,5 @@ class TestCli:
         )
         assert captured["variants_path"] == Path("agents/validation/classifier_variants.yaml")
         assert captured["output_path"] is None
+        assert "Saved JSON report to report.json" in result.stdout
+        assert "Saved Markdown report to report.md" in result.stdout
