@@ -45,6 +45,8 @@ from denbust.validation.dataset import (
     run_validation_finalize,
 )
 from denbust.validation.evaluate import (
+    ValidationLabel,
+    _build_dataset_summary,
     _load_validation_examples,
     _load_variant_matrix,
     _score_predictions,
@@ -1436,6 +1438,10 @@ class TestValidationEvaluate:
         report = json.loads(result.output_path.read_text(encoding="utf-8"))
         assert report["dataset_summary"]["total_examples"] == 2
         assert report["dataset_summary"]["legacy_only_examples"] == 2
+        assert report["dataset_summary"]["legacy_category_counts_relevant_only"][0] == {
+            "label": "brothel",
+            "evaluated_examples": 1,
+        }
         first = report["rankings"][0]
         assert first["relevance_stage"]["evaluated_examples"] == 2
         assert first["enforcement_stage_relevant_only"]["evaluated_examples"] == 1
@@ -1447,6 +1453,8 @@ class TestValidationEvaluate:
         assert "## Dataset Coverage" in markdown
         assert "Legacy-only examples" in markdown
         assert "## Validation Set Typology Coverage" in markdown
+        assert "label    n" in markdown
+        assert "correct" in markdown
         assert "### prompt-tuned" in markdown
 
     def test_score_predictions_uses_only_relevant_rows_for_category_metrics(self) -> None:
@@ -1578,6 +1586,25 @@ class TestValidationEvaluate:
         assert metrics.enforcement_recall_relevant_only == 0.0
         assert metrics.enforcement_f1_relevant_only == 0.0
         assert metrics.enforcement_accuracy_relevant_only == 0.0
+
+    def test_build_dataset_summary_rejects_partial_taxonomy_ids(self) -> None:
+        with pytest.raises(ValueError, match="partial taxonomy ids"):
+            _build_dataset_summary(
+                [
+                    (
+                        ValidationLabel(
+                            relevant=True,
+                            enforcement_related=True,
+                            category="brothel",
+                            sub_category="closure",
+                            index_relevant=False,
+                            taxonomy_version="1",
+                            taxonomy_category_id="brothels",
+                            taxonomy_subcategory_id="",
+                        )
+                    )
+                ]
+            )
 
     def test_run_validation_evaluate_delegates(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

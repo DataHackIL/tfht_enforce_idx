@@ -131,6 +131,13 @@ class LabelBreakdownMetrics(BaseModel):
     accuracy: float = 0.0
 
 
+class LabelCountMetrics(BaseModel):
+    """Frequency-only count for one label in the validation set."""
+
+    label: str
+    evaluated_examples: int = 0
+
+
 class ValidationDatasetSummary(BaseModel):
     """Composition summary of the validation set used for evaluation."""
 
@@ -138,12 +145,10 @@ class ValidationDatasetSummary(BaseModel):
     relevant_examples: int = 0
     legacy_only_examples: int = 0
     taxonomy_labeled_examples: int = 0
-    legacy_category_counts_relevant_only: list[LabelBreakdownMetrics] = Field(default_factory=list)
-    legacy_subcategory_counts_relevant_only: list[LabelBreakdownMetrics] = Field(
-        default_factory=list
-    )
-    taxonomy_category_counts: list[LabelBreakdownMetrics] = Field(default_factory=list)
-    taxonomy_subcategory_counts: list[LabelBreakdownMetrics] = Field(default_factory=list)
+    legacy_category_counts_relevant_only: list[LabelCountMetrics] = Field(default_factory=list)
+    legacy_subcategory_counts_relevant_only: list[LabelCountMetrics] = Field(default_factory=list)
+    taxonomy_category_counts: list[LabelCountMetrics] = Field(default_factory=list)
+    taxonomy_subcategory_counts: list[LabelCountMetrics] = Field(default_factory=list)
 
 
 class VariantMetrics(BaseModel):

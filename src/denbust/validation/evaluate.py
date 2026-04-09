@@ -31,6 +31,7 @@ from denbust.validation.models import (
     ClassifierVariantMatrix,
     ClassifierVariantSpec,
     LabelBreakdownMetrics,
+    LabelCountMetrics,
     ValidationDatasetSummary,
     ValidationReportPayload,
     VariantMetrics,
@@ -189,6 +190,16 @@ def _label_breakdown_metrics(
     ]
 
 
+def _label_count_metrics(counts: Counter[str]) -> list[LabelCountMetrics]:
+    return [
+        LabelCountMetrics(
+            label=label,
+            evaluated_examples=evaluated_examples,
+        )
+        for label, evaluated_examples in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def _display_label(value: str) -> str:
     return value if value else "(none)"
 
@@ -211,10 +222,18 @@ def _build_dataset_summary(labels: Sequence[ValidationLabel]) -> ValidationDatas
             relevant_examples += 1
             legacy_category_counts[label.category] += 1
             legacy_subcategory_counts[label.sub_category] += 1
-        if label.taxonomy_category_id and label.taxonomy_subcategory_id:
+        has_taxonomy_category = bool(label.taxonomy_category_id)
+        has_taxonomy_subcategory = bool(label.taxonomy_subcategory_id)
+        if has_taxonomy_category and has_taxonomy_subcategory:
             taxonomy_labeled_examples += 1
             taxonomy_category_counts[label.taxonomy_category_id] += 1
             taxonomy_subcategory_counts[label.taxonomy_subcategory_id] += 1
+        elif has_taxonomy_category != has_taxonomy_subcategory:
+            msg = (
+                "Validation label has partial taxonomy ids; both taxonomy_category_id "
+                "and taxonomy_subcategory_id must be provided together."
+            )
+            raise ValueError(msg)
         else:
             legacy_only_examples += 1
 
@@ -223,10 +242,10 @@ def _build_dataset_summary(labels: Sequence[ValidationLabel]) -> ValidationDatas
         relevant_examples=relevant_examples,
         legacy_only_examples=legacy_only_examples,
         taxonomy_labeled_examples=taxonomy_labeled_examples,
-        legacy_category_counts_relevant_only=_label_breakdown_metrics(legacy_category_counts),
-        legacy_subcategory_counts_relevant_only=_label_breakdown_metrics(legacy_subcategory_counts),
-        taxonomy_category_counts=_label_breakdown_metrics(taxonomy_category_counts),
-        taxonomy_subcategory_counts=_label_breakdown_metrics(taxonomy_subcategory_counts),
+        legacy_category_counts_relevant_only=_label_count_metrics(legacy_category_counts),
+        legacy_subcategory_counts_relevant_only=_label_count_metrics(legacy_subcategory_counts),
+        taxonomy_category_counts=_label_count_metrics(taxonomy_category_counts),
+        taxonomy_subcategory_counts=_label_count_metrics(taxonomy_subcategory_counts),
     )
 
 
@@ -468,6 +487,44 @@ def _render_breakdown_table(
     return lines
 
 
+def _render_count_table(
+    title: str,
+    counts: Sequence[LabelCountMetrics],
+) -> list[str]:
+    lines = [f"### {title}"]
+    if not counts:
+        lines.append("")
+        lines.append("_No applicable examples._")
+        lines.append("")
+        return lines
+    headers = ("label", "n")
+    rows = [
+        [
+            _display_label(item.label),
+            str(item.evaluated_examples),
+        ]
+        for item in counts
+    ]
+    widths = [
+        max(len(header), *(len(row[column]) for row in rows))
+        for column, header in enumerate(headers)
+    ]
+    lines.extend(
+        [
+            "",
+            "```text",
+            "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+            *[
+                "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row))
+                for row in rows
+            ],
+            "```",
+            "",
+        ]
+    )
+    return lines
+
+
 def render_evaluation_markdown(
     *,
     evaluated_at: datetime,
@@ -503,25 +560,25 @@ def render_evaluation_markdown(
         "",
     ]
     lines.extend(
-        _render_breakdown_table(
+        _render_count_table(
             "Legacy Categories on Relevant Rows",
             dataset_summary.legacy_category_counts_relevant_only,
         )
     )
     lines.extend(
-        _render_breakdown_table(
+        _render_count_table(
             "Legacy Subcategories on Relevant Rows",
             dataset_summary.legacy_subcategory_counts_relevant_only,
         )
     )
     lines.extend(
-        _render_breakdown_table(
+        _render_count_table(
             "Taxonomy Categories",
             dataset_summary.taxonomy_category_counts,
         )
     )
     lines.extend(
-        _render_breakdown_table(
+        _render_count_table(
             "Taxonomy Subcategories",
             dataset_summary.taxonomy_subcategory_counts,
         )
