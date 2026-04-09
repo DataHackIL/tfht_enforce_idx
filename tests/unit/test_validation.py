@@ -49,6 +49,7 @@ from denbust.validation.evaluate import (
     _build_dataset_summary,
     _load_validation_examples,
     _load_variant_matrix,
+    _resolve_report_paths,
     _score_predictions,
     evaluate_classifier_variants,
     render_rankings_table,
@@ -1627,6 +1628,24 @@ class TestValidationEvaluate:
         assert summary.taxonomy_labeled_examples == 1
         assert summary.taxonomy_category_counts[0].label == "brothels"
         assert summary.taxonomy_subcategory_counts[0].label == "administrative_closure"
+
+    def test_resolve_report_paths_rejects_markdown_json_collision(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        report_path = tmp_path / "report.json"
+        monkeypatch.setattr(
+            "denbust.validation.evaluate._markdown_path_for_json",
+            lambda path: path,
+        )
+
+        with pytest.raises(ValueError, match="must differ"):
+            _resolve_report_paths(
+                config=Config(),
+                collected_at=datetime(2026, 4, 10, tzinfo=UTC),
+                output_path=report_path,
+            )
 
     @pytest.mark.asyncio
     async def test_evaluate_classifier_variants_rejects_non_json_output_path(
