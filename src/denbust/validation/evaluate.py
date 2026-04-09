@@ -210,6 +210,23 @@ def _markdown_path_for_json(path: Path) -> Path:
     return path.with_suffix(".md")
 
 
+def _resolve_report_paths(
+    *,
+    config: Config,
+    collected_at: datetime,
+    output_path: Path | None,
+) -> tuple[Path, Path]:
+    report_path = output_path or default_evaluation_output_path(config, collected_at)
+    if output_path is not None and report_path.suffix.casefold() != ".json":
+        msg = f"Evaluation output path must end with .json: {report_path}"
+        raise ValueError(msg)
+    markdown_path = _markdown_path_for_json(report_path)
+    if markdown_path == report_path:
+        msg = "Markdown report path must differ from the JSON report path"
+        raise ValueError(msg)
+    return report_path, markdown_path
+
+
 def _build_dataset_summary(labels: Sequence[ValidationLabel]) -> ValidationDatasetSummary:
     relevant_examples = 0
     legacy_only_examples = 0
@@ -636,7 +653,8 @@ async def evaluate_classifier_variants(
     output_path: Path | None = None,
 ) -> ValidationEvaluateResult:
     """Evaluate tracked classifier variants against the permanent validation set."""
-    api_key = Config().anthropic_api_key
+    config = Config()
+    api_key = config.anthropic_api_key
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY environment variable not set")
 
@@ -685,8 +703,11 @@ async def evaluate_classifier_variants(
         rankings.append(_score_predictions(labels, predictions, variant=variant, model=model))
 
     sorted_rankings = _sort_rankings(rankings)
-    report_path = output_path or default_evaluation_output_path(Config(), collected_at)
-    markdown_path = _markdown_path_for_json(report_path)
+    report_path, markdown_path = _resolve_report_paths(
+        config=config,
+        collected_at=collected_at,
+        output_path=output_path,
+    )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     payload = ValidationReportPayload(
         evaluated_at=collected_at,

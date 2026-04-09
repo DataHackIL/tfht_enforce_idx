@@ -1606,6 +1606,105 @@ class TestValidationEvaluate:
                 ]
             )
 
+    def test_build_dataset_summary_counts_taxonomy_labeled_rows(self) -> None:
+        summary = _build_dataset_summary(
+            [
+                ValidationLabel(
+                    relevant=True,
+                    enforcement_related=True,
+                    category="brothel",
+                    sub_category="closure",
+                    index_relevant=True,
+                    taxonomy_version="1",
+                    taxonomy_category_id="brothels",
+                    taxonomy_subcategory_id="administrative_closure",
+                )
+            ]
+        )
+
+        assert summary.total_examples == 1
+        assert summary.legacy_only_examples == 0
+        assert summary.taxonomy_labeled_examples == 1
+        assert summary.taxonomy_category_counts[0].label == "brothels"
+        assert summary.taxonomy_subcategory_counts[0].label == "administrative_closure"
+
+    @pytest.mark.asyncio
+    async def test_evaluate_classifier_variants_rejects_non_json_output_path(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        validation_set_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_set_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                {
+                    "source_name": "ynet",
+                    "article_date": "2026-03-01T00:00:00+00:00",
+                    "url": "https://example.com/a",
+                    "canonical_url": "https://example.com/a",
+                    "title": "title a",
+                    "snippet": "snippet a",
+                    "relevant": "False",
+                    "enforcement_related": "False",
+                    "index_relevant": "False",
+                    "taxonomy_version": "",
+                    "taxonomy_category_id": "",
+                    "taxonomy_subcategory_id": "",
+                    "category": "not_relevant",
+                    "sub_category": "",
+                    "review_status": "reviewed",
+                    "annotation_source": "",
+                    "expected_month_bucket": "",
+                    "expected_city": "",
+                    "expected_status": "",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-01T00:00:00+00:00",
+                    "finalized_at": "2026-03-02T00:00:00+00:00",
+                    "draft_source": "draft.csv",
+                }
+            ],
+        )
+        variants_path = tmp_path / "variants.yaml"
+        variants_path.write_text(
+            yaml.safe_dump({"defaults": {"model": "claude-sonnet-4-20250514"}, "variants": [{"name": "baseline"}]}),
+            encoding="utf-8",
+        )
+
+        class VariantClassifier:
+            async def classify_batch(self, articles: list[RawArticle]) -> list[ClassifiedArticle]:
+                return [
+                    ClassifiedArticle(
+                        article=article,
+                        classification=ClassificationResult(
+                            relevant=False,
+                            enforcement_related=False,
+                            category=Category.NOT_RELEVANT,
+                            sub_category=None,
+                            confidence="high",
+                        ),
+                    )
+                    for article in articles
+                ]
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.validation.evaluate.create_classifier",
+            lambda **_kwargs: VariantClassifier(),
+        )
+
+        with pytest.raises(ValueError, match="must end with \\.json"):
+            await evaluate_classifier_variants(
+                validation_set_path=validation_set_path,
+                variants_path=variants_path,
+                output_path=tmp_path / "report.md",
+            )
+
     def test_run_validation_evaluate_delegates(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
