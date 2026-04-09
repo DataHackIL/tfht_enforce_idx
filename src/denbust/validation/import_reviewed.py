@@ -6,15 +6,20 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
+
+from pydantic import ValidationError
 
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.taxonomy import default_taxonomy
 from denbust.validation.collect import serialize_draft_rows
 from denbust.validation.common import DRAFT_COLUMNS, write_csv_rows
+from denbust.validation.dataset import validate_reviewed_row
 from denbust.validation.models import ValidationDraftRow
 
 TFHT_MANUAL_TRACKING_V1 = "tfht_manual_tracking_v1"
+VALIDATION_REVIEWED_EXAMPLES_V1 = "validation_reviewed_examples_v1"
 _MONTH_NAMES = {
     "ינואר": 1,
     "פברואר": 2,
@@ -114,11 +119,161 @@ def _infer_taxonomy_leaf(
     return None
 
 
-def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], list[str]]:
+def _normalize_headers(row: dict[str, object]) -> dict[str, str]:
+    return {
+        re.sub(r"[^a-z0-9]+", "_", str(key).strip().casefold()).strip("_"): (
+            "" if value is None else str(value).strip()
+        )
+        for key, value in row.items()
+        if key is not None
+    }
+
+
+def _string_value(normalized: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = normalized.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _load_workbook(input_path: Path) -> Any:
     from openpyxl import load_workbook  # type: ignore[import-untyped]
 
+    return load_workbook(input_path, data_only=True)
+
+
+def _load_workbook_values(input_path: Path) -> list[tuple[object, ...]]:
+    workbook = _load_workbook(input_path)
+    sheet = workbook.active
+    return list(sheet.iter_rows(values_only=True))
+
+
+def _read_tabular_rows(input_path: Path) -> list[dict[str, object]]:
+    suffix = input_path.suffix.casefold()
+    if suffix == ".csv":
+        import csv
+
+        with input_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            return [dict(row) for row in reader]
+
+    if suffix in {".xlsx", ".xlsm"}:
+        rows = _load_workbook_values(input_path)
+        if not rows:
+            return []
+        headers = [str(value or "").strip() for value in rows[0]]
+        parsed_rows: list[dict[str, object]] = []
+        for row in rows[1:]:
+            parsed_rows.append(dict(zip(headers, row, strict=False)))
+        return parsed_rows
+
+    raise ValueError(f"Unsupported reviewed examples file type: {input_path.suffix}")
+
+
+def _normalize_reviewed_examples_row(
+    row: dict[str, object],
+    *,
+    collected_at: datetime,
+) -> dict[str, str]:
+    normalized = _normalize_headers(row)
+    url = _string_value(normalized, "url", "source_url", "article_url")
+    if not url:
+        raise ValueError("url is required")
+    article_date = _string_value(
+        normalized,
+        "article_date",
+        "event_date",
+        "publication_datetime",
+        "date",
+    )
+    if not article_date:
+        raise ValueError("article_date is required")
+    title = _string_value(normalized, "title", "headline")
+    if not title:
+        raise ValueError("title is required")
+
+    canonical_url = canonicalize_news_url(_string_value(normalized, "canonical_url") or url)
+    source_name = _string_value(normalized, "source_name") or _source_name_for_url(url)
+    snippet = _string_value(normalized, "snippet", "summary", "description")
+
+    draft_row = {
+        "source_name": source_name,
+        "article_date": article_date,
+        "url": url,
+        "canonical_url": canonical_url,
+        "title": title,
+        "snippet": snippet,
+        "suggested_relevant": _string_value(normalized, "suggested_relevant", "relevant"),
+        "suggested_enforcement_related": _string_value(
+            normalized,
+            "suggested_enforcement_related",
+            "enforcement_related",
+        ),
+        "suggested_index_relevant": _string_value(
+            normalized,
+            "suggested_index_relevant",
+            "index_relevant",
+        ),
+        "suggested_taxonomy_version": _string_value(
+            normalized, "suggested_taxonomy_version", "taxonomy_version"
+        ),
+        "suggested_taxonomy_category_id": _string_value(
+            normalized,
+            "suggested_taxonomy_category_id",
+            "taxonomy_category_id",
+            "category_id",
+            "tfht_category_id",
+        ),
+        "suggested_taxonomy_subcategory_id": _string_value(
+            normalized,
+            "suggested_taxonomy_subcategory_id",
+            "taxonomy_subcategory_id",
+            "subcategory_id",
+            "tfht_subcategory_id",
+        ),
+        "suggested_category": _string_value(normalized, "suggested_category", "category"),
+        "suggested_sub_category": _string_value(
+            normalized, "suggested_sub_category", "sub_category", "subcategory"
+        ),
+        "suggested_confidence": _string_value(normalized, "suggested_confidence") or "manual",
+        "relevant": _string_value(normalized, "relevant"),
+        "enforcement_related": _string_value(normalized, "enforcement_related"),
+        "index_relevant": _string_value(normalized, "index_relevant"),
+        "taxonomy_version": _string_value(normalized, "taxonomy_version"),
+        "taxonomy_category_id": _string_value(
+            normalized,
+            "taxonomy_category_id",
+            "category_id",
+            "tfht_category_id",
+        ),
+        "taxonomy_subcategory_id": _string_value(
+            normalized,
+            "taxonomy_subcategory_id",
+            "subcategory_id",
+            "tfht_subcategory_id",
+        ),
+        "category": _string_value(normalized, "category"),
+        "sub_category": _string_value(normalized, "sub_category", "subcategory"),
+        "review_status": _string_value(normalized, "review_status") or "reviewed",
+        "annotation_source": _string_value(normalized, "annotation_source") or "manual_table",
+        "expected_month_bucket": _string_value(normalized, "expected_month_bucket"),
+        "expected_city": _string_value(normalized, "expected_city"),
+        "expected_status": _string_value(normalized, "expected_status"),
+        "manual_city": _string_value(normalized, "manual_city"),
+        "manual_address": _string_value(normalized, "manual_address"),
+        "manual_event_label": _string_value(normalized, "manual_event_label"),
+        "manual_status": _string_value(normalized, "manual_status"),
+        "annotation_notes": _string_value(normalized, "annotation_notes", "notes"),
+        "collected_at": _string_value(normalized, "collected_at") or collected_at.isoformat(),
+    }
+    validate_reviewed_row(draft_row, draft_source="reviewed_examples_import")
+    return draft_row
+
+
+def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], list[str]]:
     taxonomy = default_taxonomy()
-    workbook = load_workbook(input_path, data_only=True)
+    workbook = _load_workbook(input_path)
     if "מדד האכיפה" not in workbook.sheetnames:
         raise ValueError("Workbook is missing the 'מדד האכיפה' sheet")
     sheet = workbook["מדד האכיפה"]
@@ -241,6 +396,31 @@ def _manual_tracking_rows(input_path: Path) -> tuple[list[ValidationDraftRow], l
     return list(deduped.values()), warnings
 
 
+def _reviewed_examples_rows(input_path: Path) -> tuple[list[ValidationDraftRow], list[str]]:
+    raw_rows = _read_tabular_rows(input_path)
+    collected_at = datetime.now(UTC)
+    rows: list[ValidationDraftRow] = []
+    warnings: list[str] = []
+
+    for row_number, raw_row in enumerate(raw_rows, start=2):
+        try:
+            normalized = _normalize_reviewed_examples_row(raw_row, collected_at=collected_at)
+            rows.append(ValidationDraftRow.model_validate(normalized))
+        except (ValueError, ValidationError) as exc:
+            warnings.append(f"row {row_number}: skipped because {exc}")
+        except Exception as exc:
+            msg = f"row {row_number}: unexpected import failure"
+            raise RuntimeError(msg) from exc
+
+    deduped: dict[tuple[str, str], ValidationDraftRow] = {}
+    for draft_row in rows:
+        deduped[(draft_row.source_name, draft_row.canonical_url)] = draft_row
+    skipped_duplicates = len(rows) - len(deduped)
+    if skipped_duplicates:
+        warnings.append(f"Skipped {skipped_duplicates} duplicate row(s) by source/canonical_url")
+    return list(deduped.values()), warnings
+
+
 def import_reviewed_table(
     *,
     input_path: Path,
@@ -248,12 +428,16 @@ def import_reviewed_table(
     output_path: Path | None = None,
 ) -> ReviewedTableImportResult:
     """Import a reviewed external table into the validation draft CSV shape."""
-    if format_name != TFHT_MANUAL_TRACKING_V1:
-        raise ValueError(f"Unsupported reviewed-table format: {format_name}")
     if not input_path.exists():
         raise FileNotFoundError(f"Reviewed table not found: {input_path}")
 
-    rows, warnings = _manual_tracking_rows(input_path)
+    if format_name == TFHT_MANUAL_TRACKING_V1:
+        rows, warnings = _manual_tracking_rows(input_path)
+    elif format_name == VALIDATION_REVIEWED_EXAMPLES_V1:
+        rows, warnings = _reviewed_examples_rows(input_path)
+    else:
+        raise ValueError(f"Unsupported reviewed-table format: {format_name}")
+
     final_output_path = output_path or _default_output_path(input_path, format_name)
     write_csv_rows(final_output_path, DRAFT_COLUMNS, serialize_draft_rows(rows))
     skipped_rows = sum(1 for warning in warnings if "skipped because" in warning)
