@@ -100,12 +100,49 @@ class ClassifierVariantMatrix(BaseModel):
     variants: list[ClassifierVariantSpec] = Field(default_factory=list)
 
 
+class BinaryStageMetrics(BaseModel):
+    """Precision/recall metrics for a binary evaluation stage."""
+
+    evaluated_examples: int = 0
+    tp: int = 0
+    fp: int = 0
+    fn: int = 0
+    tn: int = 0
+    precision: float = 0.0
+    recall: float = 0.0
+    f1: float = 0.0
+    accuracy: float = 0.0
+
+
+class AccuracyStageMetrics(BaseModel):
+    """Match-rate metrics for a categorical evaluation stage."""
+
+    evaluated_examples: int = 0
+    correct: int = 0
+    accuracy: float = 0.0
+
+
 class VariantMetrics(BaseModel):
     """Computed metrics for a single classifier variant."""
 
     name: str
     description: str | None = None
     model: str
+    relevance_stage: BinaryStageMetrics = Field(default_factory=BinaryStageMetrics)
+    enforcement_stage_relevant_only: BinaryStageMetrics = Field(default_factory=BinaryStageMetrics)
+    category_stage_relevant_only: AccuracyStageMetrics = Field(default_factory=AccuracyStageMetrics)
+    subcategory_stage_relevant_only: AccuracyStageMetrics = Field(
+        default_factory=AccuracyStageMetrics
+    )
+    taxonomy_category_stage_taxonomy_labeled: AccuracyStageMetrics = Field(
+        default_factory=AccuracyStageMetrics
+    )
+    taxonomy_subcategory_stage_taxonomy_labeled: AccuracyStageMetrics = Field(
+        default_factory=AccuracyStageMetrics
+    )
+    index_relevance_stage_taxonomy_labeled: BinaryStageMetrics = Field(
+        default_factory=BinaryStageMetrics
+    )
     relevance_precision: float
     relevance_recall: float
     relevance_f1: float

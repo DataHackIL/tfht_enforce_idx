@@ -55,6 +55,9 @@ def test_taxonomy_metrics_only_use_taxonomy_labeled_rows() -> None:
     )
 
     assert metrics.taxonomy_labeled_examples == 1
+    assert metrics.taxonomy_category_stage_taxonomy_labeled.evaluated_examples == 1
+    assert metrics.taxonomy_subcategory_stage_taxonomy_labeled.evaluated_examples == 1
+    assert metrics.index_relevance_stage_taxonomy_labeled.evaluated_examples == 1
     assert metrics.taxonomy_category_accuracy_taxonomy_labeled == 1.0
     assert metrics.taxonomy_subcategory_accuracy_taxonomy_labeled == 1.0
     assert metrics.index_relevance_f1_taxonomy_labeled == 1.0
@@ -156,6 +159,10 @@ def test_taxonomy_index_metrics_cover_fp_fn_and_tn_branches() -> None:
     )
 
     assert metrics.taxonomy_labeled_examples == 3
+    assert metrics.index_relevance_stage_taxonomy_labeled.tp == 0
+    assert metrics.index_relevance_stage_taxonomy_labeled.fp == 1
+    assert metrics.index_relevance_stage_taxonomy_labeled.fn == 1
+    assert metrics.index_relevance_stage_taxonomy_labeled.tn == 1
     assert metrics.index_relevance_precision_taxonomy_labeled == 0.0
     assert metrics.index_relevance_recall_taxonomy_labeled == 0.0
     assert metrics.index_relevance_accuracy_taxonomy_labeled == 1 / 3
