@@ -196,7 +196,9 @@ def _label_count_metrics(counts: Counter[str]) -> list[LabelCountMetrics]:
             label=label,
             evaluated_examples=evaluated_examples,
         )
-        for label, evaluated_examples in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        for label, evaluated_examples in sorted(
+            counts.items(), key=lambda item: (-item[1], item[0])
+        )
     ]
 
 
