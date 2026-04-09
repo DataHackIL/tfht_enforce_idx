@@ -1672,7 +1672,12 @@ class TestValidationEvaluate:
         )
         variants_path = tmp_path / "variants.yaml"
         variants_path.write_text(
-            yaml.safe_dump({"defaults": {"model": "claude-sonnet-4-20250514"}, "variants": [{"name": "baseline"}]}),
+            yaml.safe_dump(
+                {
+                    "defaults": {"model": "claude-sonnet-4-20250514"},
+                    "variants": [{"name": "baseline"}],
+                }
+            ),
             encoding="utf-8",
         )
 
