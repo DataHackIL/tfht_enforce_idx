@@ -183,7 +183,9 @@ def _label_breakdown_metrics(
             correct=matches[label],
             accuracy=(matches[label] / evaluated_examples) if evaluated_examples else 0.0,
         )
-        for label, evaluated_examples in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        for label, evaluated_examples in sorted(
+            counts.items(), key=lambda item: (-item[1], item[0])
+        )
     ]
 
 
