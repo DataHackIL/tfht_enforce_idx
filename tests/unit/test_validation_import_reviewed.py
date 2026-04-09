@@ -432,3 +432,32 @@ def test_import_reviewed_table_generic_adapter_requires_url_and_article_date(
     assert result.skipped_rows == 2
     assert any("url is required" in warning for warning in result.warnings)
     assert any("article_date is required" in warning for warning in result.warnings)
+
+
+def test_import_reviewed_table_generic_adapter_reraises_unexpected_row_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_path = tmp_path / "reviewed_examples.csv"
+    input_path.write_text(
+        "\n".join(
+            [
+                "URL,Title,Article Date,Relevant,Enforcement Related,Category,Review Status",
+                "https://example.com/boom,כתבה,2026-04-01T00:00:00+00:00,False,False,not_relevant,reviewed",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def boom(_raw_row: dict[str, object], *, _collected_at: object) -> dict[str, str]:
+        raise TypeError("boom")
+
+    monkeypatch.setattr("denbust.validation.import_reviewed._normalize_reviewed_examples_row", boom)
+
+    with pytest.raises(RuntimeError, match="row 2: unexpected import failure") as error:
+        import_reviewed_table(
+            input_path=input_path,
+            format_name=VALIDATION_REVIEWED_EXAMPLES_V1,
+        )
+
+    assert isinstance(error.value.__cause__, TypeError)

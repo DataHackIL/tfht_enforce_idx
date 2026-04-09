@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
+
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.taxonomy import default_taxonomy
 from denbust.validation.collect import serialize_draft_rows
@@ -404,8 +406,11 @@ def _reviewed_examples_rows(input_path: Path) -> tuple[list[ValidationDraftRow],
         try:
             normalized = _normalize_reviewed_examples_row(raw_row, collected_at=collected_at)
             rows.append(ValidationDraftRow.model_validate(normalized))
-        except Exception as exc:
+        except (ValueError, ValidationError) as exc:
             warnings.append(f"row {row_number}: skipped because {exc}")
+        except Exception as exc:
+            msg = f"row {row_number}: unexpected import failure"
+            raise RuntimeError(msg) from exc
 
     deduped: dict[tuple[str, str], ValidationDraftRow] = {}
     for draft_row in rows:
