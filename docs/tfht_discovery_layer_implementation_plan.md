@@ -20,10 +20,10 @@ It assumes the following design document exists in `docs/`:
 
 ## PR 1 — Discovery/Candidacy foundation (models, config, persistence scaffolding)
 
-## Goal
+### Goal
 Introduce the durable candidate layer without changing the production ingest behavior yet.
 
-## Scope
+### Scope
 - Add `src/denbust/discovery/` package scaffolding
 - Add core models:
   - `DiscoveryQuery`
@@ -49,23 +49,23 @@ Introduce the durable candidate layer without changing the production ingest beh
 - Add unit tests for models/config/path resolution
 - Add docs update describing the new layer and tables
 
-## Out of scope
+### Out of scope
 - no engine implementation yet
 - no source-native integration yet
 - no scrape queue yet
 - no workflow changes beyond placeholders if needed
 
-## Deliverable
+### Deliverable
 A mergeable persistence/config/model foundation that does not yet affect production runs.
 
 ---
 
 ## PR 2 — Source-native candidacy persistence
 
-## Goal
+### Goal
 Make existing source-native discovery write durable candidates.
 
-## Scope
+### Scope
 - Introduce a `SourceCandidateProducer` abstraction or equivalent
 - Adapt current source-native candidacy flow to emit `DiscoveredCandidate`
 - Normalize source-native candidates into:
@@ -80,22 +80,22 @@ Make existing source-native discovery write durable candidates.
   - repeat discovery of same item
 - Add minimal CLI/internal path to run “discover from source-native only”
 
-## Out of scope
+### Out of scope
 - no Brave/Exa/Google yet
 - no separate scrape queue yet
 - no retry scheduler yet
 
-## Deliverable
+### Deliverable
 The existing source-native system now persists durable candidates without breaking current ingest.
 
 ---
 
 ## PR 3 — Separate scrape-attempt layer and candidate-driven ingest
 
-## Goal
+### Goal
 Introduce candidate-driven scraping and retryable scrape state.
 
-## Scope
+### Scope
 - Add candidate selection / queueing logic
 - Add scrape-attempt writer/update path
 - Add candidate status transitions:
@@ -119,22 +119,22 @@ Introduce candidate-driven scraping and retryable scrape state.
   - candidate retained after failure
   - repeated scrape attempt bookkeeping
 
-## Out of scope
+### Out of scope
 - no external search engines yet
 - no backfill scheduling yet
 - no self-healing yet
 
-## Deliverable
+### Deliverable
 A working durable candidate queue with retryable scrape state underneath the existing ingest flow.
 
 ---
 
 ## PR 4 — Brave engine integration
 
-## Goal
+### Goal
 Add the first search-engine discovery path.
 
-## Scope
+### Scope
 - Implement `DiscoveryEngine` abstraction if not already done
 - Add Brave adapter under `src/denbust/discovery/engines/brave.py`
 - Add query builder support for:
@@ -147,22 +147,22 @@ Add the first search-engine discovery path.
 - Add config/docs for Brave API key and limits
 - Add unit tests with mocked Brave responses
 
-## Out of scope
+### Out of scope
 - no Exa yet
 - no Google yet
 - no backfill yet
 
-## Deliverable
+### Deliverable
 Search-engine discovery begins contributing durable candidates, starting with Brave.
 
 ---
 
 ## PR 5 — Exa engine integration
 
-## Goal
+### Goal
 Add Exa as a semantic/AI-native discovery engine.
 
-## Scope
+### Scope
 - Add Exa adapter under `src/denbust/discovery/engines/exa.py`
 - Support:
   - standard query search
@@ -173,22 +173,22 @@ Add Exa as a semantic/AI-native discovery engine.
 - Add tests with mocked Exa responses
 - Add engine-level observability fields where useful
 
-## Out of scope
+### Out of scope
 - no Google yet
 - no backfill yet
 - no self-healing yet
 
-## Deliverable
+### Deliverable
 A second complementary discovery engine is integrated cleanly.
 
 ---
 
 ## PR 6 — Google CSE integration
 
-## Goal
+### Goal
 Add recall-oriented search discovery via Google CSE.
 
-## Scope
+### Scope
 - Add Google CSE adapter under `src/denbust/discovery/engines/google_cse.py`
 - Support:
   - broad Hebrew queries
@@ -202,11 +202,11 @@ Add recall-oriented search discovery via Google CSE.
   - budget controls
 - Add tests with mocked Google responses
 
-## Out of scope
+### Out of scope
 - no backfill yet
 - no self-healing yet
 
-## Deliverable
+### Deliverable
 The initial three-engine discovery layer is complete:
 - source-native
 - Brave
@@ -217,10 +217,10 @@ The initial three-engine discovery layer is complete:
 
 ## PR 7 — Discovery observability and overlap reporting
 
-## Goal
+### Goal
 Make the new layer measurable and debuggable.
 
-## Scope
+### Scope
 - Add engine overlap report generation
 - Add source-native vs search-engine recall reporting
 - Add candidate-to-news-item conversion metrics
@@ -234,21 +234,21 @@ Make the new layer measurable and debuggable.
 - Add CLI command(s) or report helpers for discovery diagnostics
 - Add tests around report generation logic
 
-## Out of scope
+### Out of scope
 - no backfill yet
 - no self-healing yet
 
-## Deliverable
+### Deliverable
 You can now tell whether the discovery layer is actually helping.
 
 ---
 
 ## PR 8 — Search-result-only fallback rows and partial retention
 
-## Goal
+### Goal
 Retain value from promising candidates even when full scraping fails.
 
-## Scope
+### Scope
 - Add explicit handling for:
   - `content_basis = search_result_only`
   - `content_basis = partial_page`
@@ -262,21 +262,21 @@ Retain value from promising candidates even when full scraping fails.
   - retention on failed scrape
   - default exclusion from public release
 
-## Out of scope
+### Out of scope
 - no backfill scheduler yet
 - no self-healing yet
 
-## Deliverable
+### Deliverable
 The system can retain useful low-confidence candidates without pretending they are fully scraped articles.
 
 ---
 
 ## PR 9 — Backfill foundation
 
-## Goal
+### Goal
 Enable slow, systematic historical gap-closing from the candidate layer.
 
-## Scope
+### Scope
 - Add backfill models/config:
   - `backfill_batches`
   - candidate `backfill_batch_id`
@@ -290,21 +290,21 @@ Enable slow, systematic historical gap-closing from the candidate layer.
   - max scrape attempts per run
 - Add docs and tests for backfill scheduling and queue behavior
 
-## Out of scope
+### Out of scope
 - no self-healing yet
 - no automatic source addition yet
 
-## Deliverable
+### Deliverable
 Historical discovery becomes operationally possible without overwhelming the pipeline.
 
 ---
 
 ## PR 10 — Source suggestion and social-targeted discovery support
 
-## Goal
+### Goal
 Lay the groundwork for future source expansion and social/reference discovery.
 
-## Scope
+### Scope
 - Add source-suggestion reporting from candidate provenance:
   - repeated unseen domains
   - scrape success/failure signals
@@ -314,22 +314,22 @@ Lay the groundwork for future source expansion and social/reference discovery.
 - Add docs on intended use and limitations
 - Add tests for source suggestion logic and social query handling
 
-## Out of scope
+### Out of scope
 - no full social scraping
 - no automatic source creation yet
 - no event inference yet
 
-## Deliverable
+### Deliverable
 The candidate layer now supports future expansion into new sources and social/reference evidence.
 
 ---
 
 ## PR 11 — Workflow and operations rollout
 
-## Goal
+### Goal
 Expose the new layer safely in GitHub Actions and local operations.
 
-## Scope
+### Scope
 - Add/update workflows for:
   - `discover`
   - candidate-driven ingest
@@ -346,27 +346,27 @@ Expose the new layer safely in GitHub Actions and local operations.
   - retry semantics
 - Add migration/setup checklist
 
-## Out of scope
+### Out of scope
 - no self-healing implementation yet
 - no event table yet
 
-## Deliverable
+### Deliverable
 The feature is operationally usable in CI/GitHub Actions.
 
 ---
 
 ## Optional PR 12 — Self-healing scaffolding hooks
 
-## Goal
+### Goal
 Add explicit hooks for the future AI-based self-healing phase without implementing it yet.
 
-## Scope
+### Scope
 - add `self_heal_eligible` plumbing where still missing
 - add structured scrape-failure diagnostics
 - add explicit self-heal retry attempt kind
 - add docs for future self-heal workflow
 
-## Deliverable
+### Deliverable
 A clean on-ramp for the next large feature, but not the feature itself.
 
 ---

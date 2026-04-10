@@ -210,7 +210,7 @@ Unifies multiple `news_items` and other references into actual events.
 
 ## Discovery engine abstraction
 
-## Interface
+### Interface
 
 Introduce a discovery-engine interface such as:
 
@@ -264,19 +264,21 @@ as different producers of the same candidate object type.
 
 ## Core models
 
-## 1. Discovery query model
+### 1. Discovery query model
 
 ```python
+from pydantic import Field
+
 class DiscoveryQuery(BaseModel):
     query_text: str
-    language: str | None
-    date_from: datetime | None
-    date_to: datetime | None
-    preferred_domains: list[str] = []
-    excluded_domains: list[str] = []
+    language: str | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    preferred_domains: list[str] = Field(default_factory=list)
+    excluded_domains: list[str] = Field(default_factory=list)
     source_hint: str | None = None
     query_kind: Literal["broad", "source_targeted", "taxonomy_targeted", "social_targeted"]
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
 ```
 
 ### Notes
@@ -287,7 +289,7 @@ class DiscoveryQuery(BaseModel):
 
 ---
 
-## 2. Discovered candidate model
+### 2. Discovered candidate model
 
 ```python
 class DiscoveredCandidate(BaseModel):
@@ -305,14 +307,14 @@ class DiscoveredCandidate(BaseModel):
     rank: int | None
     producer_confidence: float | None
     source_hint: str | None
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
 ```
 
 This is still not a final `news_items` row.
 
 ---
 
-## 3. Persistent candidate model
+### 3. Persistent candidate model
 
 This is the new key model.
 
@@ -364,7 +366,7 @@ class PersistentCandidate(BaseModel):
     backfill_batch_id: str | None
     self_heal_eligible: bool
     source_discovery_only: bool
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
 ```
 
 ### Why this model matters
@@ -372,7 +374,7 @@ It makes candidacy durable and retryable.
 
 ---
 
-## 4. Candidate provenance model
+### 4. Candidate provenance model
 
 Candidates should preserve full provenance.
 
@@ -389,7 +391,7 @@ class CandidateProvenance(BaseModel):
     snippet: str | None
     rank: int | None
     discovered_at: datetime
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
 ```
 
 This is important for:
@@ -400,7 +402,7 @@ This is important for:
 
 ---
 
-## 5. Scrape attempt model
+### 5. Scrape attempt model
 
 ```python
 class ScrapeAttempt(BaseModel):
@@ -434,7 +436,7 @@ class ScrapeAttempt(BaseModel):
 
     error_code: str | None
     error_message: str | None
-    diagnostics: dict[str, Any] = {}
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 ```
 
 This allows:
@@ -447,7 +449,7 @@ This allows:
 
 ## Initial discovery engines
 
-## 1. Brave Search API
+### 1. Brave Search API
 
 ### Role
 - broad candidate discovery
@@ -459,7 +461,7 @@ Even if it misses some Israeli sources, it still contributes overlap/diversity a
 
 ---
 
-## 2. Exa
+### 2. Exa
 
 ### Role
 - semantic complement
@@ -474,7 +476,7 @@ Exa becomes more useful once candidates are persistent, because:
 
 ---
 
-## 3. Google Custom Search JSON API
+### 3. Google Custom Search JSON API
 
 ### Why choose Google here
 Given the Hebrew-query observation about Brave missing major sources, Google is the best initial third engine because it likely improves mainstream-source recall.
@@ -524,7 +526,7 @@ That means source-native candidacy is no longer “just an input to the immediat
 
 ## Candidate generation strategy
 
-## A. Broad cross-web queries
+### A. Broad cross-web queries
 Examples:
 - `"בית בושת"`
 - `"סחר בבני אדם" זנות`
@@ -538,7 +540,7 @@ Run across:
 - Exa
 - Google
 
-## B. Source-targeted search-engine queries
+### B. Source-targeted search-engine queries
 Examples:
 - `site:ynet.co.il "בית בושת"`
 - `site:mako.co.il "סחר בבני אדם"`
@@ -546,19 +548,19 @@ Examples:
 
 These compensate for weak source-native site search.
 
-## C. Source-native candidacy
+### C. Source-native candidacy
 Current source modules continue producing candidates via:
 - RSS
 - archive/list pages
 - source-specific extraction
 
-## D. Example-driven semantic discovery
+### D. Example-driven semantic discovery
 Use Exa against:
 - validated example URLs
 - reviewed manual examples
 - typology seed examples
 
-## E. Social-targeted discovery (future)
+### E. Social-targeted discovery (future)
 Examples:
 - `site:www.facebook.com "בית בושת"`
 - `site:www.instagram.com "סחר בבני אדם"`
@@ -591,7 +593,7 @@ Canonicalization must happen before persistence dedup/merge, because candidates 
 
 This is the main amendment.
 
-## Required behavior
+### Required behavior
 All candidates, from both search engines and source-native discovery, are written first into durable storage.
 
 ### Storage targets
@@ -605,9 +607,9 @@ All candidates, from both search engines and source-native discovery, are writte
 
 ---
 
-## Recommended storage model
+### Recommended storage model
 
-## Supabase tables
+#### Supabase tables
 
 ### 1. `discovery_runs`
 One row per discovery execution.
@@ -816,7 +818,7 @@ Do not treat them as equivalent to fully fetched rows by default.
 
 This design should explicitly support historical backfill.
 
-## Backfill should operate at the candidate layer
+### Backfill should operate at the candidate layer
 That means backfill jobs:
 - generate discovery queries for historical date windows
 - write candidates into persistent storage
@@ -845,7 +847,7 @@ You want:
 
 This design should explicitly support AI-based self-healing later.
 
-## Why candidate persistence matters here
+### Why candidate persistence matters here
 Self-healing needs a backlog of failures to learn from and re-attempt.
 
 ### Future self-healing loop can operate on:
@@ -877,7 +879,7 @@ This requires the durable candidate queue/history that this amended design intro
 
 This design should also support future source expansion.
 
-## Mechanism
+### Mechanism
 Candidates discovered via search may repeatedly come from domains that are:
 - not in your current source list
 - relevant
@@ -952,7 +954,7 @@ So the persistent candidate layer is a useful precursor to the event table.
 
 ## Config design
 
-## Discovery config block
+### Discovery config block
 
 ```yaml
 discovery:
@@ -979,7 +981,7 @@ discovery:
       max_results_per_query: 10
 ```
 
-## Source-native config block
+### Source-native config block
 
 ```yaml
 source_discovery:
@@ -994,7 +996,7 @@ source_discovery:
       enabled: true
 ```
 
-## Candidate persistence config
+### Candidate persistence config
 
 ```yaml
 candidates:
@@ -1009,7 +1011,7 @@ candidates:
   max_retry_attempts: 10
 ```
 
-## Backfill config
+### Backfill config
 
 ```yaml
 backfill:
@@ -1023,7 +1025,7 @@ backfill:
 
 ## Job model
 
-## New recommended jobs
+### New recommended jobs
 
 ```text
 news_items / discover
@@ -1152,39 +1154,39 @@ The important separation is:
 
 ## Recommended implementation milestones
 
-## Milestone 1 — persistent candidacy foundation
+### Milestone 1 — persistent candidacy foundation
 - add persistent candidate models
 - add candidate provenance and scrape-attempt models
 - add Supabase candidate tables
 - add state-repo candidate files
 - write source-native candidates into the durable layer too
 
-## Milestone 2 — Brave + source-native merged discovery
+### Milestone 2 — Brave + source-native merged discovery
 - discovery engine abstraction
 - Brave adapter
 - candidate union/update into durable store
 - scrape-attempt queue
 - final source-aware scraping from durable candidates
 
-## Milestone 3 — Exa + Google CSE
+### Milestone 3 — Exa + Google CSE
 - add Exa
 - add Google CSE
 - add overlap metrics
 - add queue health metrics
 
-## Milestone 4 — retryability and fallback
+### Milestone 4 — retryability and fallback
 - explicit retry scheduling
 - search-result-only fallback rows
 - partial-scrape retention
 - scrape-attempt history
 
-## Milestone 5 — backfill support
+### Milestone 5 — backfill support
 - historical query generation
 - backfill batch model
 - slow-drain backfill queue
 - date-window scheduling
 
-## Milestone 6 — future-facing hooks
+### Milestone 6 — future-facing hooks
 - self-heal eligibility flags
 - source suggestion reports
 - social-targeted candidate support
