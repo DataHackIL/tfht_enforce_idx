@@ -993,7 +993,9 @@ class TestRunPipeline:
         """Scaffolded but unimplemented jobs should fail with a specific placeholder message."""
         config = Config(dataset_name="news_items", job_name="discover")
 
-        with pytest.raises(ValueError, match="news_items/discover is scaffolded but not implemented yet"):
+        with pytest.raises(
+            ValueError, match="news_items/discover is scaffolded but not implemented yet"
+        ):
             await run_job_async(config)
 
     @pytest.mark.asyncio
