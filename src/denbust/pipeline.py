@@ -279,9 +279,10 @@ def _build_source_summaries(
         error_map.setdefault(source_name, []).append(error)
 
     source_debug = {
-        source.name: source.get_debug_state()
+        source.name: debug_state
         for source in sources
-        if source.get_debug_state() is not None
+        for debug_state in [source.get_debug_state()]
+        if debug_state is not None
     }
 
     return [
@@ -447,11 +448,11 @@ def _build_ingest_debug_payload(
     rejected_articles = [
         article for article in classified_articles if not article.classification.relevant
     ]
-    source_runtime_debug = {
-        source.name: source.get_debug_state()
-        for source in sources
-        if source.get_debug_state() is not None
-    }
+    source_runtime_debug: dict[str, object] = {}
+    for source in sources:
+        debug_state = source.get_debug_state()
+        if debug_state is not None:
+            source_runtime_debug[source.name] = debug_state
     source_summaries = _build_source_summaries(
         sources=sources,
         source_names=source_names,

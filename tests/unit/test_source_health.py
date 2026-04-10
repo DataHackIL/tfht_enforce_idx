@@ -1761,6 +1761,58 @@ async def test_probe_mako_reports_section_keyword_match(
 
 
 @pytest.mark.asyncio
+async def test_probe_mako_reports_not_found_search_terminal_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    article = SimpleNamespace(url="https://www.mako.co.il/men-men_news/Article-123.htm")
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://www.mako.co.il/Search"
+
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            return SimpleNamespace(page=FakePage())
+
+        async def _close_browser_session(self, _session: object) -> None:
+            return None
+
+        def _build_search_url(self, keyword: str) -> str:
+            return f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+
+        async def _fetch_search_html(self, session: SimpleNamespace, keyword: str) -> None:
+            session.page.url = self._build_search_url(keyword)
+            return None
+
+        async def _fetch_section_html(self, session: SimpleNamespace, _url: str) -> str:
+            session.page.url = "https://www.mako.co.il/men-men_news"
+            return "<html><body><article>candidate</article></body></html>"
+
+        def _parse_search_results(self, html: str | None, cutoff: datetime) -> list[object]:
+            del html, cutoff
+            return []
+
+        def _parse_article_item(self, item: object, cutoff: datetime) -> object:
+            del item, cutoff
+            return article
+
+        def _matches_keywords(self, candidate: object, keywords: list[str]) -> bool:
+            del keywords
+            return candidate is article
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    search_check = next(check for check in result.checks if check.name == "search:בית בושת")
+    assert search_check.summary == "Search reached Mako's not-found terminal state"
+    assert search_check.details["terminal_state"] == "not_found"
+
+
+@pytest.mark.asyncio
 async def test_probe_mako_skips_when_browser_runtime_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

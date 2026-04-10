@@ -697,7 +697,7 @@ async def _probe_mako(
 
             if html is None:
                 status = DiagnosticStatus.WARN
-                summary = "Search reached a terminal page but returned no rendered results"
+                summary = "Search reached Mako's not-found terminal state"
             elif len(parsed_articles) == 0:
                 status = DiagnosticStatus.WARN
                 summary = "Search page rendered but parsing returned zero articles"
@@ -716,6 +716,7 @@ async def _probe_mako(
                     details={
                         "requested_url": search_url,
                         "final_url": session.page.url,
+                        "terminal_state": "not_found" if html is None else "results",
                         "payload_length": len(html) if html is not None else 0,
                         "article_count": len(parsed_articles),
                         "article_urls": [str(article.url) for article in parsed_articles[:5]],

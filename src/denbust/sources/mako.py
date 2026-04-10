@@ -292,7 +292,7 @@ class MakoScraper(Source):
             raise
 
         state = (
-            "empty"
+            "not_found"
             if html is None
             else self._classify_search_page(self._get_page_url(page, search_url), title, html)[0]
         )

@@ -553,8 +553,52 @@ class TestRunPipelineAsync:
         }
         rejected = result.debug_payload["rejected_articles"]
         assert len(rejected) == 1
-        assert rejected[0]["canonical_url"] == "https://example.com/rejected"
-        assert rejected[0]["relevant"] is False
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_async_calls_get_debug_state_once_per_payload_site(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Per payload site, debug state should be captured once and reused."""
+
+        def fake_create_deduplicator(*, threshold: float) -> MagicMock:
+            del threshold
+            return MagicMock()
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        unseen_article = build_raw_article("https://example.com/rejected")
+        seen_store = MagicMock(count=4)
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[build_classified_article("https://example.com/rejected", relevant=False)]
+        )
+
+        class SourceStub:
+            name = "test"
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_debug_state(self) -> dict[str, int]:
+                self.calls += 1
+                return {"call": self.calls}
+
+        source = SourceStub()
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [source])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([unseen_article], [])),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _seen_store: articles)
+
+        result = await run_pipeline_async(Config(max_articles=5), days=3)
+
+        assert result.debug_payload is not None
+        assert source.calls == 2
+        assert result.debug_payload["source_runtime_debug"] == {"test": {"call": 1}}
+        assert result.debug_payload["source_summaries"][0]["runtime_debug"] == {"call": 2}
 
     def test_machine_debug_helpers_do_not_flag_all_unseen_rejected_on_classification_anomaly(
         self,

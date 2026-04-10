@@ -223,6 +223,41 @@ class TestMakoScraper:
         assert debug_state["sections"][0]["requested_url"] == "https://www.mako.co.il/men-men_news"
 
     @pytest.mark.asyncio
+    async def test_fetch_records_not_found_terminal_state(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Mako not-found search should be recorded explicitly in runtime telemetry."""
+        scraper = self._create_scraper()
+        session = SimpleNamespace(page=SimpleNamespace(url="https://www.mako.co.il/not-found"))
+
+        async def open_browser_session() -> object:
+            return session
+
+        async def close_browser_session(_session: object) -> None:
+            return None
+
+        async def fetch_search_html(_session: object, keyword: str) -> None:
+            session.page.url = f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+            return None
+
+        async def fetch_section_html(_session: object, url: str) -> str:
+            session.page.url = url
+            return "<html></html>"
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser_session)
+        monkeypatch.setattr(scraper, "_close_browser_session", close_browser_session)
+        monkeypatch.setattr(scraper, "_fetch_search_html", fetch_search_html)
+        monkeypatch.setattr(scraper, "_fetch_section_html", fetch_section_html)
+
+        await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
+
+        debug_state = scraper.get_debug_state()
+
+        assert debug_state is not None
+        assert debug_state["searches"][0]["terminal_state"] == "not_found"
+        assert debug_state["searches"][0]["html_present"] is False
+
+    @pytest.mark.asyncio
     async def test_fetch_uses_only_canonical_search_url(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
