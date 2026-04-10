@@ -1,12 +1,15 @@
 """Configuration management for denbust."""
 
 import os
+from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from denbust.discovery.models import DiscoveryQueryKind
+from denbust.discovery.state_paths import DiscoveryStatePaths, resolve_discovery_state_paths
 from denbust.models.common import DatasetName, JobName, normalize_job_name
 from denbust.store.state_paths import DatasetStatePaths, resolve_dataset_state_paths
 
@@ -218,6 +221,127 @@ class BackupConfig(BaseModel):
     object_storage: ObjectStorageBackupConfig = Field(default_factory=ObjectStorageBackupConfig)
 
 
+class DiscoveryEngineConfig(BaseModel):
+    """Base configuration for a discovery engine."""
+
+    enabled: bool = False
+    api_key_env: str | None = None
+    max_results_per_query: int = Field(default=20, ge=1)
+
+
+class ExaDiscoveryEngineConfig(DiscoveryEngineConfig):
+    """Exa-specific discovery configuration."""
+
+    allow_find_similar: bool = True
+
+
+class GoogleCseDiscoveryEngineConfig(DiscoveryEngineConfig):
+    """Google Custom Search Engine configuration."""
+
+    cse_id_env: str | None = None
+    max_results_per_query: int = Field(default=10, ge=1)
+
+
+class DiscoveryEnginesConfig(BaseModel):
+    """Search-engine configuration for durable discovery."""
+
+    brave: DiscoveryEngineConfig = Field(
+        default_factory=lambda: DiscoveryEngineConfig(
+            enabled=False,
+            api_key_env="DENBUST_BRAVE_SEARCH_API_KEY",
+            max_results_per_query=20,
+        )
+    )
+    exa: ExaDiscoveryEngineConfig = Field(
+        default_factory=lambda: ExaDiscoveryEngineConfig(
+            enabled=False,
+            api_key_env="DENBUST_EXA_API_KEY",
+            max_results_per_query=20,
+            allow_find_similar=True,
+        )
+    )
+    google_cse: GoogleCseDiscoveryEngineConfig = Field(
+        default_factory=lambda: GoogleCseDiscoveryEngineConfig(
+            enabled=False,
+            api_key_env="DENBUST_GOOGLE_CSE_API_KEY",
+            cse_id_env="DENBUST_GOOGLE_CSE_ID",
+            max_results_per_query=10,
+        )
+    )
+
+
+class DiscoveryConfig(BaseModel):
+    """Top-level durable discovery configuration."""
+
+    enabled: bool = False
+    persist_candidates: bool = True
+    engines: DiscoveryEnginesConfig = Field(default_factory=DiscoveryEnginesConfig)
+    default_query_kinds: list[DiscoveryQueryKind] = Field(
+        default_factory=lambda: [
+            DiscoveryQueryKind.BROAD,
+            DiscoveryQueryKind.SOURCE_TARGETED,
+        ]
+    )
+
+
+class SourceDiscoveryProducerConfig(BaseModel):
+    """Per-source source-native candidacy configuration."""
+
+    enabled: bool = True
+
+
+class SourceDiscoveryConfig(BaseModel):
+    """Configuration for source-native candidate persistence."""
+
+    enabled: bool = True
+    persist_candidates: bool = True
+    sources: dict[str, SourceDiscoveryProducerConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_sources(cls, data: object) -> object:
+        if data is None or not isinstance(data, Mapping):
+            return data
+
+        normalized = dict(data)
+        sources = normalized.get("sources")
+        if not isinstance(sources, Mapping):
+            return normalized
+
+        normalized["sources"] = {
+            str(name): (
+                value
+                if isinstance(value, Mapping)
+                else {"enabled": bool(value)}
+            )
+            for name, value in sources.items()
+        }
+        return normalized
+
+
+class CandidatesConfig(BaseModel):
+    """Configuration for durable candidate persistence and retry semantics."""
+
+    discovery_runs_table: str = "discovery_runs"
+    supabase_table: str = "persistent_candidates"
+    provenance_table: str = "candidate_provenance"
+    scrape_attempts_table: str = "scrape_attempts"
+    keep_search_only_fallbacks: bool = True
+    require_review_for_search_only: bool = True
+    allow_retry_on_fetch_failure: bool = True
+    default_retry_backoff_hours: int = Field(default=24, ge=1)
+    max_retry_attempts: int = Field(default=10, ge=1)
+
+
+class BackfillConfig(BaseModel):
+    """Optional backfill orchestration configuration."""
+
+    enabled: bool = False
+    batch_window_days: int = Field(default=7, ge=1)
+    max_candidates_per_run: int = Field(default=500, ge=1)
+    max_scrape_attempts_per_run: int = Field(default=100, ge=1)
+
+
 # Default keywords for searching news articles (Hebrew)
 DEFAULT_KEYWORDS: list[str] = [
     "זנות",  # prostitution
@@ -248,6 +372,10 @@ class Config(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     store: StoreConfig = Field(default_factory=StoreConfig)
     operational: OperationalConfig = Field(default_factory=OperationalConfig)
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
+    source_discovery: SourceDiscoveryConfig = Field(default_factory=SourceDiscoveryConfig)
+    candidates: CandidatesConfig = Field(default_factory=CandidatesConfig)
+    backfill: BackfillConfig = Field(default_factory=BackfillConfig)
     release: ReleaseConfig = Field(default_factory=ReleaseConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
 
@@ -274,6 +402,14 @@ class Config(BaseModel):
             seen_path=self.store.seen_path,
             runs_dir=self.store.runs_dir,
             publication_dir=self.store.publication_dir,
+        )
+
+    @property
+    def discovery_state_paths(self) -> DiscoveryStatePaths:
+        """Resolve candidate-layer state paths for this dataset."""
+        return resolve_discovery_state_paths(
+            state_root=self.store.state_root,
+            dataset_name=self.dataset_name,
         )
 
     @property
@@ -346,6 +482,30 @@ class Config(BaseModel):
     def supabase_service_role_key(self) -> str | None:
         """Get the Supabase service role key from the environment."""
         return os.environ.get("DENBUST_SUPABASE_SERVICE_ROLE_KEY")
+
+    @property
+    def brave_search_api_key(self) -> str | None:
+        """Get the Brave Search API key from the configured environment variable."""
+        env_name = self.discovery.engines.brave.api_key_env
+        return os.environ.get(env_name) if env_name else None
+
+    @property
+    def exa_api_key(self) -> str | None:
+        """Get the Exa API key from the configured environment variable."""
+        env_name = self.discovery.engines.exa.api_key_env
+        return os.environ.get(env_name) if env_name else None
+
+    @property
+    def google_cse_api_key(self) -> str | None:
+        """Get the Google CSE API key from the configured environment variable."""
+        env_name = self.discovery.engines.google_cse.api_key_env
+        return os.environ.get(env_name) if env_name else None
+
+    @property
+    def google_cse_id(self) -> str | None:
+        """Get the Google CSE identifier from the configured environment variable."""
+        env_name = self.discovery.engines.google_cse.cse_id_env
+        return os.environ.get(env_name) if env_name else None
 
     @property
     def huggingface_token(self) -> str | None:

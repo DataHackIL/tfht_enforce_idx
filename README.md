@@ -15,6 +15,7 @@ data jobs. Phase A introduced the shared platform spine. Phase B turns the first
 
 Today, the implemented dataset/jobs are:
 
+- `news_items / discover` scaffold only
 - `news_items / ingest`
 - `news_items / release`
 - `news_items / backup`
@@ -37,6 +38,8 @@ Planned future datasets:
 - Publishes release bundles to Kaggle and Hugging Face when configured
 - Uploads the latest release bundle to Google Drive and S3-compatible object storage when configured
 - Persists dataset/job-scoped seen state and per-run JSON snapshots
+- Scaffolds a persistent discovery/candidacy layer with dedicated Supabase tables and state-repo
+  paths under `news_items/discover/`
 - Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
 
 ## Quick Start
@@ -150,6 +153,22 @@ tfht_enforce_idx_state/
         └── publication/
 ```
 
+The new discovery/candidacy foundation adds a separate candidate-layer namespace alongside the
+existing ingest/release/backup state:
+
+```text
+tfht_enforce_idx_state/
+└── news_items/
+    └── discover/
+        ├── runs/
+        ├── candidates/
+        │   ├── latest_candidates.jsonl
+        │   ├── retry_queue.jsonl
+        │   └── backfill_queue.jsonl
+        └── metrics/
+            └── engine_overlap_latest.json
+```
+
 Bootstrap notes:
 
 - `seen.json` may be absent initially; it is created once a run marks at least one URL as seen
@@ -196,8 +215,26 @@ What is implemented now:
 Still intentionally deferred:
 
 - additional dataset implementations beyond `news_items`
+- operational wiring of the new multi-engine discovery layer into production ingest
 - richer human review tooling / admin UI
 - more advanced privacy policies beyond the current pragmatic gate
+
+## Discovery Layer Foundation
+
+PR 1 of the persistent multi-engine discovery work is now in place as scaffolding only. It adds:
+
+- `src/denbust/discovery/` with durable candidate, provenance, scrape-attempt, and discovery-run
+  models
+- config sections for `discovery`, `source_discovery`, `candidates`, and `backfill`
+- explicit state-repo path helpers for candidate-layer snapshots and queue files
+- Supabase migrations for:
+  - `discovery_runs`
+  - `persistent_candidates`
+  - `candidate_provenance`
+  - `scrape_attempts`
+
+This PR does not yet call Brave, Exa, or Google CSE, and it does not yet route the live ingest
+pipeline through the durable candidate queue. The current daily monitoring flow remains unchanged.
 
 ## Config Layout
 

@@ -19,9 +19,13 @@ class DatasetName(StrEnum):
 class JobName(StrEnum):
     """Supported dataset job identifiers."""
 
+    DISCOVER = "discover"
+    SCRAPE_CANDIDATES = "scrape_candidates"
     INGEST = "ingest"
     RELEASE = "release"
     BACKUP = "backup"
+    BACKFILL_DISCOVER = "backfill_discover"
+    BACKFILL_SCRAPE = "backfill_scrape"
 
 
 def normalize_job_name(value: JobName | str | None) -> JobName:
