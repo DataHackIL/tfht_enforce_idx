@@ -275,9 +275,10 @@ class MakoScraper(Source):
     ) -> list[RawArticle]:
         """Search Mako for a specific keyword."""
         search_url = self._build_search_url(keyword)
+        page = getattr(session, "page", None)
         try:
             html = await self._fetch_search_html(session, keyword)
-            title = await session.page.title()
+            title = await self._get_page_title(page)
         except Exception as exc:
             self._append_debug_entry(
                 "searches",
@@ -293,7 +294,7 @@ class MakoScraper(Source):
         state = (
             "empty"
             if html is None
-            else self._classify_search_page(session.page.url, title, html)[0]
+            else self._classify_search_page(self._get_page_url(page, search_url), title, html)[0]
         )
         parsed_articles = self._parse_search_results(html, cutoff) if html else []
         self._append_debug_entry(
@@ -301,7 +302,7 @@ class MakoScraper(Source):
             {
                 "keyword": keyword,
                 "requested_url": search_url,
-                "final_url": session.page.url,
+                "final_url": self._get_page_url(page, search_url),
                 "page_title": title,
                 "terminal_state": state,
                 "html_present": html is not None,
@@ -316,9 +317,10 @@ class MakoScraper(Source):
         self, session: _BrowserSession, url: str, cutoff: datetime, keywords: list[str]
     ) -> list[RawArticle]:
         """Scrape a Mako section page."""
+        page = getattr(session, "page", None)
         try:
             html = await self._fetch_section_html(session, url)
-            title = await session.page.title()
+            title = await self._get_page_title(page)
         except Exception as exc:
             self._append_debug_entry(
                 "sections",
@@ -337,7 +339,7 @@ class MakoScraper(Source):
             "sections",
             {
                 "requested_url": url,
-                "final_url": session.page.url,
+                "final_url": self._get_page_url(page, url),
                 "page_title": title,
                 "status": "ok",
                 "payload_length": len(html),
@@ -347,6 +349,21 @@ class MakoScraper(Source):
             },
         )
         return parsed_articles
+
+    @staticmethod
+    def _get_page_url(page: object | None, fallback: str) -> str:
+        """Return the current browser URL when available."""
+        url = getattr(page, "url", None)
+        return url if isinstance(url, str) and url else fallback
+
+    @staticmethod
+    async def _get_page_title(page: object | None) -> str:
+        """Return the current browser title when available."""
+        title_method = getattr(page, "title", None)
+        if callable(title_method):
+            title = await title_method()
+            return title if isinstance(title, str) else ""
+        return ""
 
     async def _fetch_search_html(self, session: _BrowserSession, keyword: str) -> str | None:
         """Fetch rendered search page HTML via Playwright."""

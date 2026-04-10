@@ -1496,7 +1496,7 @@ async def test_probe_source_uses_fallback_for_unknown_source(
 ) -> None:
     async def fake_fallback(**_kwargs: object) -> SourceDiagnosticResult:
         return SourceDiagnosticResult(
-            source_name="walla",
+            source_name="unknown-source",
             status=DiagnosticStatus.OK,
             live_status=DiagnosticStatus.OK,
             probe_mode="fallback_fetch",
@@ -1504,9 +1504,9 @@ async def test_probe_source_uses_fallback_for_unknown_source(
 
     monkeypatch.setattr(source_health, "_probe_via_fallback_fetch", fake_fallback)
     result = await source_health._probe_source(
-        source_name="walla",
-        source=_FakeSource("walla", 1),
-        source_cfg=SimpleNamespace(name="walla"),
+        source_name="unknown-source",
+        source=_FakeSource("unknown-source", 1),
+        source_cfg=SimpleNamespace(name="unknown-source"),
         days=21,
         sample_keywords=["זנות"],
     )
