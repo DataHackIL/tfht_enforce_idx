@@ -43,6 +43,14 @@ BLOCKED_RESOURCE_URL_FRAGMENTS = (
     "outbrain.com",
     "taboola.com",
 )
+HAARETZ_CONTEXTUAL_LIVUI_PHRASES = (
+    "נערות ליווי",
+    "שירותי ליווי",
+    "מכון ליווי",
+    "דירת ליווי",
+    "סוכנות ליווי",
+    "ליווי בזנות",
+)
 HAARETZ_MONTHS = {
     "ינואר": 1,
     "פברואר": 2,
@@ -368,14 +376,29 @@ class HaaretzScraper(Source):
     def _matches_keywords(self, entry: _HaaretzSearchEntry, keywords: list[str]) -> bool:
         """Check whether a Haaretz search result matches any monitored keyword."""
         haystack = f"{entry.title} {entry.snippet}".casefold()
-        return any(keyword.casefold() in haystack for keyword in keywords)
+        for keyword in keywords:
+            normalized_keyword = keyword.casefold()
+            if normalized_keyword == "ליווי":
+                if any(
+                    phrase.casefold() in haystack for phrase in HAARETZ_CONTEXTUAL_LIVUI_PHRASES
+                ):
+                    return True
+                continue
+            if normalized_keyword in haystack:
+                return True
+        return False
 
     def _is_article_url(self, url: str) -> bool:
         """Check whether a normalized URL points to an internal Haaretz article."""
         parsed = urlsplit(url)
         if parsed.netloc not in {"www.haaretz.co.il", "haaretz.co.il"}:
             return False
-        if "/labels/" in parsed.path or "/promotion" in parsed.path or "/account/" in parsed.path:
+        if (
+            "/labels/" in parsed.path
+            or "/promotion" in parsed.path
+            or "/account/" in parsed.path
+            or "/talkback/" in parsed.path
+        ):
             return False
         return "/ty-article" in parsed.path
 

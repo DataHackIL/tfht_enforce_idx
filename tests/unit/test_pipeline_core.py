@@ -91,15 +91,25 @@ def build_unified_item(url: str = "https://example.com/article") -> UnifiedItem:
 class FakeSource:
     """Simple async source stub."""
 
-    def __init__(self, name: str, fetch_result: list[RawArticle] | Exception) -> None:
+    def __init__(
+        self,
+        name: str,
+        fetch_result: list[RawArticle] | Exception,
+        *,
+        debug_state: dict[str, object] | None = None,
+    ) -> None:
         self.name = name
         self._fetch_result = fetch_result
+        self._debug_state = debug_state
 
     async def fetch(self, days: int, keywords: list[str]) -> list[RawArticle]:
         del days, keywords
         if isinstance(self._fetch_result, Exception):
             raise self._fetch_result
         return self._fetch_result
+
+    def get_debug_state(self) -> dict[str, object] | None:
+        return self._debug_state
 
 
 class TestSetupLogging:
@@ -231,6 +241,15 @@ class TestFetchAndClassifyHelpers:
     def test_machine_debug_helpers_flag_source_errors_and_zero_results(self) -> None:
         """Machine-oriented summaries should expose source errors and zero-result sources."""
         source_summaries = _build_source_summaries(
+            sources=[
+                FakeSource(
+                    "mako",
+                    [],
+                    debug_state={"searches": [{"keyword": "בית בושת", "status": "ok"}]},
+                ),
+                FakeSource("haaretz", []),
+                FakeSource("ice", []),
+            ],
             source_names=["mako", "haaretz", "ice"],
             raw_articles=[build_raw_article("https://example.com/one")],
             errors=["mako: timeout", "plain warning without source prefix"],
@@ -259,6 +278,9 @@ class TestFetchAndClassifyHelpers:
 
         assert source_summaries[0]["source_name"] == "mako"
         assert source_summaries[0]["had_error"] is True
+        assert source_summaries[0]["runtime_debug"] == {
+            "searches": [{"keyword": "בית בושת", "status": "ok"}]
+        }
         assert source_summaries[1]["source_name"] == "haaretz"
         assert source_summaries[1]["returned_zero_results"] is True
         assert source_summaries[2]["source_name"] == "ice"
@@ -493,7 +515,14 @@ class TestRunPipelineAsync:
         classifier.classify_batch = AsyncMock(
             return_value=[build_classified_article("https://example.com/rejected", relevant=False)]
         )
-        source = type("SourceStub", (), {"name": "test"})()
+
+        class SourceStub:
+            name = "test"
+
+            def get_debug_state(self) -> dict[str, str]:
+                return {"phase": "fetch", "status": "ok"}
+
+        source = SourceStub()
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [source])
         monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
@@ -510,21 +539,75 @@ class TestRunPipelineAsync:
         assert result.debug_payload is not None
         assert result.debug_payload["schema_version"] == "news_items.ingest.debug.v1"
         assert result.debug_payload["counts"]["unseen_article_count"] == 1
+        assert result.debug_payload["source_runtime_debug"] == {
+            "test": {"phase": "fetch", "status": "ok"}
+        }
         assert result.debug_payload["classifier_summary"]["rejected_article_count"] == 1
         assert result.debug_payload["problems"]["all_unseen_rejected"] is True
         assert "all_unseen_rejected" in result.debug_payload["suspicions"]
         assert result.debug_payload["source_summaries"][0]["source_name"] == "test"
         assert result.debug_payload["source_summaries"][0]["raw_article_count"] == 1
+        assert result.debug_payload["source_summaries"][0]["runtime_debug"] == {
+            "phase": "fetch",
+            "status": "ok",
+        }
         rejected = result.debug_payload["rejected_articles"]
         assert len(rejected) == 1
         assert rejected[0]["canonical_url"] == "https://example.com/rejected"
         assert rejected[0]["relevant"] is False
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_async_calls_get_debug_state_once_per_payload_site(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Per payload site, debug state should be captured once and reused."""
+
+        def fake_create_deduplicator(*, threshold: float) -> MagicMock:
+            del threshold
+            return MagicMock()
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        unseen_article = build_raw_article("https://example.com/rejected")
+        seen_store = MagicMock(count=4)
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[build_classified_article("https://example.com/rejected", relevant=False)]
+        )
+
+        class SourceStub:
+            name = "test"
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_debug_state(self) -> dict[str, int]:
+                self.calls += 1
+                return {"call": self.calls}
+
+        source = SourceStub()
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [source])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([unseen_article], [])),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _seen_store: articles)
+
+        result = await run_pipeline_async(Config(max_articles=5), days=3)
+
+        assert result.debug_payload is not None
+        assert source.calls == 2
+        assert result.debug_payload["source_runtime_debug"] == {"test": {"call": 1}}
+        assert result.debug_payload["source_summaries"][0]["runtime_debug"] == {"call": 2}
 
     def test_machine_debug_helpers_do_not_flag_all_unseen_rejected_on_classification_anomaly(
         self,
     ) -> None:
         """Incomplete classifier output should not emit the all-unseen-rejected signal."""
         source_summaries = _build_source_summaries(
+            sources=[FakeSource("mako", [])],
             source_names=["mako"],
             raw_articles=[],
             errors=[],

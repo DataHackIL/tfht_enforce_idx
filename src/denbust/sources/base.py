@@ -1,6 +1,7 @@
 """Base protocol for news sources."""
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from denbust.data_models import RawArticle
 
@@ -26,3 +27,7 @@ class Source(ABC):
             List of raw articles matching the criteria.
         """
         ...
+
+    def get_debug_state(self) -> dict[str, Any] | None:
+        """Return optional structured runtime telemetry for debug logs."""
+        return None

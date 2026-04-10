@@ -259,7 +259,7 @@ def create_ynet_source() -> RSSSource:
     """Create Ynet RSS source."""
     return RSSSource(
         source_name="ynet",
-        feed_url="https://www.ynet.co.il/Integration/StoryRss2.xml",
+        feed_url="https://www.ynet.co.il/Integration/StoryRss190.xml",
     )
 
 

@@ -116,11 +116,16 @@ class MakoScraper(Source):
         """Initialize Mako scraper."""
         self._name = "mako"
         self._rate_limit_delay_seconds = rate_limit_delay_seconds
+        self._debug_state: dict[str, Any] = {}
 
     @property
     def name(self) -> str:
         """Return the source name."""
         return self._name
+
+    def get_debug_state(self) -> dict[str, Any] | None:
+        """Return structured runtime telemetry for debug logs."""
+        return self._debug_state or None
 
     async def fetch(self, days: int, keywords: list[str]) -> list[RawArticle]:
         """Fetch articles from Mako, filtering by date and keywords.
@@ -136,12 +141,22 @@ class MakoScraper(Source):
 
         articles: list[RawArticle] = []
         cutoff = datetime.now(UTC) - timedelta(days=days)
+        self._reset_debug_state(days=days, keywords=keywords)
 
         try:
             session = await self._open_browser_session()
+            self._debug_state["browser_session"] = {
+                "status": "ok",
+                "headless": True,
+                "user_agent": USER_AGENT,
+            }
         except Exception as e:
+            self._debug_state["browser_session"] = {
+                "status": "error",
+                "error": str(e),
+            }
             logger.exception("Mako browser session could not be opened: %s", e)
-            return []
+            raise RuntimeError(f"Mako browser session could not be opened: {e}") from e
 
         try:
             for keyword in keywords:
@@ -180,7 +195,27 @@ class MakoScraper(Source):
                 unique.append(article)
 
         logger.info("Found %s unique articles from Mako", len(unique))
+        self._debug_state["result"] = {
+            "raw_article_count": len(articles),
+            "unique_article_count": len(unique),
+        }
         return unique
+
+    def _reset_debug_state(self, *, days: int, keywords: list[str]) -> None:
+        """Reset per-fetch runtime telemetry."""
+        self._debug_state = {
+            "days": days,
+            "keywords": list(keywords),
+            "browser_session": {"status": "pending"},
+            "searches": [],
+            "sections": [],
+        }
+
+    def _append_debug_entry(self, key: str, entry: dict[str, Any]) -> None:
+        """Append a telemetry entry under a list-valued key."""
+        bucket = self._debug_state.setdefault(key, [])
+        if isinstance(bucket, list):
+            bucket.append(entry)
 
     async def _rate_limit(self) -> None:
         """Sleep between Mako requests unless disabled for tests."""
@@ -239,18 +274,96 @@ class MakoScraper(Source):
         self, session: _BrowserSession, keyword: str, cutoff: datetime
     ) -> list[RawArticle]:
         """Search Mako for a specific keyword."""
-        html = await self._fetch_search_html(session, keyword)
-        if not html:
-            return []
+        search_url = self._build_search_url(keyword)
+        page = getattr(session, "page", None)
+        try:
+            html = await self._fetch_search_html(session, keyword)
+            title = await self._get_page_title(page)
+        except Exception as exc:
+            self._append_debug_entry(
+                "searches",
+                {
+                    "keyword": keyword,
+                    "requested_url": search_url,
+                    "status": "error",
+                    "error": str(exc),
+                },
+            )
+            raise
 
-        return self._parse_search_results(html, cutoff)
+        state = (
+            "not_found"
+            if html is None
+            else self._classify_search_page(self._get_page_url(page, search_url), title, html)[0]
+        )
+        parsed_articles = self._parse_search_results(html, cutoff) if html else []
+        self._append_debug_entry(
+            "searches",
+            {
+                "keyword": keyword,
+                "requested_url": search_url,
+                "final_url": self._get_page_url(page, search_url),
+                "page_title": title,
+                "terminal_state": state,
+                "html_present": html is not None,
+                "payload_length": len(html) if html is not None else 0,
+                "parsed_article_count": len(parsed_articles),
+                "article_urls": [str(article.url) for article in parsed_articles[:5]],
+            },
+        )
+        return parsed_articles
 
     async def _scrape_section(
         self, session: _BrowserSession, url: str, cutoff: datetime, keywords: list[str]
     ) -> list[RawArticle]:
         """Scrape a Mako section page."""
-        html = await self._fetch_section_html(session, url)
-        return self._parse_section_page(html, cutoff, keywords)
+        page = getattr(session, "page", None)
+        try:
+            html = await self._fetch_section_html(session, url)
+            title = await self._get_page_title(page)
+        except Exception as exc:
+            self._append_debug_entry(
+                "sections",
+                {
+                    "requested_url": url,
+                    "status": "error",
+                    "error": str(exc),
+                },
+            )
+            raise
+
+        soup = BeautifulSoup(html, "lxml")
+        container_count = len(soup.select("article, .article, .item, li"))
+        parsed_articles = self._parse_section_page(html, cutoff, keywords)
+        self._append_debug_entry(
+            "sections",
+            {
+                "requested_url": url,
+                "final_url": self._get_page_url(page, url),
+                "page_title": title,
+                "status": "ok",
+                "payload_length": len(html),
+                "container_count": container_count,
+                "parsed_article_count": len(parsed_articles),
+                "article_urls": [str(article.url) for article in parsed_articles[:5]],
+            },
+        )
+        return parsed_articles
+
+    @staticmethod
+    def _get_page_url(page: object | None, fallback: str) -> str:
+        """Return the current browser URL when available."""
+        url = getattr(page, "url", None)
+        return url if isinstance(url, str) and url else fallback
+
+    @staticmethod
+    async def _get_page_title(page: object | None) -> str:
+        """Return the current browser title when available."""
+        title_method = getattr(page, "title", None)
+        if callable(title_method):
+            title = await title_method()
+            return title if isinstance(title, str) else ""
+        return ""
 
     async def _fetch_search_html(self, session: _BrowserSession, keyword: str) -> str | None:
         """Fetch rendered search page HTML via Playwright."""
