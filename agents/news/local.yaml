@@ -8,7 +8,7 @@ max_articles: 30
 sources:
   - name: ynet
     type: rss
-    url: https://www.ynet.co.il/Integration/StoryRss2.xml
+    url: https://www.ynet.co.il/Integration/StoryRss190.xml
     enabled: true
 
   - name: walla

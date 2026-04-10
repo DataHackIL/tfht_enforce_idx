@@ -18,8 +18,11 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
 import denbust.sources.ice as ice_source
+import denbust.sources.haaretz as haaretz_source
+import denbust.sources.mako as mako_source
 import denbust.sources.maariv as maariv_source
 import denbust.sources.rss as rss_source
+import denbust.sources.walla as walla_source
 from denbust.config import DEFAULT_KEYWORDS, Config, SourceConfig, load_config
 from denbust.pipeline import create_sources
 from denbust.sources.base import Source
@@ -46,6 +49,7 @@ class FailureBucket(StrEnum):
 
     FEED_FETCH_FAILED = "feed_fetch_failed"
     FEED_EMPTY_OR_STALE = "feed_empty_or_stale"
+    STALE_RESULTS = "stale_results"
     KEYWORD_FILTER_ZEROED_RESULTS = "keyword_filter_zeroed_results"
     HTTP_FETCH_FAILED = "http_fetch_failed"
     UNEXPECTED_REDIRECT = "unexpected_redirect"
@@ -345,8 +349,14 @@ async def _probe_source(
         return await _probe_ynet(source_cfg=source_cfg, days=days, sample_keywords=sample_keywords)
     if source_name == "maariv":
         return await _probe_maariv(days=days, sample_keywords=sample_keywords)
+    if source_name == "mako":
+        return await _probe_mako(days=days, sample_keywords=sample_keywords)
+    if source_name == "haaretz":
+        return await _probe_haaretz(days=days, sample_keywords=sample_keywords)
     if source_name == "ice":
         return await _probe_ice(days=days, sample_keywords=sample_keywords)
+    if source_name == "walla":
+        return await _probe_walla(days=days, sample_keywords=sample_keywords)
     if source is None:
         return SourceDiagnosticResult(
             source_name=source_name,
@@ -605,6 +615,217 @@ async def _probe_maariv(
     )
 
 
+async def _probe_mako(
+    *,
+    days: int,
+    sample_keywords: list[str],
+) -> SourceDiagnosticResult:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    scraper = mako_source.MakoScraper(rate_limit_delay_seconds=0.0)
+
+    try:
+        session = await scraper._open_browser_session()
+    except RuntimeError as exc:
+        message = str(exc)
+        status = (
+            DiagnosticStatus.SKIP
+            if "playwright" in message.lower() or "chromium" in message.lower()
+            else DiagnosticStatus.FAIL
+        )
+        return _live_result(
+            source_name="mako",
+            status=status,
+            bucket=None if status is DiagnosticStatus.SKIP else FailureBucket.LIVE_PROBE_EXCEPTION,
+            checks=[
+                ProbeCheck(
+                    name="browser_session",
+                    status=status,
+                    summary=message,
+                )
+            ],
+        )
+    except Exception as exc:
+        return _live_result(
+            source_name="mako",
+            status=DiagnosticStatus.FAIL,
+            bucket=FailureBucket.LIVE_PROBE_EXCEPTION,
+            checks=[
+                ProbeCheck(
+                    name="browser_session",
+                    status=DiagnosticStatus.FAIL,
+                    summary=f"Browser session failed unexpectedly: {exc}",
+                )
+            ],
+        )
+
+    checks: list[ProbeCheck] = []
+    saw_search_success = False
+    saw_search_keyword_match = False
+    saw_search_parseable_results = False
+    saw_section_success = False
+    saw_section_keyword_match = False
+    saw_section_parseable_results = False
+    unexpected_redirect = False
+
+    try:
+        for keyword in sample_keywords:
+            search_url = scraper._build_search_url(keyword)
+            try:
+                html = await scraper._fetch_search_html(session, keyword)
+            except Exception as exc:
+                checks.append(
+                    ProbeCheck(
+                        name=f"search:{keyword}",
+                        status=DiagnosticStatus.FAIL,
+                        summary=f"Search fetch failed: {exc}",
+                        details={"requested_url": search_url},
+                    )
+                )
+                continue
+
+            saw_search_success = True
+            if _is_unexpected_redirect(session.page.url, search_url):
+                unexpected_redirect = True
+
+            parsed_articles = scraper._parse_search_results(html, cutoff) if html else []
+            saw_search_parseable_results = saw_search_parseable_results or bool(parsed_articles)
+            keyword_hit = any(
+                scraper._matches_keywords(article, sample_keywords) for article in parsed_articles
+            )
+            saw_search_keyword_match = saw_search_keyword_match or keyword_hit
+
+            if html is None:
+                status = DiagnosticStatus.WARN
+                summary = "Search reached a terminal page but returned no rendered results"
+            elif len(parsed_articles) == 0:
+                status = DiagnosticStatus.WARN
+                summary = "Search page rendered but parsing returned zero articles"
+            elif keyword_hit:
+                status = DiagnosticStatus.OK
+                summary = "Search page returned parsed keyword-matching articles"
+            else:
+                status = DiagnosticStatus.OK
+                summary = "Search page returned parsed articles"
+
+            checks.append(
+                ProbeCheck(
+                    name=f"search:{keyword}",
+                    status=status,
+                    summary=summary,
+                    details={
+                        "requested_url": search_url,
+                        "final_url": session.page.url,
+                        "payload_length": len(html) if html is not None else 0,
+                        "article_count": len(parsed_articles),
+                        "article_urls": [str(article.url) for article in parsed_articles[:5]],
+                    },
+                )
+            )
+
+        try:
+            section_html = await scraper._fetch_section_html(session, mako_source.MAKO_MEN_NEWS_URL)
+        except Exception as exc:
+            checks.append(
+                ProbeCheck(
+                    name="section:men-men_news",
+                    status=DiagnosticStatus.FAIL,
+                    summary=f"Section fetch failed: {exc}",
+                    details={"requested_url": mako_source.MAKO_MEN_NEWS_URL},
+                )
+            )
+        else:
+            saw_section_success = True
+            if _is_unexpected_redirect(session.page.url, mako_source.MAKO_MEN_NEWS_URL):
+                unexpected_redirect = True
+
+            soup = BeautifulSoup(section_html, "lxml")
+            containers = soup.select("article, .article, .item, li")
+            parsed_articles = [
+                article
+                for article in (
+                    scraper._parse_article_item(item, cutoff) for item in containers
+                )
+                if article is not None
+            ]
+            keyword_matches = [
+                article
+                for article in parsed_articles
+                if scraper._matches_keywords(article, sample_keywords)
+            ]
+            saw_section_parseable_results = bool(parsed_articles)
+            saw_section_keyword_match = bool(keyword_matches)
+
+            if len(containers) == 0:
+                status = DiagnosticStatus.FAIL
+                summary = "Section page rendered but no candidate containers were found"
+            elif len(parsed_articles) == 0:
+                status = DiagnosticStatus.WARN
+                summary = "Section page contains candidates but parsing returned zero articles"
+            elif len(keyword_matches) == 0:
+                status = DiagnosticStatus.WARN
+                summary = "Section page returned parsed articles but none match the sampled keywords"
+            else:
+                status = DiagnosticStatus.OK
+                summary = "Section page returned parsed keyword-matching articles"
+
+            checks.append(
+                ProbeCheck(
+                    name="section:men-men_news",
+                    status=status,
+                    summary=summary,
+                    details={
+                        "requested_url": mako_source.MAKO_MEN_NEWS_URL,
+                        "final_url": session.page.url,
+                        "payload_length": len(section_html),
+                        "container_count": len(containers),
+                        "parsed_article_count": len(parsed_articles),
+                        "keyword_match_count": len(keyword_matches),
+                        "article_urls": [str(article.url) for article in keyword_matches[:5]],
+                    },
+                )
+            )
+    finally:
+        try:
+            await scraper._close_browser_session(session)
+        except Exception:
+            pass
+
+    if unexpected_redirect:
+        return _live_result(
+            source_name="mako",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.UNEXPECTED_REDIRECT,
+            checks=checks,
+        )
+    if not saw_search_success and not saw_section_success:
+        return _live_result(
+            source_name="mako",
+            status=DiagnosticStatus.FAIL,
+            bucket=FailureBucket.HTTP_FETCH_FAILED,
+            checks=checks,
+        )
+    if not saw_search_parseable_results and not saw_section_parseable_results:
+        return _live_result(
+            source_name="mako",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.PARSE_ZEROED_RESULTS,
+            checks=checks,
+        )
+    if not saw_search_keyword_match and not saw_section_keyword_match:
+        return _live_result(
+            source_name="mako",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+            checks=checks,
+        )
+
+    return _live_result(
+        source_name="mako",
+        status=DiagnosticStatus.OK,
+        checks=checks,
+    )
+
+
 async def _probe_ice(
     *,
     days: int,
@@ -616,6 +837,7 @@ async def _probe_ice(
     saw_successful_page = False
     saw_results_container = False
     parsed_article_total = 0
+    stale_candidate_total = 0
     unexpected_redirect = False
 
     async with httpx.AsyncClient(
@@ -654,16 +876,25 @@ async def _probe_ice(
 
             unparseable_date_count = 0
             parsed_article_count = 0
+            stale_candidate_count = 0
             for candidate in candidates:
-                if scraper._parse_date(candidate.get_text(" ", strip=True)) is None:
+                candidate_text = candidate.get_text(" ", strip=True)
+                parsed_date = scraper._parse_date(candidate_text)
+                if parsed_date is None:
                     unparseable_date_count += 1
+                elif parsed_date < cutoff:
+                    stale_candidate_count += 1
                 if scraper._parse_article_item(candidate, cutoff) is not None:
                     parsed_article_count += 1
 
             parsed_article_total += parsed_article_count
+            stale_candidate_total += stale_candidate_count
             if results_article is None:
                 status = DiagnosticStatus.FAIL
                 summary = "Search page did not expose the expected ICE results container"
+            elif parsed_article_count == 0 and stale_candidate_count == len(candidates) and candidates:
+                status = DiagnosticStatus.WARN
+                summary = "Search page returned only stale candidates outside the cutoff window"
             elif parsed_article_count == 0:
                 status = DiagnosticStatus.WARN
                 summary = "Search page contains candidates but parsing returned zero articles"
@@ -684,6 +915,7 @@ async def _probe_ice(
                         "payload_length": len(fetch_result.text),
                         "candidate_count": len(candidates),
                         "parsed_article_count": parsed_article_count,
+                        "stale_candidate_count": stale_candidate_count,
                         "unparseable_date_count": unparseable_date_count,
                         "has_results_container": results_article is not None,
                     },
@@ -718,6 +950,13 @@ async def _probe_ice(
             bucket=FailureBucket.SELECTOR_DRIFT_SUSPECTED,
             checks=checks,
         )
+    if parsed_article_total == 0 and stale_candidate_total > 0:
+        return _live_result(
+            source_name="ice",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.STALE_RESULTS,
+            checks=checks,
+        )
     if parsed_article_total == 0:
         return _live_result(
             source_name="ice",
@@ -728,6 +967,285 @@ async def _probe_ice(
 
     return _live_result(
         source_name="ice",
+        status=DiagnosticStatus.OK,
+        checks=checks,
+    )
+
+
+async def _probe_walla(
+    *,
+    days: int,
+    sample_keywords: list[str],
+) -> SourceDiagnosticResult:
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=days)
+    scraper = walla_source.WallaScraper(rate_limit_delay_seconds=0.0)
+    checks: list[ProbeCheck] = []
+    saw_successful_page = False
+    unexpected_redirect = False
+    entry_total = 0
+    recent_entry_total = 0
+    keyword_match_total = 0
+
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        headers={"User-Agent": walla_source.USER_AGENT},
+        follow_redirects=True,
+    ) as client:
+        months = scraper._iter_months(cutoff, now)
+        for category_id in walla_source.WALLA_ARCHIVE_CATEGORY_IDS:
+            for year, month in months:
+                archive_url = scraper._build_archive_url(category_id, year, month, page_number=1)
+                try:
+                    fetch_result = await _fetch_text(
+                        archive_url,
+                        user_agent=walla_source.USER_AGENT,
+                        client=client,
+                    )
+                except Exception as exc:
+                    checks.append(
+                        ProbeCheck(
+                            name=f"archive:{category_id}:{year}-{month:02d}",
+                            status=DiagnosticStatus.FAIL,
+                            summary=f"Archive fetch failed: {exc}",
+                            details={"url": archive_url},
+                        )
+                    )
+                    continue
+
+                saw_successful_page = True
+                if _is_unexpected_redirect(fetch_result.final_url, archive_url):
+                    unexpected_redirect = True
+
+                entries = scraper._parse_archive_entries(fetch_result.text)
+                recent_entries = [entry for entry in entries if entry.date >= cutoff]
+                keyword_matches = [
+                    entry
+                    for entry in recent_entries
+                    if scraper._matches_keywords(entry, sample_keywords)
+                ]
+
+                entry_total += len(entries)
+                recent_entry_total += len(recent_entries)
+                keyword_match_total += len(keyword_matches)
+
+                if len(entries) == 0:
+                    status = DiagnosticStatus.FAIL
+                    summary = "Archive page fetched but parsed zero entries"
+                elif len(recent_entries) == 0:
+                    status = DiagnosticStatus.WARN
+                    summary = "Archive page parsed entries but none are inside the cutoff window"
+                elif len(keyword_matches) == 0:
+                    status = DiagnosticStatus.WARN
+                    summary = "Archive page has recent entries but none match the sampled keywords"
+                else:
+                    status = DiagnosticStatus.OK
+                    summary = "Archive page returned recent keyword-matching entries"
+
+                checks.append(
+                    ProbeCheck(
+                        name=f"archive:{category_id}:{year}-{month:02d}",
+                        status=status,
+                        summary=summary,
+                        details={
+                            "requested_url": archive_url,
+                            "final_url": fetch_result.final_url,
+                            "status_code": fetch_result.status_code,
+                            "content_type": fetch_result.content_type,
+                            "payload_length": len(fetch_result.text),
+                            "entry_count": len(entries),
+                            "recent_entry_count": len(recent_entries),
+                            "keyword_match_count": len(keyword_matches),
+                        },
+                    )
+                )
+
+    if not saw_successful_page:
+        return _live_result(
+            source_name="walla",
+            status=DiagnosticStatus.FAIL,
+            bucket=FailureBucket.HTTP_FETCH_FAILED,
+            checks=checks
+            or [
+                ProbeCheck(
+                    name="live_probe",
+                    status=DiagnosticStatus.FAIL,
+                    summary="All Walla archive fetches failed",
+                )
+            ],
+        )
+    if unexpected_redirect:
+        return _live_result(
+            source_name="walla",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.UNEXPECTED_REDIRECT,
+            checks=checks,
+        )
+    if entry_total == 0:
+        return _live_result(
+            source_name="walla",
+            status=DiagnosticStatus.FAIL,
+            bucket=FailureBucket.SELECTOR_DRIFT_SUSPECTED,
+            checks=checks,
+        )
+    if recent_entry_total == 0:
+        return _live_result(
+            source_name="walla",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.STALE_RESULTS,
+            checks=checks,
+        )
+    if keyword_match_total == 0:
+        return _live_result(
+            source_name="walla",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+            checks=checks,
+        )
+
+    return _live_result(
+        source_name="walla",
+        status=DiagnosticStatus.OK,
+        checks=checks,
+    )
+
+
+async def _probe_haaretz(
+    *,
+    days: int,
+    sample_keywords: list[str],
+) -> SourceDiagnosticResult:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    scraper = haaretz_source.HaaretzScraper(rate_limit_delay_seconds=0.0)
+    checks: list[ProbeCheck] = []
+    saw_successful_page = False
+    unexpected_redirect = False
+    entry_total = 0
+    recent_entry_total = 0
+    keyword_match_total = 0
+
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        headers={"User-Agent": haaretz_source.USER_AGENT},
+        follow_redirects=True,
+    ) as client:
+        for keyword in sample_keywords:
+            page_url = scraper._build_search_url(keyword, page_number=1)
+            try:
+                fetch_result = await _fetch_text(
+                    page_url,
+                    user_agent=haaretz_source.USER_AGENT,
+                    client=client,
+                )
+            except Exception as exc:
+                checks.append(
+                    ProbeCheck(
+                        name=f"search:{keyword}",
+                        status=DiagnosticStatus.FAIL,
+                        summary=f"Search fetch failed: {exc}",
+                        details={"url": page_url},
+                    )
+                )
+                continue
+
+            saw_successful_page = True
+            if _is_unexpected_redirect(fetch_result.final_url, page_url):
+                unexpected_redirect = True
+
+            title_tag = BeautifulSoup(fetch_result.text, "lxml").find("title")
+            page_title = title_tag.get_text(" ", strip=True) if title_tag is not None else ""
+            has_results_heading = "מציג תוצאות בנושא" in fetch_result.text
+            entries = scraper._parse_search_results(fetch_result.text)
+            recent_entries = [entry for entry in entries if entry.date >= cutoff]
+            keyword_matches = [
+                entry for entry in recent_entries if scraper._matches_keywords(entry, [keyword])
+            ]
+
+            entry_total += len(entries)
+            recent_entry_total += len(recent_entries)
+            keyword_match_total += len(keyword_matches)
+
+            if not has_results_heading and len(entries) == 0:
+                status = DiagnosticStatus.FAIL
+                summary = "Search page fetched but parsed zero entries"
+            elif len(entries) == 0:
+                status = DiagnosticStatus.FAIL
+                summary = "Search results container was present but parsed zero entries"
+            elif len(recent_entries) == 0:
+                status = DiagnosticStatus.WARN
+                summary = "Search page returned only out-of-window results"
+            elif len(keyword_matches) == 0:
+                status = DiagnosticStatus.WARN
+                summary = "Search page returned recent entries but none matched after filtering"
+            else:
+                status = DiagnosticStatus.OK
+                summary = "Search page returned recent keyword-matching entries"
+
+            checks.append(
+                ProbeCheck(
+                    name=f"search:{keyword}",
+                    status=status,
+                    summary=summary,
+                    details={
+                        "requested_url": page_url,
+                        "final_url": fetch_result.final_url,
+                        "status_code": fetch_result.status_code,
+                        "content_type": fetch_result.content_type,
+                        "payload_length": len(fetch_result.text),
+                        "page_title": page_title,
+                        "has_results_heading": has_results_heading,
+                        "entry_count": len(entries),
+                        "recent_entry_count": len(recent_entries),
+                        "keyword_match_count": len(keyword_matches),
+                    },
+                )
+            )
+
+    if not saw_successful_page:
+        return _live_result(
+            source_name="haaretz",
+            status=DiagnosticStatus.FAIL,
+            bucket=FailureBucket.HTTP_FETCH_FAILED,
+            checks=checks
+            or [
+                ProbeCheck(
+                    name="live_probe",
+                    status=DiagnosticStatus.FAIL,
+                    summary="All Haaretz search fetches failed",
+                )
+            ],
+        )
+    if unexpected_redirect:
+        return _live_result(
+            source_name="haaretz",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.UNEXPECTED_REDIRECT,
+            checks=checks,
+        )
+    if entry_total == 0:
+        return _live_result(
+            source_name="haaretz",
+            status=DiagnosticStatus.FAIL,
+            bucket=FailureBucket.SELECTOR_DRIFT_SUSPECTED,
+            checks=checks,
+        )
+    if recent_entry_total == 0:
+        return _live_result(
+            source_name="haaretz",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.STALE_RESULTS,
+            checks=checks,
+        )
+    if keyword_match_total == 0:
+        return _live_result(
+            source_name="haaretz",
+            status=DiagnosticStatus.WARN,
+            bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+            checks=checks,
+        )
+
+    return _live_result(
+        source_name="haaretz",
         status=DiagnosticStatus.OK,
         checks=checks,
     )

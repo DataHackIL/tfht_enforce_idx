@@ -261,6 +261,7 @@ def _source_name_from_error(error: str) -> str | None:
 
 def _build_source_summaries(
     *,
+    sources: list[Source],
     source_names: list[str],
     raw_articles: list[RawArticle],
     errors: list[str],
@@ -277,6 +278,12 @@ def _build_source_summaries(
             continue
         error_map.setdefault(source_name, []).append(error)
 
+    source_debug = {
+        source.name: source.get_debug_state()
+        for source in sources
+        if source.get_debug_state() is not None
+    }
+
     return [
         {
             "source_name": source_name,
@@ -285,6 +292,7 @@ def _build_source_summaries(
             "error_messages": error_map.get(source_name, []),
             "returned_zero_results": article_counts.get(source_name, 0) == 0
             and source_name not in error_map,
+            "runtime_debug": source_debug.get(source_name),
         }
         for source_name in source_names
     ]
@@ -425,6 +433,7 @@ def _workflow_metadata() -> dict[str, object]:
 def _build_ingest_debug_payload(
     *,
     result: RunSnapshot,
+    sources: list[Source],
     source_names: list[str],
     raw_articles: list[RawArticle],
     unseen_articles: list[RawArticle],
@@ -438,7 +447,13 @@ def _build_ingest_debug_payload(
     rejected_articles = [
         article for article in classified_articles if not article.classification.relevant
     ]
+    source_runtime_debug = {
+        source.name: source.get_debug_state()
+        for source in sources
+        if source.get_debug_state() is not None
+    }
     source_summaries = _build_source_summaries(
+        sources=sources,
         source_names=source_names,
         raw_articles=raw_articles,
         errors=result.errors,
@@ -471,6 +486,7 @@ def _build_ingest_debug_payload(
             "seen_count_before": result.seen_count_before,
             "seen_count_after": result.seen_count_after,
         },
+        "source_runtime_debug": source_runtime_debug,
         "source_summaries": source_summaries,
         "classifier_summary": classifier_summary,
         "problems": problems,
@@ -552,6 +568,7 @@ async def run_news_ingest_job(
         result.set_debug_payload(
             _build_ingest_debug_payload(
                 result=result,
+                sources=sources,
                 source_names=source_names,
                 raw_articles=all_articles,
                 unseen_articles=unseen_articles,
@@ -570,6 +587,7 @@ async def run_news_ingest_job(
         result.set_debug_payload(
             _build_ingest_debug_payload(
                 result=result,
+                sources=sources,
                 source_names=source_names,
                 raw_articles=all_articles,
                 unseen_articles=unseen_articles,
@@ -599,6 +617,7 @@ async def run_news_ingest_job(
         result.set_debug_payload(
             _build_ingest_debug_payload(
                 result=result.finish("no relevant articles found"),
+                sources=sources,
                 source_names=source_names,
                 raw_articles=all_articles,
                 unseen_articles=unseen_articles,
@@ -636,6 +655,7 @@ async def run_news_ingest_job(
     result.set_debug_payload(
         _build_ingest_debug_payload(
             result=result,
+            sources=sources,
             source_names=source_names,
             raw_articles=all_articles,
             unseen_articles=unseen_articles,

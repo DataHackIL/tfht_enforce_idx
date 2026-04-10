@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup, Tag
 from httpx import Response
 
 from denbust.data_models import RawArticle
-from denbust.sources.haaretz import HaaretzScraper, create_haaretz_source
+from denbust.sources.haaretz import _HaaretzSearchEntry, HaaretzScraper, create_haaretz_source
 from denbust.sources.ice import IceScraper, create_ice_source
 from denbust.sources.maariv import MaarivScraper, create_maariv_source
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source
@@ -172,6 +172,53 @@ class TestMakoScraper:
         assert len(urls) == len(set(urls))
 
     @pytest.mark.asyncio
+    async def test_fetch_records_runtime_debug_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fetch should retain per-search and per-section telemetry for debug logs."""
+        html_content = load_fixture("html/mako_search.html")
+        scraper = self._create_scraper()
+
+        class FakePage:
+            def __init__(self) -> None:
+                self.url = "https://www.mako.co.il/Search?searchstring_input=%D7%A1%D7%A8%D7%A1%D7%95%D7%A8"
+
+            async def title(self) -> str:
+                return "mako חדשות"
+
+        session = SimpleNamespace(page=FakePage())
+
+        async def open_browser_session() -> object:
+            return session
+
+        async def close_browser_session(_session: object) -> None:
+            return None
+
+        async def fetch_search_html(_session: object, keyword: str) -> str:
+            session.page.url = f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+            return html_content
+
+        async def fetch_section_html(_session: object, url: str) -> str:
+            session.page.url = url
+            return html_content
+
+        monkeypatch.setattr(scraper, "_open_browser_session", open_browser_session)
+        monkeypatch.setattr(scraper, "_close_browser_session", close_browser_session)
+        monkeypatch.setattr(scraper, "_fetch_search_html", fetch_search_html)
+        monkeypatch.setattr(scraper, "_fetch_section_html", fetch_section_html)
+
+        await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
+
+        debug_state = scraper.get_debug_state()
+
+        assert debug_state is not None
+        assert debug_state["browser_session"]["status"] == "ok"
+        assert debug_state["result"]["unique_article_count"] == 2
+        assert len(debug_state["searches"]) == 1
+        assert debug_state["searches"][0]["keyword"] == "סרסור"
+        assert debug_state["searches"][0]["parsed_article_count"] >= 1
+        assert len(debug_state["sections"]) == 1
+        assert debug_state["sections"][0]["requested_url"] == "https://www.mako.co.il/men-men_news"
+
+    @pytest.mark.asyncio
     async def test_fetch_uses_only_canonical_search_url(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -207,7 +254,7 @@ class TestMakoScraper:
 
     @pytest.mark.asyncio
     async def test_handles_browser_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test browser failures are handled gracefully."""
+        """Browser session failures should surface as source errors."""
         scraper = self._create_scraper()
 
         async def open_browser_session() -> object:
@@ -215,9 +262,8 @@ class TestMakoScraper:
 
         monkeypatch.setattr(scraper, "_open_browser_session", open_browser_session)
 
-        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
-
-        assert articles == []
+        with pytest.raises(RuntimeError, match="Mako browser session could not be opened"):
+            await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["סרסור"])
 
     @pytest.mark.asyncio
     async def test_fetch_logs_cleanup_failure_and_keeps_articles(
@@ -1651,6 +1697,28 @@ class TestHaaretzScraper:
         assert not scraper._is_article_url(
             "https://www.haaretz.co.il/labels/2026-03-15/ty-article/abc"
         )
+        assert not scraper._is_article_url(
+            "https://www.haaretz.co.il/talkback/2026-03-15/ty-article/abc"
+        )
+
+    def test_matches_keywords_requires_context_for_bare_livui(self) -> None:
+        """Bare 'ליווי' should only match explicit sex-work phrases."""
+        scraper = self._create_scraper()
+        false_positive = _HaaretzSearchEntry(
+            url="https://www.haaretz.co.il/news/politics/2026-04-06/ty-article/.premium/abc",
+            title="מתנחלים הקימו מאחז חדש בצפון הגדה - בליווי חיילים",
+            snippet="כתבה פוליטית כללית.",
+            date=datetime(2026, 4, 6, tzinfo=UTC),
+        )
+        true_positive = _HaaretzSearchEntry(
+            url="https://www.haaretz.co.il/news/law/2026-04-06/ty-article/.premium/def",
+            title="המשטרה חשפה שירותי ליווי בדירה בתל אביב",
+            snippet="חשד להפעלת זנות במקום.",
+            date=datetime(2026, 4, 6, tzinfo=UTC),
+        )
+
+        assert not scraper._matches_keywords(false_positive, ["ליווי"])
+        assert scraper._matches_keywords(true_positive, ["ליווי"])
 
     @pytest.mark.asyncio
     async def test_rate_limit_sleeps_when_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2900,6 +2968,41 @@ class TestMaarivScraper:
 
         assert len(articles) == 1
 
+    def test_parse_breaking_news_page_keeps_matching_articles(self) -> None:
+        """Breaking-news parsing should retain relevant cards from the index page."""
+        scraper = MaarivScraper()
+        html = """
+        <article class="breaking-news-item">
+          <a class="breaking-news-link" href="/breaking-news/article-1305266"></a>
+          <h2 class="breaking-news-title">בלב שכונת אחוזה: שוטרים חשפו בית בושת שפעל בדירה בחיפה</h2>
+          <p>במקום הוצא צו סגירה.</p>
+          <time datetime="2026-04-05T10:52:00+03:00">10:52</time>
+        </article>
+        """
+
+        articles = scraper._parse_section_page(
+            html,
+            cutoff=datetime(2026, 4, 1, tzinfo=UTC),
+            keywords=["בית בושת"],
+            source_url="https://www.maariv.co.il/breaking-news",
+        )
+
+        assert len(articles) == 1
+        assert str(articles[0].url) == "https://www.maariv.co.il/breaking-news/article-1305266"
+        assert articles[0].title == "בלב שכונת אחוזה: שוטרים חשפו בית בושת שפעל בדירה בחיפה"
+
+    def test_section_item_selector_prefers_breaking_news_cards(self) -> None:
+        """Breaking-news pages should use a narrow card selector instead of generic wrappers."""
+        scraper = MaarivScraper()
+
+        assert (
+            scraper._section_item_selector("https://www.maariv.co.il/breaking-news")
+            == "article.breaking-news-item"
+        )
+        assert "category-article" in scraper._section_item_selector(
+            "https://www.maariv.co.il/news/law"
+        )
+
     def test_parse_section_page_keeps_source_specific_relaxed_matches(self) -> None:
         """Maariv supplemental phrases should recover relevant enforcement stories."""
         scraper = MaarivScraper()
@@ -3021,6 +3124,33 @@ class TestMaarivScraper:
         )
         assert no_date is not None
 
+    def test_parse_article_item_uses_link_title_and_clean_time_markup(self) -> None:
+        """Live-like Maariv cards should keep title clean and preserve visible publish time."""
+        scraper = MaarivScraper()
+        article = scraper._parse_article_item(
+            BeautifulSoup(
+                """
+                <article class="category-article main-article">
+                  <a class="category-article-link" href="/news/law/article-1307154"
+                     title="כתב אישום הוגש נגד תושב ג'לג'וליה על אונס נער בן 14">
+                    <p class="category-article-title">כתב אישום הוגש נגד תושב ג'לג'וליה על אונס נער בן 14</p>
+                    <section class="category-article-dates-and-promo">
+                      <time class="category-article-time" datetime="2026-04-10T00:00:00+03:00">10:35</time>
+                    </section>
+                  </a>
+                </article>
+                """,
+                "lxml",
+            ).select_one("article"),
+            datetime(2026, 4, 1, tzinfo=UTC),
+        )
+
+        assert article is not None
+        assert article.title == "כתב אישום הוגש נגד תושב ג'לג'וליה על אונס נער בן 14"
+        assert article.date.date().isoformat() == "2026-04-10"
+        assert article.date.hour == 10
+        assert article.date.minute == 35
+
     def test_parse_date_prefers_datetime_attribute(self) -> None:
         """ISO datetime attributes should be parsed directly."""
         scraper = MaarivScraper()
@@ -3032,6 +3162,18 @@ class TestMaarivScraper:
         parsed = scraper._parse_date(soup.select_one("article"))
 
         assert parsed == datetime(2026, 3, 1, 10, 0, tzinfo=UTC)
+
+    def test_parse_date_combines_datetime_attribute_with_visible_time(self) -> None:
+        """Visible time should refine date-only datetime attributes on section cards."""
+        scraper = MaarivScraper()
+        soup = BeautifulSoup(
+            '<article><time class="category-article-time" datetime="2026-04-10T00:00:00+03:00">10:35</time></article>',
+            "lxml",
+        )
+
+        parsed = scraper._parse_date(soup.select_one("article"))
+
+        assert parsed == datetime(2026, 4, 10, 10, 35, tzinfo=parsed.tzinfo)
 
     def test_parse_date_handles_invalid_datetime_and_text_fallback(self) -> None:
         """Date parsing should fall back from invalid datetime attrs to visible text."""
@@ -3121,11 +3263,55 @@ class TestMaarivScraper:
             == []
         )
 
+    @pytest.mark.asyncio
+    async def test_fetch_scrapes_law_and_breaking_news_sections(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Maariv fetch should query both law and breaking-news discovery pages."""
+        scraper = MaarivScraper()
+        seen_urls: list[str] = []
+
+        async def fake_scrape_section(
+            url: str, cutoff: datetime, keywords: list[str]
+        ) -> list[RawArticle]:
+            del cutoff
+            assert keywords == ["בית בושת"]
+            seen_urls.append(url)
+            if url.endswith("/breaking-news"):
+                return [
+                    RawArticle(
+                        url="https://www.maariv.co.il/breaking-news/article-1305266",
+                        title="בלב שכונת אחוזה: שוטרים חשפו בית בושת שפעל בדירה בחיפה",
+                        snippet="במקום הוצא צו סגירה.",
+                        date=datetime(2026, 4, 5, 10, 52, tzinfo=UTC),
+                        source_name="maariv",
+                    )
+                ]
+            return []
+
+        async def fake_sleep(seconds: float) -> None:
+            assert seconds == 1.5
+
+        monkeypatch.setattr(scraper, "_scrape_section", fake_scrape_section)
+        monkeypatch.setattr("denbust.sources.maariv.asyncio.sleep", fake_sleep)
+
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=["בית בושת"])
+
+        assert seen_urls == [
+            "https://www.maariv.co.il/news/law",
+            "https://www.maariv.co.il/breaking-news",
+        ]
+        assert len(articles) == 1
+        assert str(articles[0].url) == "https://www.maariv.co.il/breaking-news/article-1305266"
+
     @respx.mock
     @pytest.mark.asyncio
     async def test_handles_empty_results(self) -> None:
         """Test handling empty search results."""
         respx.get("https://www.maariv.co.il/news/law").mock(
+            return_value=Response(200, text="<html><body></body></html>")
+        )
+        respx.get("https://www.maariv.co.il/breaking-news").mock(
             return_value=Response(200, text="<html><body></body></html>")
         )
         respx.get("https://www.maariv.co.il/search").mock(
@@ -3142,6 +3328,7 @@ class TestMaarivScraper:
     async def test_handles_http_error(self) -> None:
         """Test handling HTTP errors gracefully."""
         respx.get("https://www.maariv.co.il/news/law").mock(return_value=Response(500))
+        respx.get("https://www.maariv.co.il/breaking-news").mock(return_value=Response(500))
         respx.get("https://www.maariv.co.il/search").mock(return_value=Response(404))
 
         scraper = MaarivScraper()

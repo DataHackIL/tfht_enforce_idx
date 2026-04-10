@@ -22,6 +22,8 @@ USER_AGENT = "denbust/0.1.0 (news monitoring bot; +https://github.com/denbust)"
 MAARIV_BASE_URL = "https://www.maariv.co.il"
 # Law/crime section
 MAARIV_LAW_URL = "https://www.maariv.co.il/news/law"
+# Breaking-news index
+MAARIV_BREAKING_NEWS_URL = "https://www.maariv.co.il/breaking-news"
 # Search URL
 MAARIV_SEARCH_URL = "https://www.maariv.co.il/search"
 MAARIV_SUPPLEMENTAL_KEYWORDS = [
@@ -34,6 +36,7 @@ MAARIV_SUPPLEMENTAL_KEYWORDS = [
     "סחר מיני",
     "מכון עיסוי",
 ]
+TIME_PATTERN = re.compile(r"(\d{1,2}):(\d{2})")
 
 
 def effective_maariv_keywords(keywords: list[str]) -> list[str]:
@@ -95,10 +98,13 @@ class MaarivScraper(Source):
         ) as client:
             self._client = client
 
-            # Scrape the law section (search endpoint is broken, returns 404)
-            await asyncio.sleep(1.5)  # Rate limiting
-            section_articles = await self._scrape_section(MAARIV_LAW_URL, cutoff, keywords)
-            articles.extend(section_articles)
+            # Scrape the law section and breaking-news index.
+            # Maariv's search endpoint currently returns 404 for relevant queries,
+            # so section discovery is the only reliable path.
+            for section_url in (MAARIV_LAW_URL, MAARIV_BREAKING_NEWS_URL):
+                await asyncio.sleep(1.5)  # Rate limiting
+                section_articles = await self._scrape_section(section_url, cutoff, keywords)
+                articles.extend(section_articles)
 
             self._client = None
 
@@ -158,7 +164,7 @@ class MaarivScraper(Source):
         try:
             response = await self._client.get(url)
             response.raise_for_status()
-            return self._parse_section_page(response.text, cutoff, keywords)
+            return self._parse_section_page(response.text, cutoff, keywords, source_url=url)
         except httpx.HTTPError as e:
             logger.error(f"Error scraping Maariv section {url}: {e}")
             return []
@@ -185,7 +191,11 @@ class MaarivScraper(Source):
         return articles
 
     def _parse_section_page(
-        self, html: str, cutoff: datetime, keywords: list[str]
+        self,
+        html: str,
+        cutoff: datetime,
+        keywords: list[str],
+        source_url: str | None = None,
     ) -> list[RawArticle]:
         """Parse Maariv section page HTML.
 
@@ -200,13 +210,18 @@ class MaarivScraper(Source):
         soup = BeautifulSoup(html, "lxml")
         articles: list[RawArticle] = []
 
-        # Look for article containers - Maariv uses article.category-article
-        for item in soup.select("article.category-article, article, .article"):
+        for item in soup.select(self._section_item_selector(source_url)):
             article = self._parse_article_item(item, cutoff)
             if article and self._matches_keywords(article, keywords):
                 articles.append(article)
 
         return articles
+
+    def _section_item_selector(self, source_url: str | None = None) -> str:
+        """Return a targeted article-card selector for the section page."""
+        if source_url and "/breaking-news" in source_url:
+            return "article.breaking-news-item"
+        return "article.category-article, article.main-article, article.article"
 
     def _parse_article_item(self, item: Tag, cutoff: datetime) -> RawArticle | None:
         """Parse a single article item from HTML.
@@ -241,8 +256,18 @@ class MaarivScraper(Source):
             return None
 
         # Get title
-        title_elem = item.select_one("h1, h2, h3, .title, .headline")
-        title = title_elem.get_text(strip=True) if title_elem else link.get_text(strip=True)
+        title_elem = item.select_one(
+            "h1, h2, h3, .title, .headline, .category-article-title"
+        )
+        title = ""
+        if title_elem:
+            title = title_elem.get_text(" ", strip=True)
+        if not title:
+            title_attr = str(link.get("title", "")).strip()
+            if title_attr:
+                title = title_attr
+        if not title:
+            title = link.get_text(" ", strip=True)
 
         if not title:
             return None
@@ -282,12 +307,20 @@ class MaarivScraper(Source):
             dt_attr = date_elem.get("datetime")
             if dt_attr:
                 try:
-                    return datetime.fromisoformat(str(dt_attr).replace("Z", "+00:00"))
+                    parsed = datetime.fromisoformat(str(dt_attr).replace("Z", "+00:00"))
+                    date_text = date_elem.get_text(" ", strip=True)
+                    time_match = TIME_PATTERN.search(date_text)
+                    if time_match and parsed.hour == 0 and parsed.minute == 0:
+                        return parsed.replace(
+                            hour=int(time_match.group(1)),
+                            minute=int(time_match.group(2)),
+                        )
+                    return parsed
                 except ValueError:
                     pass
 
             # Try text content
-            date_text = date_elem.get_text(strip=True)
+            date_text = date_elem.get_text(" ", strip=True)
             date = self._parse_hebrew_date(date_text)
             if date:
                 return date
