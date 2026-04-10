@@ -62,4 +62,5 @@ def test_write_discovery_layer_artifacts(tmp_path: Path) -> None:
     assert json.loads(metrics_path.read_text(encoding="utf-8")) == {"brave": 3}
     candidate_lines = candidates_path.read_text(encoding="utf-8").splitlines()
     assert len(candidate_lines) == 1
-    assert '"current_url":"https://www.ynet.co.il/item"' in candidate_lines[0]
+    candidate_record = json.loads(candidate_lines[0])
+    assert candidate_record["current_url"] == "https://www.ynet.co.il/item"
