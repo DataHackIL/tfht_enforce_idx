@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,6 +30,10 @@ from denbust.validation.models import (
     BinaryStageMetrics,
     ClassifierVariantMatrix,
     ClassifierVariantSpec,
+    LabelBreakdownMetrics,
+    LabelCountMetrics,
+    ValidationDatasetSummary,
+    ValidationReportPayload,
     VariantMetrics,
 )
 
@@ -74,6 +79,8 @@ class ValidationEvaluateResult:
     """Result of evaluating classifier variants."""
 
     output_path: Path
+    markdown_path: Path
+    dataset_summary: ValidationDatasetSummary
     rankings: list[VariantMetrics]
 
 
@@ -165,6 +172,102 @@ def _accuracy_stage_metrics(*, correct: int, evaluated_examples: int) -> Accurac
     )
 
 
+def _label_breakdown_metrics(
+    counts: Counter[str],
+    correct_counts: Counter[str] | None = None,
+) -> list[LabelBreakdownMetrics]:
+    matches = correct_counts or Counter()
+    return [
+        LabelBreakdownMetrics(
+            label=label,
+            evaluated_examples=evaluated_examples,
+            correct=matches[label],
+            accuracy=(matches[label] / evaluated_examples) if evaluated_examples else 0.0,
+        )
+        for label, evaluated_examples in sorted(
+            counts.items(), key=lambda item: (-item[1], item[0])
+        )
+    ]
+
+
+def _label_count_metrics(counts: Counter[str]) -> list[LabelCountMetrics]:
+    return [
+        LabelCountMetrics(
+            label=label,
+            evaluated_examples=evaluated_examples,
+        )
+        for label, evaluated_examples in sorted(
+            counts.items(), key=lambda item: (-item[1], item[0])
+        )
+    ]
+
+
+def _display_label(value: str) -> str:
+    return value if value else "(none)"
+
+
+def _markdown_path_for_json(path: Path) -> Path:
+    return path.with_suffix(".md")
+
+
+def _resolve_report_paths(
+    *,
+    config: Config,
+    collected_at: datetime,
+    output_path: Path | None,
+) -> tuple[Path, Path]:
+    report_path = output_path or default_evaluation_output_path(config, collected_at)
+    if output_path is not None and report_path.suffix.casefold() != ".json":
+        msg = f"Evaluation output path must end with .json: {report_path}"
+        raise ValueError(msg)
+    markdown_path = _markdown_path_for_json(report_path)
+    if markdown_path == report_path:
+        msg = "Markdown report path must differ from the JSON report path"
+        raise ValueError(msg)
+    return report_path, markdown_path
+
+
+def _build_dataset_summary(labels: Sequence[ValidationLabel]) -> ValidationDatasetSummary:
+    relevant_examples = 0
+    legacy_only_examples = 0
+    taxonomy_labeled_examples = 0
+    legacy_category_counts: Counter[str] = Counter()
+    legacy_subcategory_counts: Counter[str] = Counter()
+    taxonomy_category_counts: Counter[str] = Counter()
+    taxonomy_subcategory_counts: Counter[str] = Counter()
+
+    for label in labels:
+        if label.relevant:
+            relevant_examples += 1
+            legacy_category_counts[label.category] += 1
+            legacy_subcategory_counts[label.sub_category] += 1
+        has_taxonomy_category = bool(label.taxonomy_category_id)
+        has_taxonomy_subcategory = bool(label.taxonomy_subcategory_id)
+        if has_taxonomy_category and has_taxonomy_subcategory:
+            taxonomy_labeled_examples += 1
+            taxonomy_category_counts[label.taxonomy_category_id] += 1
+            taxonomy_subcategory_counts[label.taxonomy_subcategory_id] += 1
+        elif has_taxonomy_category != has_taxonomy_subcategory:
+            msg = (
+                "Validation label has partial taxonomy ids; both taxonomy_category_id "
+                "and taxonomy_subcategory_id must be provided together."
+            )
+            raise ValueError(msg)
+        else:
+            legacy_only_examples += 1
+
+    return ValidationDatasetSummary(
+        total_examples=len(labels),
+        relevant_examples=relevant_examples,
+        legacy_only_examples=legacy_only_examples,
+        taxonomy_labeled_examples=taxonomy_labeled_examples,
+        legacy_category_counts_relevant_only=_label_count_metrics(legacy_category_counts),
+        legacy_subcategory_counts_relevant_only=_label_count_metrics(legacy_subcategory_counts),
+        taxonomy_category_counts=_label_count_metrics(taxonomy_category_counts),
+        taxonomy_subcategory_counts=_label_count_metrics(taxonomy_subcategory_counts),
+    )
+
+
 def _score_predictions(
     labels: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
     predictions: Sequence[ValidationLabel | tuple[bool, bool, str, str]],
@@ -183,6 +286,14 @@ def _score_predictions(
     taxonomy_category_matches = 0
     taxonomy_subcategory_matches = 0
     index_tp = index_fp = index_fn = index_tn = 0
+    legacy_category_counts: Counter[str] = Counter()
+    legacy_category_correct: Counter[str] = Counter()
+    legacy_subcategory_counts: Counter[str] = Counter()
+    legacy_subcategory_correct: Counter[str] = Counter()
+    taxonomy_category_counts: Counter[str] = Counter()
+    taxonomy_category_correct: Counter[str] = Counter()
+    taxonomy_subcategory_counts: Counter[str] = Counter()
+    taxonomy_subcategory_correct: Counter[str] = Counter()
 
     for raw_true_label, raw_predicted_label in zip(labels, predictions, strict=True):
         true_label = _coerce_label(raw_true_label)
@@ -202,6 +313,8 @@ def _score_predictions(
 
         if true_label.relevant:
             relevant_rows += 1
+            legacy_category_counts[true_label.category] += 1
+            legacy_subcategory_counts[true_label.sub_category] += 1
             if true_label.enforcement_related and predicted_enforcement_related:
                 enforcement_tp += 1
             elif not true_label.enforcement_related and predicted_enforcement_related:
@@ -213,11 +326,15 @@ def _score_predictions(
             if predicted_label.relevant:
                 if predicted_label.category == true_label.category:
                     category_matches += 1
+                    legacy_category_correct[true_label.category] += 1
                 if predicted_label.sub_category == true_label.sub_category:
                     subcategory_matches += 1
+                    legacy_subcategory_correct[true_label.sub_category] += 1
 
         if true_label.taxonomy_category_id and true_label.taxonomy_subcategory_id:
             taxonomy_labeled_rows += 1
+            taxonomy_category_counts[true_label.taxonomy_category_id] += 1
+            taxonomy_subcategory_counts[true_label.taxonomy_subcategory_id] += 1
             if predicted_label.index_relevant and true_label.index_relevant:
                 index_tp += 1
             elif predicted_label.index_relevant and not true_label.index_relevant:
@@ -229,8 +346,10 @@ def _score_predictions(
 
             if predicted_label.taxonomy_category_id == true_label.taxonomy_category_id:
                 taxonomy_category_matches += 1
+                taxonomy_category_correct[true_label.taxonomy_category_id] += 1
             if predicted_label.taxonomy_subcategory_id == true_label.taxonomy_subcategory_id:
                 taxonomy_subcategory_matches += 1
+                taxonomy_subcategory_correct[true_label.taxonomy_subcategory_id] += 1
 
         exact_match = (
             predicted_label.relevant == true_label.relevant
@@ -291,6 +410,22 @@ def _score_predictions(
         taxonomy_category_stage_taxonomy_labeled=taxonomy_category_stage,
         taxonomy_subcategory_stage_taxonomy_labeled=taxonomy_subcategory_stage,
         index_relevance_stage_taxonomy_labeled=index_stage,
+        legacy_category_breakdown_relevant_only=_label_breakdown_metrics(
+            legacy_category_counts,
+            legacy_category_correct,
+        ),
+        legacy_subcategory_breakdown_relevant_only=_label_breakdown_metrics(
+            legacy_subcategory_counts,
+            legacy_subcategory_correct,
+        ),
+        taxonomy_category_breakdown_taxonomy_labeled=_label_breakdown_metrics(
+            taxonomy_category_counts,
+            taxonomy_category_correct,
+        ),
+        taxonomy_subcategory_breakdown_taxonomy_labeled=_label_breakdown_metrics(
+            taxonomy_subcategory_counts,
+            taxonomy_subcategory_correct,
+        ),
         relevance_precision=relevance_stage.precision,
         relevance_recall=relevance_stage.recall,
         relevance_f1=relevance_stage.f1,
@@ -331,6 +466,186 @@ def _sort_rankings(metrics: list[VariantMetrics]) -> list[VariantMetrics]:
     )
 
 
+def _render_breakdown_table(
+    title: str,
+    breakdowns: Sequence[LabelBreakdownMetrics],
+) -> list[str]:
+    lines = [f"### {title}"]
+    if not breakdowns:
+        lines.append("")
+        lines.append("_No applicable examples._")
+        lines.append("")
+        return lines
+    headers = ("label", "n", "correct", "acc")
+    rows = [
+        [
+            _display_label(item.label),
+            str(item.evaluated_examples),
+            str(item.correct),
+            f"{item.accuracy:.3f}",
+        ]
+        for item in breakdowns
+    ]
+    widths = [
+        max(len(header), *(len(row[column]) for row in rows))
+        for column, header in enumerate(headers)
+    ]
+    lines.extend(
+        [
+            "",
+            "```text",
+            "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+            *[
+                "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row))
+                for row in rows
+            ],
+            "```",
+            "",
+        ]
+    )
+    return lines
+
+
+def _render_count_table(
+    title: str,
+    counts: Sequence[LabelCountMetrics],
+) -> list[str]:
+    lines = [f"### {title}"]
+    if not counts:
+        lines.append("")
+        lines.append("_No applicable examples._")
+        lines.append("")
+        return lines
+    headers = ("label", "n")
+    rows = [
+        [
+            _display_label(item.label),
+            str(item.evaluated_examples),
+        ]
+        for item in counts
+    ]
+    widths = [
+        max(len(header), *(len(row[column]) for row in rows))
+        for column, header in enumerate(headers)
+    ]
+    lines.extend(
+        [
+            "",
+            "```text",
+            "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+            *[
+                "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row))
+                for row in rows
+            ],
+            "```",
+            "",
+        ]
+    )
+    return lines
+
+
+def render_evaluation_markdown(
+    *,
+    evaluated_at: datetime,
+    validation_set_path: Path,
+    variants_path: Path,
+    dataset_summary: ValidationDatasetSummary,
+    metrics: Sequence[VariantMetrics],
+) -> str:
+    """Render a human-readable markdown validation report."""
+    lines = [
+        "# Classifier Variant Evaluation",
+        "",
+        f"- Evaluated at: `{evaluated_at.isoformat()}`",
+        f"- Validation set: `{validation_set_path}`",
+        f"- Variant matrix: `{variants_path}`",
+        "",
+        "## Dataset Coverage",
+        "",
+        f"- Total examples: `{dataset_summary.total_examples}`",
+        f"- Relevant examples: `{dataset_summary.relevant_examples}`",
+        f"- Taxonomy-labeled examples: `{dataset_summary.taxonomy_labeled_examples}`",
+        f"- Legacy-only examples: `{dataset_summary.legacy_only_examples}`",
+        "",
+        "Taxonomy-aware stages use only taxonomy-labeled examples. Legacy-only rows remain included in relevance and legacy category/subcategory evaluation.",
+        "",
+        "## Variant Ranking",
+        "",
+        "```text",
+        render_rankings_table(list(metrics)),
+        "```",
+        "",
+        "## Validation Set Typology Coverage",
+        "",
+    ]
+    lines.extend(
+        _render_count_table(
+            "Legacy Categories on Relevant Rows",
+            dataset_summary.legacy_category_counts_relevant_only,
+        )
+    )
+    lines.extend(
+        _render_count_table(
+            "Legacy Subcategories on Relevant Rows",
+            dataset_summary.legacy_subcategory_counts_relevant_only,
+        )
+    )
+    lines.extend(
+        _render_count_table(
+            "Taxonomy Categories",
+            dataset_summary.taxonomy_category_counts,
+        )
+    )
+    lines.extend(
+        _render_count_table(
+            "Taxonomy Subcategories",
+            dataset_summary.taxonomy_subcategory_counts,
+        )
+    )
+
+    lines.append("## Variant Details")
+    lines.append("")
+    for metric in metrics:
+        lines.extend(
+            [
+                f"### {metric.name}",
+                "",
+                f"- Model: `{metric.model}`",
+                f"- Relevance: `{metric.relevance_stage.f1:.3f}` F1 on `{metric.relevance_stage.evaluated_examples}` examples",
+                f"- Enforcement (relevant only): `{metric.enforcement_stage_relevant_only.f1:.3f}` F1 on `{metric.enforcement_stage_relevant_only.evaluated_examples}` examples",
+                f"- Taxonomy subcategory accuracy: `{metric.taxonomy_subcategory_stage_taxonomy_labeled.accuracy:.3f}` on `{metric.taxonomy_subcategory_stage_taxonomy_labeled.evaluated_examples}` examples",
+                f"- Index relevance: `{metric.index_relevance_stage_taxonomy_labeled.f1:.3f}` F1 on `{metric.index_relevance_stage_taxonomy_labeled.evaluated_examples}` examples",
+                f"- Overall exact match: `{metric.overall_exact_match:.3f}`",
+                "",
+            ]
+        )
+        lines.extend(
+            _render_breakdown_table(
+                f"{metric.name} Legacy Category Accuracy",
+                metric.legacy_category_breakdown_relevant_only,
+            )
+        )
+        lines.extend(
+            _render_breakdown_table(
+                f"{metric.name} Legacy Subcategory Accuracy",
+                metric.legacy_subcategory_breakdown_relevant_only,
+            )
+        )
+        lines.extend(
+            _render_breakdown_table(
+                f"{metric.name} Taxonomy Category Accuracy",
+                metric.taxonomy_category_breakdown_taxonomy_labeled,
+            )
+        )
+        lines.extend(
+            _render_breakdown_table(
+                f"{metric.name} Taxonomy Subcategory Accuracy",
+                metric.taxonomy_subcategory_breakdown_taxonomy_labeled,
+            )
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 async def evaluate_classifier_variants(
     *,
     validation_set_path: Path = DEFAULT_VALIDATION_SET_PATH,
@@ -338,13 +653,15 @@ async def evaluate_classifier_variants(
     output_path: Path | None = None,
 ) -> ValidationEvaluateResult:
     """Evaluate tracked classifier variants against the permanent validation set."""
-    api_key = Config().anthropic_api_key
+    config = Config()
+    api_key = config.anthropic_api_key
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY environment variable not set")
 
     articles, labels = _load_validation_examples(validation_set_path)
     matrix = _load_variant_matrix(variants_path)
     collected_at = datetime.now(UTC)
+    dataset_summary = _build_dataset_summary(labels)
 
     rankings: list[VariantMetrics] = []
     default_model = matrix.defaults.model or Config().classifier.model
@@ -386,21 +703,35 @@ async def evaluate_classifier_variants(
         rankings.append(_score_predictions(labels, predictions, variant=variant, model=model))
 
     sorted_rankings = _sort_rankings(rankings)
-    report_path = output_path or default_evaluation_output_path(Config(), collected_at)
+    report_path, markdown_path = _resolve_report_paths(
+        config=config,
+        collected_at=collected_at,
+        output_path=output_path,
+    )
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = ValidationReportPayload(
+        evaluated_at=collected_at,
+        validation_set_path=str(validation_set_path),
+        variants_path=str(variants_path),
+        dataset_summary=dataset_summary,
+        rankings=sorted_rankings,
+    )
     with report_path.open("w", encoding="utf-8") as handle:
-        json.dump(
-            {
-                "evaluated_at": collected_at.isoformat(),
-                "validation_set_path": str(validation_set_path),
-                "variants_path": str(variants_path),
-                "rankings": [metric.model_dump(mode="json") for metric in sorted_rankings],
-            },
-            handle,
-            ensure_ascii=False,
-            indent=2,
-        )
-    return ValidationEvaluateResult(output_path=report_path, rankings=sorted_rankings)
+        json.dump(payload.model_dump(mode="json"), handle, ensure_ascii=False, indent=2)
+    markdown = render_evaluation_markdown(
+        evaluated_at=collected_at,
+        validation_set_path=validation_set_path,
+        variants_path=variants_path,
+        dataset_summary=dataset_summary,
+        metrics=sorted_rankings,
+    )
+    markdown_path.write_text(markdown, encoding="utf-8")
+    return ValidationEvaluateResult(
+        output_path=report_path,
+        markdown_path=markdown_path,
+        dataset_summary=dataset_summary,
+        rankings=sorted_rankings,
+    )
 
 
 def render_rankings_table(metrics: list[VariantMetrics]) -> str:

@@ -45,8 +45,11 @@ from denbust.validation.dataset import (
     run_validation_finalize,
 )
 from denbust.validation.evaluate import (
+    ValidationLabel,
+    _build_dataset_summary,
     _load_validation_examples,
     _load_variant_matrix,
+    _resolve_report_paths,
     _score_predictions,
     evaluate_classifier_variants,
     render_rankings_table,
@@ -1432,13 +1435,28 @@ class TestValidationEvaluate:
 
         assert [metric.name for metric in result.rankings] == ["prompt-tuned", "baseline"]
         assert result.output_path.exists()
+        assert result.markdown_path.exists()
         report = json.loads(result.output_path.read_text(encoding="utf-8"))
+        assert report["dataset_summary"]["total_examples"] == 2
+        assert report["dataset_summary"]["legacy_only_examples"] == 2
+        assert report["dataset_summary"]["legacy_category_counts_relevant_only"][0] == {
+            "label": "brothel",
+            "evaluated_examples": 1,
+        }
         first = report["rankings"][0]
         assert first["relevance_stage"]["evaluated_examples"] == 2
         assert first["enforcement_stage_relevant_only"]["evaluated_examples"] == 1
         assert first["category_stage_relevant_only"]["evaluated_examples"] == 1
         assert first["taxonomy_subcategory_stage_taxonomy_labeled"]["evaluated_examples"] == 0
         assert first["index_relevance_stage_taxonomy_labeled"]["evaluated_examples"] == 0
+        assert first["legacy_category_breakdown_relevant_only"][0]["label"] == "brothel"
+        markdown = result.markdown_path.read_text(encoding="utf-8")
+        assert "## Dataset Coverage" in markdown
+        assert "Legacy-only examples" in markdown
+        assert "## Validation Set Typology Coverage" in markdown
+        assert "label    n" in markdown
+        assert "correct" in markdown
+        assert "### prompt-tuned" in markdown
 
     def test_score_predictions_uses_only_relevant_rows_for_category_metrics(self) -> None:
         """Category and sub-category metrics should ignore non-relevant gold rows."""
@@ -1570,6 +1588,147 @@ class TestValidationEvaluate:
         assert metrics.enforcement_f1_relevant_only == 0.0
         assert metrics.enforcement_accuracy_relevant_only == 0.0
 
+    def test_build_dataset_summary_rejects_partial_taxonomy_ids(self) -> None:
+        with pytest.raises(ValueError, match="partial taxonomy ids"):
+            _build_dataset_summary(
+                [
+                    (
+                        ValidationLabel(
+                            relevant=True,
+                            enforcement_related=True,
+                            category="brothel",
+                            sub_category="closure",
+                            index_relevant=False,
+                            taxonomy_version="1",
+                            taxonomy_category_id="brothels",
+                            taxonomy_subcategory_id="",
+                        )
+                    )
+                ]
+            )
+
+    def test_build_dataset_summary_counts_taxonomy_labeled_rows(self) -> None:
+        summary = _build_dataset_summary(
+            [
+                ValidationLabel(
+                    relevant=True,
+                    enforcement_related=True,
+                    category="brothel",
+                    sub_category="closure",
+                    index_relevant=True,
+                    taxonomy_version="1",
+                    taxonomy_category_id="brothels",
+                    taxonomy_subcategory_id="administrative_closure",
+                )
+            ]
+        )
+
+        assert summary.total_examples == 1
+        assert summary.legacy_only_examples == 0
+        assert summary.taxonomy_labeled_examples == 1
+        assert summary.taxonomy_category_counts[0].label == "brothels"
+        assert summary.taxonomy_subcategory_counts[0].label == "administrative_closure"
+
+    def test_resolve_report_paths_rejects_markdown_json_collision(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        report_path = tmp_path / "report.json"
+        monkeypatch.setattr(
+            "denbust.validation.evaluate._markdown_path_for_json",
+            lambda path: path,
+        )
+
+        with pytest.raises(ValueError, match="must differ"):
+            _resolve_report_paths(
+                config=Config(),
+                collected_at=datetime(2026, 4, 10, tzinfo=UTC),
+                output_path=report_path,
+            )
+
+    @pytest.mark.asyncio
+    async def test_evaluate_classifier_variants_rejects_non_json_output_path(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        validation_set_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_set_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                {
+                    "source_name": "ynet",
+                    "article_date": "2026-03-01T00:00:00+00:00",
+                    "url": "https://example.com/a",
+                    "canonical_url": "https://example.com/a",
+                    "title": "title a",
+                    "snippet": "snippet a",
+                    "relevant": "False",
+                    "enforcement_related": "False",
+                    "index_relevant": "False",
+                    "taxonomy_version": "",
+                    "taxonomy_category_id": "",
+                    "taxonomy_subcategory_id": "",
+                    "category": "not_relevant",
+                    "sub_category": "",
+                    "review_status": "reviewed",
+                    "annotation_source": "",
+                    "expected_month_bucket": "",
+                    "expected_city": "",
+                    "expected_status": "",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-01T00:00:00+00:00",
+                    "finalized_at": "2026-03-02T00:00:00+00:00",
+                    "draft_source": "draft.csv",
+                }
+            ],
+        )
+        variants_path = tmp_path / "variants.yaml"
+        variants_path.write_text(
+            yaml.safe_dump(
+                {
+                    "defaults": {"model": "claude-sonnet-4-20250514"},
+                    "variants": [{"name": "baseline"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        class VariantClassifier:
+            async def classify_batch(self, articles: list[RawArticle]) -> list[ClassifiedArticle]:
+                return [
+                    ClassifiedArticle(
+                        article=article,
+                        classification=ClassificationResult(
+                            relevant=False,
+                            enforcement_related=False,
+                            category=Category.NOT_RELEVANT,
+                            sub_category=None,
+                            confidence="high",
+                        ),
+                    )
+                    for article in articles
+                ]
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.validation.evaluate.create_classifier",
+            lambda **_kwargs: VariantClassifier(),
+        )
+
+        with pytest.raises(ValueError, match="must end with \\.json"):
+            await evaluate_classifier_variants(
+                validation_set_path=validation_set_path,
+                variants_path=variants_path,
+                output_path=tmp_path / "report.md",
+            )
+
     def test_run_validation_evaluate_delegates(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -1588,6 +1747,7 @@ class TestValidationEvaluate:
 
             class Result:
                 output_path = tmp_path / "report.json"
+                markdown_path = tmp_path / "report.md"
                 rankings: list[object] = []
 
             return Result()
