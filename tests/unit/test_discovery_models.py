@@ -18,6 +18,7 @@ from denbust.discovery.models import (
     ProducerKind,
     ScrapeAttempt,
     ScrapeAttemptKind,
+    _domain_from_url,
 )
 from denbust.models.common import JobName
 
@@ -56,6 +57,11 @@ def test_discovered_candidate_serializes_with_inferred_domain() -> None:
     assert payload["producer_kind"] == "search_engine"
 
 
+def test_domain_from_url_none_passthrough() -> None:
+    """The internal domain helper should preserve a missing URL as None."""
+    assert _domain_from_url(None) is None
+
+
 def test_persistent_candidate_validates_scrape_timestamps() -> None:
     """Persistent candidates should enforce coherent retry timestamps."""
     first_seen = datetime(2026, 4, 10, 8, 0, tzinfo=UTC)
@@ -83,6 +89,23 @@ def test_persistent_candidate_validates_scrape_timestamps() -> None:
             current_url="https://mako.co.il/news/123",
             first_seen_at=first_seen,
             last_seen_at=first_seen - timedelta(minutes=1),
+        )
+
+    with pytest.raises(ValueError):
+        PersistentCandidate(
+            current_url="https://mako.co.il/news/123",
+            first_seen_at=first_seen,
+            last_seen_at=first_seen,
+            last_scrape_attempt_at=first_seen - timedelta(minutes=1),
+        )
+
+    with pytest.raises(ValueError):
+        PersistentCandidate(
+            current_url="https://mako.co.il/news/123",
+            first_seen_at=first_seen,
+            last_seen_at=first_seen,
+            last_scrape_attempt_at=last_attempt,
+            next_scrape_attempt_at=last_attempt - timedelta(minutes=1),
         )
 
 
@@ -129,3 +152,14 @@ def test_discovery_run_defaults_to_discover_job() -> None:
 
     assert run.job_name == JobName.DISCOVER
     assert run.status == DiscoveryRunStatus.RUNNING
+
+
+def test_discovery_run_rejects_finished_at_before_started_at() -> None:
+    """Discovery runs should reject inverted timestamps."""
+    started_at = datetime(2026, 4, 10, 10, 0, tzinfo=UTC)
+
+    with pytest.raises(ValueError):
+        DiscoveryRun(
+            started_at=started_at,
+            finished_at=started_at - timedelta(minutes=1),
+        )
