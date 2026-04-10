@@ -22,6 +22,6 @@ def test_discovery_migration_includes_core_columns() -> None:
     assert "candidate_status text not null" in sql
     assert "content_basis text not null" in sql
     assert "next_scrape_attempt_at timestamptz" in sql
-    assert "metadata_json jsonb not null default '{}'::jsonb" in sql
-    assert "errors_json jsonb not null default '[]'::jsonb" in sql
-    assert "diagnostics_json jsonb not null default '{}'::jsonb" in sql
+    assert "metadata jsonb not null default '{}'::jsonb" in sql
+    assert "errors jsonb not null default '[]'::jsonb" in sql
+    assert "diagnostics jsonb not null default '{}'::jsonb" in sql

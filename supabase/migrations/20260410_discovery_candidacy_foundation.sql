@@ -9,7 +9,7 @@ create table if not exists public.discovery_runs (
     candidate_count integer not null default 0,
     merged_candidate_count integer not null default 0,
     queued_for_scrape_count integer not null default 0,
-    errors_json jsonb not null default '[]'::jsonb
+    errors jsonb not null default '[]'::jsonb
 );
 
 create index if not exists discovery_runs_dataset_job_idx
@@ -34,7 +34,7 @@ create table if not exists public.persistent_candidates (
     needs_review boolean not null default false,
     backfill_batch_id text,
     self_heal_eligible boolean not null default false,
-    metadata_json jsonb not null default '{}'::jsonb
+    metadata jsonb not null default '{}'::jsonb
 );
 
 create index if not exists persistent_candidates_status_idx
@@ -62,7 +62,7 @@ create table if not exists public.candidate_provenance (
     rank integer,
     domain text,
     discovered_at timestamptz not null,
-    metadata_json jsonb not null default '{}'::jsonb
+    metadata jsonb not null default '{}'::jsonb
 );
 
 create index if not exists candidate_provenance_candidate_idx
@@ -84,7 +84,7 @@ create table if not exists public.scrape_attempts (
     extracted_body_hash text,
     error_code text,
     error_message text,
-    diagnostics_json jsonb not null default '{}'::jsonb
+    diagnostics jsonb not null default '{}'::jsonb
 );
 
 create index if not exists scrape_attempts_candidate_idx

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from denbust.discovery.models import PersistentCandidate
 from denbust.models.common import DatasetName, JobName
+from denbust.store.run_snapshots import snapshot_filename
 
 
 class DiscoveryStatePaths(BaseModel):
@@ -56,9 +57,8 @@ def resolve_discovery_state_paths(
 
 
 def discovery_snapshot_filename(run_timestamp: datetime) -> str:
-    """Build a git-safe filename for discovery-layer snapshots."""
-    safe_timestamp = run_timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H-%M-%S-%fZ")
-    return f"{safe_timestamp}.json"
+    """Build a discovery-layer snapshot filename using the shared run format."""
+    return snapshot_filename(run_timestamp)
 
 
 def write_discovery_run_snapshot(

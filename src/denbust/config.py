@@ -308,10 +308,19 @@ class SourceDiscoveryConfig(BaseModel):
         if not isinstance(sources, Mapping):
             return normalized
 
-        normalized["sources"] = {
-            str(name): (value if isinstance(value, Mapping) else {"enabled": bool(value)})
-            for name, value in sources.items()
-        }
+        normalized_sources: dict[str, Mapping[str, object] | dict[str, bool]] = {}
+        for name, value in sources.items():
+            if isinstance(value, Mapping):
+                normalized_sources[str(name)] = value
+            elif isinstance(value, bool):
+                normalized_sources[str(name)] = {"enabled": value}
+            else:
+                raise ValueError(
+                    "sources entries must be mappings or booleans for shorthand "
+                    f"(got {type(value).__name__} for source {name!r})"
+                )
+
+        normalized["sources"] = normalized_sources
         return normalized
 
 

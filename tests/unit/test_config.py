@@ -257,6 +257,17 @@ class TestConfig:
         assert SourceDiscoveryConfig._normalize_sources(sentinel) is sentinel
         assert SourceDiscoveryConfig._normalize_sources(None) is None
 
+    def test_source_discovery_rejects_non_boolean_shorthand(self) -> None:
+        """Source shorthand should only accept actual booleans, not truthy strings."""
+        with pytest.raises(ValueError, match="sources entries must be mappings or booleans"):
+            SourceDiscoveryConfig.model_validate(
+                {
+                    "sources": {
+                        "ynet": "false",
+                    }
+                }
+            )
+
     def test_discovery_config_parses_engine_blocks(self) -> None:
         """Discovery engine settings should parse from YAML-like mappings."""
         config = DiscoveryConfig.model_validate(
