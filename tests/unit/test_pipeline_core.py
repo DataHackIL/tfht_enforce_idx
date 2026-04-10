@@ -515,11 +515,14 @@ class TestRunPipelineAsync:
         classifier.classify_batch = AsyncMock(
             return_value=[build_classified_article("https://example.com/rejected", relevant=False)]
         )
-        source = type(
-            "SourceStub",
-            (),
-            {"name": "test", "get_debug_state": lambda self: {"phase": "fetch", "status": "ok"}},
-        )()
+
+        class SourceStub:
+            name = "test"
+
+            def get_debug_state(self) -> dict[str, str]:
+                return {"phase": "fetch", "status": "ok"}
+
+        source = SourceStub()
         monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [source])
         monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)

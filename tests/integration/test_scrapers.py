@@ -14,7 +14,11 @@ from bs4 import BeautifulSoup, Tag
 from httpx import Response
 
 from denbust.data_models import RawArticle
-from denbust.sources.haaretz import _HaaretzSearchEntry, HaaretzScraper, create_haaretz_source
+from denbust.sources.haaretz import (
+    HaaretzScraper,
+    _HaaretzSearchEntry,
+    create_haaretz_source,
+)
 from denbust.sources.ice import IceScraper, create_ice_source
 from denbust.sources.maariv import MaarivScraper, create_maariv_source
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source

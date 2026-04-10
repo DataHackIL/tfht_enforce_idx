@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import calendar
 import json
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
@@ -17,10 +18,10 @@ import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
-import denbust.sources.ice as ice_source
 import denbust.sources.haaretz as haaretz_source
-import denbust.sources.mako as mako_source
+import denbust.sources.ice as ice_source
 import denbust.sources.maariv as maariv_source
+import denbust.sources.mako as mako_source
 import denbust.sources.rss as rss_source
 import denbust.sources.walla as walla_source
 from denbust.config import DEFAULT_KEYWORDS, Config, SourceConfig, load_config
@@ -785,10 +786,8 @@ async def _probe_mako(
                 )
             )
     finally:
-        try:
+        with suppress(Exception):
             await scraper._close_browser_session(session)
-        except Exception:
-            pass
 
     if unexpected_redirect:
         return _live_result(
