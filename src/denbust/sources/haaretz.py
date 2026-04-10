@@ -379,7 +379,9 @@ class HaaretzScraper(Source):
         for keyword in keywords:
             normalized_keyword = keyword.casefold()
             if normalized_keyword == "ליווי":
-                if any(phrase.casefold() in haystack for phrase in HAARETZ_CONTEXTUAL_LIVUI_PHRASES):
+                if any(
+                    phrase.casefold() in haystack for phrase in HAARETZ_CONTEXTUAL_LIVUI_PHRASES
+                ):
                     return True
                 continue
             if normalized_keyword in haystack:

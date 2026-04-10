@@ -742,9 +742,7 @@ async def _probe_mako(
             containers = soup.select("article, .article, .item, li")
             parsed_articles = [
                 article
-                for article in (
-                    scraper._parse_article_item(item, cutoff) for item in containers
-                )
+                for article in (scraper._parse_article_item(item, cutoff) for item in containers)
                 if article is not None
             ]
             keyword_matches = [
@@ -763,7 +761,9 @@ async def _probe_mako(
                 summary = "Section page contains candidates but parsing returned zero articles"
             elif len(keyword_matches) == 0:
                 status = DiagnosticStatus.WARN
-                summary = "Section page returned parsed articles but none match the sampled keywords"
+                summary = (
+                    "Section page returned parsed articles but none match the sampled keywords"
+                )
             else:
                 status = DiagnosticStatus.OK
                 summary = "Section page returned parsed keyword-matching articles"
@@ -892,7 +892,11 @@ async def _probe_ice(
             if results_article is None:
                 status = DiagnosticStatus.FAIL
                 summary = "Search page did not expose the expected ICE results container"
-            elif parsed_article_count == 0 and stale_candidate_count == len(candidates) and candidates:
+            elif (
+                parsed_article_count == 0
+                and stale_candidate_count == len(candidates)
+                and candidates
+            ):
                 status = DiagnosticStatus.WARN
                 summary = "Search page returned only stale candidates outside the cutoff window"
             elif parsed_article_count == 0:

@@ -290,7 +290,11 @@ class MakoScraper(Source):
             )
             raise
 
-        state = "empty" if html is None else self._classify_search_page(session.page.url, title, html)[0]
+        state = (
+            "empty"
+            if html is None
+            else self._classify_search_page(session.page.url, title, html)[0]
+        )
         parsed_articles = self._parse_search_results(html, cutoff) if html else []
         self._append_debug_entry(
             "searches",

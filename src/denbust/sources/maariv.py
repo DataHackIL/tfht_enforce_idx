@@ -256,9 +256,7 @@ class MaarivScraper(Source):
             return None
 
         # Get title
-        title_elem = item.select_one(
-            "h1, h2, h3, .title, .headline, .category-article-title"
-        )
+        title_elem = item.select_one("h1, h2, h3, .title, .headline, .category-article-title")
         title = ""
         if title_elem:
             title = title_elem.get_text(" ", strip=True)
