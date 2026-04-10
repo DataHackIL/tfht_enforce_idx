@@ -58,7 +58,7 @@ Instead, candidates should become a durable queue/history layer that the system 
 
 ## Core design decision
 
-## Candidacy is a separate durable layer
+### Candidacy is a separate durable layer
 
 The architecture should now explicitly separate:
 
@@ -220,7 +220,7 @@ class DiscoveryEngine(Protocol):
 
     async def discover(
         self,
-        query_batch: "DiscoveryQueryBatch",
+        queries: list["DiscoveryQuery"],
         context: "DiscoveryContext",
     ) -> list["DiscoveredCandidate"]:
         ...
@@ -232,6 +232,10 @@ Each engine implementation should:
 - apply engine-specific filters if supported
 - return normalized candidate objects
 - expose engine-specific diagnostics and cost metadata
+
+### Context objects
+- `DiscoveryContext`: shared execution context for a discovery run, such as the `run_id`, engine-level config, rate-limit settings, and any shared telemetry hooks.
+- `SourceDiscoveryContext`: the equivalent context object for source-native producers, carrying the `run_id`, source-specific config, date windows, and any producer diagnostics hooks.
 
 ---
 
@@ -381,6 +385,7 @@ Candidates should preserve full provenance.
 ```python
 class CandidateProvenance(BaseModel):
     provenance_id: str
+    run_id: str
     candidate_id: str
     producer_name: str
     producer_kind: str
@@ -389,7 +394,9 @@ class CandidateProvenance(BaseModel):
     normalized_url: str | None
     title: str | None
     snippet: str | None
+    publication_datetime_hint: datetime | None
     rank: int | None
+    domain: str | None
     discovered_at: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
 ```
@@ -654,6 +661,7 @@ Fields:
 - `canonical_url`
 - `current_url`
 - `domain`
+- `source_discovery_only`
 - `first_seen_at`
 - `last_seen_at`
 - `candidate_status`
@@ -667,7 +675,7 @@ Fields:
 - `needs_review`
 - `backfill_batch_id`
 - `self_heal_eligible`
-- `metadata_json`
+- `metadata_json` — stores structured or repeated context that is modeled earlier on `PersistentCandidate` but is not broken out as first-class columns here, including `titles`, `snippets`, `discovered_via`, `discovery_queries`, and `source_hints`
 
 ### 4. `scrape_attempts`
 One row per scrape attempt.
@@ -680,6 +688,9 @@ Fields:
 - `attempt_kind`
 - `fetch_status`
 - `source_adapter_name`
+- `extracted_title`
+- `extracted_publication_datetime`
+- `extracted_body_hash`
 - `error_code`
 - `error_message`
 - `diagnostics_json`
@@ -698,7 +709,7 @@ state_repo/
   news_items/
     discover/
       runs/
-        2026-04-10T120001Z.json
+        2026-04-10T12-00-01-000000Z.json
       candidates/
         latest_candidates.jsonl
         retry_queue.jsonl
