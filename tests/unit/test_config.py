@@ -17,6 +17,7 @@ from denbust.config import (
     OutputFormat,
     ReleaseConfig,
     SourceConfig,
+    SourceDiscoveryConfig,
     SourceType,
     StoreConfig,
     load_config,
@@ -248,6 +249,13 @@ class TestConfig:
 
         assert config.source_discovery.sources["ynet"].enabled is True
         assert config.source_discovery.sources["mako"].enabled is False
+
+    def test_source_discovery_normalizer_passthrough_for_non_mapping(self) -> None:
+        """SourceDiscoveryConfig's pre-validator should leave non-mapping values untouched."""
+        sentinel = object()
+
+        assert SourceDiscoveryConfig._normalize_sources(sentinel) is sentinel
+        assert SourceDiscoveryConfig._normalize_sources(None) is None
 
     def test_discovery_config_parses_engine_blocks(self) -> None:
         """Discovery engine settings should parse from YAML-like mappings."""
