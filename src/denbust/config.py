@@ -309,11 +309,7 @@ class SourceDiscoveryConfig(BaseModel):
             return normalized
 
         normalized["sources"] = {
-            str(name): (
-                value
-                if isinstance(value, Mapping)
-                else {"enabled": bool(value)}
-            )
+            str(name): (value if isinstance(value, Mapping) else {"enabled": bool(value)})
             for name, value in sources.items()
         }
         return normalized

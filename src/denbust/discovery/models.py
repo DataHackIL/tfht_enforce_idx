@@ -190,9 +190,7 @@ class PersistentCandidate(BaseModel):
             and self.last_scrape_attempt_at is not None
             and self.next_scrape_attempt_at < self.last_scrape_attempt_at
         ):
-            raise ValueError(
-                "next_scrape_attempt_at cannot be earlier than last_scrape_attempt_at"
-            )
+            raise ValueError("next_scrape_attempt_at cannot be earlier than last_scrape_attempt_at")
         return self
 
 

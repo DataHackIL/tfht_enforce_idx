@@ -61,7 +61,9 @@ def discovery_snapshot_filename(run_timestamp: datetime) -> str:
     return f"{safe_timestamp}.json"
 
 
-def write_discovery_run_snapshot(runs_dir: Path, payload: dict[str, Any], *, run_timestamp: datetime) -> Path:
+def write_discovery_run_snapshot(
+    runs_dir: Path, payload: dict[str, Any], *, run_timestamp: datetime
+) -> Path:
     """Write a per-run discovery artifact to disk."""
     runs_dir.mkdir(parents=True, exist_ok=True)
     path = runs_dir / discovery_snapshot_filename(run_timestamp)
