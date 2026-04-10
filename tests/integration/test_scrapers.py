@@ -3153,7 +3153,29 @@ class TestMaarivScraper:
         assert article.title == "כתב אישום הוגש נגד תושב ג'לג'וליה על אונס נער בן 14"
         assert article.date.date().isoformat() == "2026-04-10"
         assert article.date.hour == 10
-        assert article.date.minute == 35
+
+    def test_parse_article_item_uses_link_title_when_heading_missing(self) -> None:
+        """Link title should be used when no dedicated heading element exists."""
+        scraper = MaarivScraper()
+        article = scraper._parse_article_item(
+            BeautifulSoup(
+                """
+                <article class="category-article">
+                  <a class="category-article-link"
+                     href="/breaking-news/article-1305266"
+                     title="בלב שכונת אחוזה: שוטרים חשפו בית בושת שפעל בדירה בחיפה">
+                    <time datetime="2026-04-05T10:52:00+03:00">10:52</time>
+                  </a>
+                </article>
+                """,
+                "lxml",
+            ).select_one("article"),
+            datetime(2026, 4, 1, tzinfo=UTC),
+        )
+
+        assert article is not None
+        assert article.title == "בלב שכונת אחוזה: שוטרים חשפו בית בושת שפעל בדירה בחיפה"
+        assert article.date.minute == 52
 
     def test_parse_date_prefers_datetime_attribute(self) -> None:
         """ISO datetime attributes should be parsed directly."""

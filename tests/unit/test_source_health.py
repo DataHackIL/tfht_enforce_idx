@@ -1155,6 +1155,141 @@ async def test_probe_haaretz_reports_success(monkeypatch: pytest.MonkeyPatch) ->
     assert result.failure_bucket is None
 
 
+@pytest.mark.asyncio
+async def test_probe_haaretz_handles_all_fetch_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del url, user_agent, client
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_haaretz(days=21, sample_keywords=["ליווי"])
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.HTTP_FETCH_FAILED
+    assert result.checks[0].summary == "Search fetch failed: boom"
+
+
+@pytest.mark.asyncio
+async def test_probe_haaretz_handles_unexpected_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url="https://example.com/redirect",
+            status_code=200,
+            content_type="text/html",
+            text="""
+            <html><head><title>search</title></head><body>
+              <h2>מציג תוצאות בנושא</h2>
+              <article>
+                <h3><a href="/news/law/2026-04-06/ty-article/abc">המשטרה חשפה שירותי ליווי בדירה בתל אביב</a></h3>
+                <div>חשד להפעלת זנות במקום.</div>
+                <time>6 באפריל 2026</time>
+              </article>
+            </body></html>
+            """,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_haaretz(days=21, sample_keywords=["ליווי"])
+
+    assert result.live_status == DiagnosticStatus.WARN
+    assert result.failure_bucket == FailureBucket.UNEXPECTED_REDIRECT
+
+
+@pytest.mark.asyncio
+async def test_probe_haaretz_distinguishes_parse_zero_without_results_heading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text="<html><head><title>search</title></head><body><div>no results</div></body></html>",
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_haaretz(days=21, sample_keywords=["ליווי"])
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.SELECTOR_DRIFT_SUSPECTED
+    assert result.checks[0].summary == "Search page fetched but parsed zero entries"
+
+
+@pytest.mark.asyncio
+async def test_probe_haaretz_distinguishes_parse_zero_with_results_heading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text="""
+            <html><head><title>search</title></head><body>
+              <h2>מציג תוצאות בנושא</h2>
+              <article><div>ללא פריטים</div></article>
+            </body></html>
+            """,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_haaretz(days=21, sample_keywords=["ליווי"])
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.SELECTOR_DRIFT_SUSPECTED
+    assert result.checks[0].summary == "Search results container was present but parsed zero entries"
+
+
+@pytest.mark.asyncio
+async def test_probe_haaretz_distinguishes_stale_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text="""
+            <html><head><title>search</title></head><body>
+              <h2>מציג תוצאות בנושא</h2>
+              <article>
+                <h3><a href="/news/law/2025-01-06/ty-article/abc">המשטרה חשפה שירותי ליווי בדירה בתל אביב</a></h3>
+                <div>חשד להפעלת זנות במקום.</div>
+                <time>6 בינואר 2025</time>
+              </article>
+            </body></html>
+            """,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_haaretz(days=21, sample_keywords=["ליווי"])
+
+    assert result.live_status == DiagnosticStatus.WARN
+    assert result.failure_bucket == FailureBucket.STALE_RESULTS
+    assert result.checks[0].summary == "Search page returned only out-of-window results"
+
+
 class _FakeSource(Source):
     def __init__(self, name: str, count: int) -> None:
         self._name = name
@@ -1437,11 +1572,15 @@ async def test_probe_source_dispatches_named_sources(monkeypatch: pytest.MonkeyP
     async def fake_ice(**_kwargs: object) -> SourceDiagnosticResult:
         return SourceDiagnosticResult(source_name="ice", status=DiagnosticStatus.OK)
 
+    async def fake_walla(**_kwargs: object) -> SourceDiagnosticResult:
+        return SourceDiagnosticResult(source_name="walla", status=DiagnosticStatus.OK)
+
     monkeypatch.setattr(source_health, "_probe_ynet", fake_ynet)
     monkeypatch.setattr(source_health, "_probe_maariv", fake_maariv)
     monkeypatch.setattr(source_health, "_probe_mako", fake_mako)
     monkeypatch.setattr(source_health, "_probe_haaretz", fake_haaretz)
     monkeypatch.setattr(source_health, "_probe_ice", fake_ice)
+    monkeypatch.setattr(source_health, "_probe_walla", fake_walla)
 
     assert (
         await source_health._probe_source(
@@ -1488,6 +1627,15 @@ async def test_probe_source_dispatches_named_sources(monkeypatch: pytest.MonkeyP
             sample_keywords=["זנות"],
         )
     ).source_name == "ice"
+    assert (
+        await source_health._probe_source(
+            source_name="walla",
+            source=_FakeSource("walla", 1),
+            source_cfg=SimpleNamespace(name="walla"),
+            days=21,
+            sample_keywords=["זנות"],
+        )
+    ).source_name == "walla"
 
 
 @pytest.mark.asyncio
@@ -1608,6 +1756,256 @@ async def test_probe_mako_reports_section_keyword_match(
 
     assert result.live_status == DiagnosticStatus.OK
     assert result.failure_bucket is None
+
+
+@pytest.mark.asyncio
+async def test_probe_mako_skips_when_browser_runtime_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            raise RuntimeError("Chromium is not installed")
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    assert result.live_status == DiagnosticStatus.SKIP
+    assert result.failure_bucket is None
+    assert result.checks[0].name == "browser_session"
+
+
+@pytest.mark.asyncio
+async def test_probe_mako_fails_on_unexpected_browser_start_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            raise ValueError("boom")
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.LIVE_PROBE_EXCEPTION
+    assert result.checks[0].name == "browser_session"
+
+
+@pytest.mark.asyncio
+async def test_probe_mako_reports_http_fetch_failed_when_search_and_section_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            return SimpleNamespace(page=SimpleNamespace(url="https://www.mako.co.il/Search"))
+
+        async def _close_browser_session(self, _session: object) -> None:
+            return None
+
+        def _build_search_url(self, keyword: str) -> str:
+            return f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+
+        async def _fetch_search_html(self, session: SimpleNamespace, keyword: str) -> str:
+            session.page.url = self._build_search_url(keyword)
+            raise RuntimeError(f"search failed for {keyword}")
+
+        async def _fetch_section_html(self, session: SimpleNamespace, _url: str) -> str:
+            session.page.url = "https://www.mako.co.il/men-men_news"
+            raise RuntimeError("section failed")
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.HTTP_FETCH_FAILED
+    assert {check.name for check in result.checks} == {
+        "search:בית בושת",
+        "section:men-men_news",
+    }
+
+
+@pytest.mark.asyncio
+async def test_probe_mako_reports_unexpected_redirect_after_keyword_hit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    article = SimpleNamespace(url="https://www.mako.co.il/men-men_news/Article-123.htm")
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://www.mako.co.il/Search"
+
+        async def title(self) -> str:
+            return "search title"
+
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            return SimpleNamespace(page=FakePage())
+
+        async def _close_browser_session(self, _session: object) -> None:
+            return None
+
+        def _build_search_url(self, keyword: str) -> str:
+            return f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+
+        async def _fetch_search_html(self, session: SimpleNamespace, keyword: str) -> str:
+            del keyword
+            session.page.url = "https://example.com/redirected-search"
+            return "<html><body>search</body></html>"
+
+        async def _fetch_section_html(self, session: SimpleNamespace, _url: str) -> str:
+            session.page.url = "https://example.com/redirected-section"
+            return "<html><body><article>candidate</article></body></html>"
+
+        def _parse_search_results(self, html: str | None, cutoff: datetime) -> list[object]:
+            del html, cutoff
+            return [article]
+
+        def _parse_article_item(self, item: object, cutoff: datetime) -> object:
+            del item, cutoff
+            return article
+
+        def _matches_keywords(self, candidate: object, keywords: list[str]) -> bool:
+            del keywords
+            return candidate is article
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    assert result.live_status == DiagnosticStatus.WARN
+    assert result.failure_bucket == FailureBucket.UNEXPECTED_REDIRECT
+    assert any(check.summary == "Search page returned parsed keyword-matching articles" for check in result.checks)
+
+
+@pytest.mark.asyncio
+async def test_probe_mako_reports_keyword_zeroing_with_search_hits_and_section_parse_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    article = SimpleNamespace(url="https://www.mako.co.il/men-men_news/Article-123.htm")
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://www.mako.co.il/Search"
+
+        async def title(self) -> str:
+            return "search title"
+
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            return SimpleNamespace(page=FakePage())
+
+        async def _close_browser_session(self, _session: object) -> None:
+            return None
+
+        def _build_search_url(self, keyword: str) -> str:
+            return f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+
+        async def _fetch_search_html(self, session: SimpleNamespace, keyword: str) -> str:
+            session.page.url = self._build_search_url(keyword)
+            return "<html><body>search</body></html>"
+
+        async def _fetch_section_html(self, session: SimpleNamespace, _url: str) -> str:
+            session.page.url = "https://www.mako.co.il/men-men_news"
+            return "<html><body><article>candidate</article></body></html>"
+
+        def _parse_search_results(self, html: str | None, cutoff: datetime) -> list[object]:
+            del html, cutoff
+            return [article]
+
+        def _parse_article_item(self, item: object, cutoff: datetime) -> None:
+            del item, cutoff
+            return None
+
+        def _matches_keywords(self, candidate: object, keywords: list[str]) -> bool:
+            del candidate, keywords
+            return False
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    assert result.live_status == DiagnosticStatus.WARN
+    assert result.failure_bucket == FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS
+    summaries = {check.name: check.summary for check in result.checks}
+    assert summaries["search:בית בושת"] == "Search page returned parsed articles"
+    assert summaries["section:men-men_news"] == (
+        "Section page contains candidates but parsing returned zero articles"
+    )
+
+
+@pytest.mark.asyncio
+async def test_probe_mako_reports_section_keyword_zeroing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    article = SimpleNamespace(url="https://www.mako.co.il/men-men_news/Article-123.htm")
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://www.mako.co.il/Search"
+
+        async def title(self) -> str:
+            return "page title"
+
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            return SimpleNamespace(page=FakePage())
+
+        async def _close_browser_session(self, _session: object) -> None:
+            return None
+
+        def _build_search_url(self, keyword: str) -> str:
+            return f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+
+        async def _fetch_search_html(self, session: SimpleNamespace, keyword: str) -> None:
+            session.page.url = self._build_search_url(keyword)
+            return None
+
+        async def _fetch_section_html(self, session: SimpleNamespace, _url: str) -> str:
+            session.page.url = "https://www.mako.co.il/men-men_news"
+            return "<html><body><article>candidate</article></body></html>"
+
+        def _parse_search_results(self, html: str | None, cutoff: datetime) -> list[object]:
+            del html, cutoff
+            return []
+
+        def _parse_article_item(self, item: object, cutoff: datetime) -> object:
+            del item, cutoff
+            return article
+
+        def _matches_keywords(self, candidate: object, keywords: list[str]) -> bool:
+            del candidate, keywords
+            return False
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    assert result.live_status == DiagnosticStatus.WARN
+    assert result.failure_bucket == FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS
+    summaries = {check.name: check.summary for check in result.checks}
+    assert summaries["section:men-men_news"] == (
+        "Section page returned parsed articles but none match the sampled keywords"
+    )
 
 
 @pytest.mark.asyncio

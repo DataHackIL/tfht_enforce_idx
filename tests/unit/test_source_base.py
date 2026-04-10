@@ -20,3 +20,7 @@ class TestSourceBase:
         result = await Source.fetch(object(), 1, [])
 
         assert result is None
+
+    def test_get_debug_state_defaults_to_none(self) -> None:
+        """The default debug-state hook should be a no-op."""
+        assert Source.get_debug_state(object()) is None
