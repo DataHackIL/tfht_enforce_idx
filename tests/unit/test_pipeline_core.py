@@ -553,6 +553,8 @@ class TestRunPipelineAsync:
         }
         rejected = result.debug_payload["rejected_articles"]
         assert len(rejected) == 1
+        assert rejected[0]["canonical_url"] == "https://example.com/rejected"
+        assert rejected[0]["relevant"] is False
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_calls_get_debug_state_once_per_payload_site(
