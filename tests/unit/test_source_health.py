@@ -1255,7 +1255,9 @@ async def test_probe_haaretz_distinguishes_parse_zero_with_results_heading(
 
     assert result.live_status == DiagnosticStatus.FAIL
     assert result.failure_bucket == FailureBucket.SELECTOR_DRIFT_SUSPECTED
-    assert result.checks[0].summary == "Search results container was present but parsed zero entries"
+    assert (
+        result.checks[0].summary == "Search results container was present but parsed zero entries"
+    )
 
 
 @pytest.mark.asyncio
@@ -1888,7 +1890,10 @@ async def test_probe_mako_reports_unexpected_redirect_after_keyword_hit(
 
     assert result.live_status == DiagnosticStatus.WARN
     assert result.failure_bucket == FailureBucket.UNEXPECTED_REDIRECT
-    assert any(check.summary == "Search page returned parsed keyword-matching articles" for check in result.checks)
+    assert any(
+        check.summary == "Search page returned parsed keyword-matching articles"
+        for check in result.checks
+    )
 
 
 @pytest.mark.asyncio
