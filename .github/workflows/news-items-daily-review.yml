@@ -63,8 +63,7 @@ jobs:
             --format json \
             --output diagnostics/source_diagnostics.json; then
             echo "Source diagnostics failed; writing fallback diagnostics payload."
-            printf '{"status":"failed","warning":"Artifact-only source diagnostics step failed in news-items-daily-review workflow."}\n' \
-              > diagnostics/source_diagnostics.json
+            echo '{"status":"failed","warning":"Artifact-only source diagnostics step failed in news-items-daily-review workflow."}' > diagnostics/source_diagnostics.json
           fi
 
       - name: Upload source diagnostics artifact
