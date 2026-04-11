@@ -828,11 +828,15 @@ class TestRunPipelineAsync:
                 raise RuntimeError("boom")
             from denbust.discovery.source_native import raw_article_to_discovered_candidate
 
-            return [raw_article_to_discovered_candidate(build_raw_article("https://example.com/good"))]
+            return [
+                raw_article_to_discovered_candidate(build_raw_article("https://example.com/good"))
+            ]
 
         mock_logger = MagicMock()
         monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
-        monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: FakePersistence())
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence", lambda _config: FakePersistence()
+        )
         monkeypatch.setattr(
             "denbust.pipeline.SourceDiscoveryAdapter.discover_candidates",
             fake_discover_candidates,
@@ -866,7 +870,10 @@ class TestRunPipelineAsync:
             "denbust.pipeline.fetch_all_sources",
             AsyncMock(return_value=([raw_article], [])),
         )
-        monkeypatch.setattr("denbust.pipeline._persist_source_native_candidates", AsyncMock(side_effect=RuntimeError("boom")))
+        monkeypatch.setattr(
+            "denbust.pipeline._persist_source_native_candidates",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        )
         monkeypatch.setattr("denbust.pipeline.filter_seen", lambda _articles, _seen_store: [])
 
         result = await run_news_ingest_job(Config(), operational_store=MagicMock())
@@ -927,7 +934,9 @@ class TestRunPipelineAsync:
             candidates=[],
             provenance=[],
         )
-        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")])
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")]
+        )
         monkeypatch.setattr(
             "denbust.pipeline._run_source_native_discovery",
             AsyncMock(return_value=persisted),
@@ -936,7 +945,10 @@ class TestRunPipelineAsync:
         partial_result = await run_news_discover_job(Config())
 
         assert partial_result.fatal is False
-        assert "source-native discovery completed with partial source failures" in partial_result.warnings
+        assert (
+            "source-native discovery completed with partial source failures"
+            in partial_result.warnings
+        )
 
         persisted.run.status = DiscoveryRunStatus.FAILED
         failed_result = await run_news_discover_job(Config())
