@@ -472,11 +472,13 @@ def test_supabase_discovery_persistence_finds_candidate_by_current_url() -> None
     assert found.candidate_id == "candidate-1"
 
 
-def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary() -> None:
+def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
+    tmp_path: Path,
+) -> None:
     """Composite persistence should mirror writes while delegating reads to the primary."""
     primary = StateRepoDiscoveryPersistence(
         resolve_discovery_state_paths(
-            state_root=Path("/tmp/primary-discovery-test"),
+            state_root=tmp_path / "primary-discovery-test",
             dataset_name=DatasetName.NEWS_ITEMS,
         )
     )
@@ -514,9 +516,11 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
     composite.close()
 
 
-def test_create_discovery_persistence_selects_state_or_composite(monkeypatch) -> None:
+def test_create_discovery_persistence_selects_state_or_composite(
+    monkeypatch, tmp_path: Path
+) -> None:
     """The discovery persistence factory should return state-only or composite backends."""
-    config = Config(store={"state_root": Path("/tmp/discovery-factory-state")})
+    config = Config(store={"state_root": tmp_path / "discovery-factory-state"})
     state_only = create_discovery_persistence(config)
     assert isinstance(state_only, StateRepoDiscoveryPersistence)
 
@@ -525,8 +529,10 @@ def test_create_discovery_persistence_selects_state_or_composite(monkeypatch) ->
     composite = create_discovery_persistence(
         Config(
             operational={"provider": "supabase"},
-            store={"state_root": Path("/tmp/discovery-factory-composite")},
+            store={"state_root": tmp_path / "discovery-factory-composite"},
         )
     )
     assert isinstance(composite, CompositeDiscoveryPersistence)
+    assert isinstance(composite.primary, StateRepoDiscoveryPersistence)
+    assert isinstance(composite.mirrors[0], SupabaseDiscoveryPersistence)
     composite.close()

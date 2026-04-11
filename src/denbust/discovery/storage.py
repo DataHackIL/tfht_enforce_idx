@@ -534,5 +534,5 @@ def create_discovery_persistence(config: Config) -> DiscoveryPersistence:
                 "scrape_attempts": config.candidates.scrape_attempts_table,
             },
         )
-        return CompositeDiscoveryPersistence(supabase_store, [state_store])
+        return CompositeDiscoveryPersistence(state_store, [supabase_store])
     return state_store
