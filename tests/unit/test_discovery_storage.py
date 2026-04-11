@@ -242,7 +242,9 @@ def test_null_discovery_persistence_is_noop() -> None:
 
     assert store.get_candidate("missing") is None
     assert store.list_candidates() == []
-    assert store.find_candidate_by_urls(canonical_url=None, current_url="https://example.com") is None
+    assert (
+        store.find_candidate_by_urls(canonical_url=None, current_url="https://example.com") is None
+    )
     assert store.list_provenance("missing") == []
     assert store.list_attempts("missing") == []
     assert store.close() is None
@@ -261,7 +263,9 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
         backfill_batch_id="batch-1",
     )
 
-    store.write_run(DiscoveryRun(run_id="run-1", started_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC)))
+    store.write_run(
+        DiscoveryRun(run_id="run-1", started_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC))
+    )
     store.upsert_candidates([queued, backfill])
     store.append_provenance([build_provenance("queued"), build_provenance("backfill")])
     store.append_attempts([build_attempt("queued"), build_attempt("backfill")])
@@ -270,15 +274,24 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
     assert store.attempts_path == paths.candidates_dir / "scrape_attempts.jsonl"
     assert store.get_candidate("queued") is not None
     assert len(store.list_candidates()) == 2
-    assert store.list_candidates(statuses=[CandidateStatus.QUEUED], limit=1)[0].candidate_id == "queued"
-    assert store.find_candidate_by_urls(
-        canonical_url="https://www.walla.co.il/item",
-        current_url="https://ignored.example.com",
-    ) is not None
-    assert store.find_candidate_by_urls(
-        canonical_url=None,
-        current_url="https://www.walla.co.il/item",
-    ) is not None
+    assert (
+        store.list_candidates(statuses=[CandidateStatus.QUEUED], limit=1)[0].candidate_id
+        == "queued"
+    )
+    assert (
+        store.find_candidate_by_urls(
+            canonical_url="https://www.walla.co.il/item",
+            current_url="https://ignored.example.com",
+        )
+        is not None
+    )
+    assert (
+        store.find_candidate_by_urls(
+            canonical_url=None,
+            current_url="https://www.walla.co.il/item",
+        )
+        is not None
+    )
     assert len(store.list_provenance("queued", limit=1)) == 1
     assert len(store.list_attempts("backfill", limit=1)) == 1
     assert paths.retry_queue_path.exists()
@@ -369,14 +382,20 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
     store.upsert_candidates([build_candidate()])
     assert store.get_candidate("candidate-1") is not None
     assert len(store.list_candidates(statuses=[CandidateStatus.NEW], limit=2)) == 1
-    assert store.find_candidate_by_urls(
-        canonical_url="https://www.ynet.co.il/news/article/abc",
-        current_url="https://ignored.example.com",
-    ) is not None
-    assert store.find_candidate_by_urls(
-        canonical_url=None,
-        current_url="https://missing.example.com",
-    ) is None
+    assert (
+        store.find_candidate_by_urls(
+            canonical_url="https://www.ynet.co.il/news/article/abc",
+            current_url="https://ignored.example.com",
+        )
+        is not None
+    )
+    assert (
+        store.find_candidate_by_urls(
+            canonical_url=None,
+            current_url="https://missing.example.com",
+        )
+        is None
+    )
     store.append_provenance([build_provenance()])
     assert len(store.list_provenance("candidate-1", limit=1)) == 1
     store.append_attempts([build_attempt()])
@@ -445,12 +464,21 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
 
     assert composite.get_candidate(candidate.candidate_id) is not None
     assert composite.list_candidates(limit=1)[0].candidate_id == candidate.candidate_id
-    assert composite.find_candidate_by_urls(
-        canonical_url="https://www.ynet.co.il/news/article/abc",
-        current_url="https://unused.example.com",
-    ) is not None
-    assert composite.list_provenance(candidate.candidate_id, limit=1)[0].candidate_id == candidate.candidate_id
-    assert composite.list_attempts(candidate.candidate_id, limit=1)[0].candidate_id == candidate.candidate_id
+    assert (
+        composite.find_candidate_by_urls(
+            canonical_url="https://www.ynet.co.il/news/article/abc",
+            current_url="https://unused.example.com",
+        )
+        is not None
+    )
+    assert (
+        composite.list_provenance(candidate.candidate_id, limit=1)[0].candidate_id
+        == candidate.candidate_id
+    )
+    assert (
+        composite.list_attempts(candidate.candidate_id, limit=1)[0].candidate_id
+        == candidate.candidate_id
+    )
     assert mirror.written_run is not None
     assert mirror.candidates[0].candidate_id == candidate.candidate_id
     assert mirror.provenance[0].candidate_id == candidate.candidate_id
