@@ -100,3 +100,64 @@ def test_persist_discovered_candidates_merges_repeat_discovery_by_canonical_url(
     assert len(run_snapshots) == 2
     latest_snapshot = json.loads(run_snapshots[-1].read_text(encoding="utf-8"))
     assert latest_snapshot["merged_candidate_count"] == 1
+    assert latest_snapshot["finished_at"] is not None
+
+
+def test_persist_discovered_candidates_marks_runs_finished_on_success(tmp_path: Path) -> None:
+    """Successful persistence should stamp a terminal finished_at value on the run."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discovery = raw_article_to_discovered_candidate(
+        build_raw_article("https://www.ynet.co.il/news/article/xyz")
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-finished"),
+        discovered_candidates=[discovery],
+        persistence=persistence,
+    )
+
+    assert persisted.run.status.value == "succeeded"
+    assert persisted.run.finished_at is not None
+
+
+def test_persist_discovered_candidates_writes_failed_run_before_reraising() -> None:
+    """Persistence failures should update the run record to failed before propagating."""
+
+    class FailingPersistence(StateRepoDiscoveryPersistence):
+        def __init__(self, paths: object) -> None:
+            super().__init__(paths)
+            self.written_runs: list[DiscoveryRun] = []
+
+        def write_run(self, run: DiscoveryRun) -> None:
+            self.written_runs.append(run.model_copy(deep=True))
+
+        def upsert_candidates(self, candidates: object) -> None:
+            del candidates
+            raise RuntimeError("candidate write failed")
+
+    paths = resolve_discovery_state_paths(
+        state_root=Path("/tmp/discovery-source-native-failure"),
+        dataset_name=DatasetName.NEWS_ITEMS,
+    )
+    persistence = FailingPersistence(paths)
+    discovery = raw_article_to_discovered_candidate(
+        build_raw_article("https://www.ynet.co.il/news/article/failure")
+    )
+
+    try:
+        persist_discovered_candidates(
+            run=DiscoveryRun(run_id="run-failure"),
+            discovered_candidates=[discovery],
+            persistence=persistence,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "candidate write failed"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert len(persistence.written_runs) == 1
+    failed_run = persistence.written_runs[0]
+    assert failed_run.status.value == "failed"
+    assert failed_run.finished_at is not None
+    assert failed_run.errors == ["persistence: RuntimeError: candidate write failed"]
