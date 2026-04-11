@@ -1000,7 +1000,9 @@ class TestRunPipeline:
         )
         monkeypatch.setattr(
             "denbust.pipeline.create_sources",
-            lambda _config: [FakeSource("ynet", [build_raw_article("https://www.ynet.co.il/item")])],
+            lambda _config: [
+                FakeSource("ynet", [build_raw_article("https://www.ynet.co.il/item")])
+            ],
         )
 
         def fail_if_called(_config: Config) -> None:

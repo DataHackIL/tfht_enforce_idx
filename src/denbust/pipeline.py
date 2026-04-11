@@ -662,7 +662,11 @@ async def run_news_ingest_job(
     if source_errors:
         result.warnings.append(f"{len(source_errors)} source(s) reported errors")
 
-    if config.source_discovery.enabled and config.source_discovery.persist_candidates and all_articles:
+    if (
+        config.source_discovery.enabled
+        and config.source_discovery.persist_candidates
+        and all_articles
+    ):
         try:
             persisted_source_discovery = await _persist_source_native_candidates(
                 config=config,
@@ -670,8 +674,7 @@ async def run_news_ingest_job(
                 run_id=result.run_timestamp.astimezone(UTC).isoformat(),
             )
             result.warnings.append(
-                "source_native_candidates_persisted="
-                f"{len(persisted_source_discovery.candidates)}"
+                f"source_native_candidates_persisted={len(persisted_source_discovery.candidates)}"
             )
         except Exception as exc:
             logger.warning("Source-native candidate persistence failed during ingest: %s", exc)

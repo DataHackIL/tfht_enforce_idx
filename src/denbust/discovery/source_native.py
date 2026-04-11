@@ -91,7 +91,9 @@ def merge_discovered_candidate(
         existing_metadata["latest_discovery_metadata"] = discovered.metadata
 
     return PersistentCandidate(
-        candidate_id=existing.candidate_id if existing is not None else build_candidate_id(identity_url),
+        candidate_id=existing.candidate_id
+        if existing is not None
+        else build_candidate_id(identity_url),
         canonical_url=discovered.canonical_url or (existing.canonical_url if existing else None),
         current_url=discovered.candidate_url,
         domain=discovered.domain or (existing.domain if existing else None),
@@ -114,10 +116,21 @@ def merge_discovered_candidate(
             ]
         ),
         first_seen_at=min(
-            [value for value in [existing.first_seen_at if existing else None, discovered.discovered_at] if value is not None]
+            [
+                value
+                for value in [
+                    existing.first_seen_at if existing else None,
+                    discovered.discovered_at,
+                ]
+                if value is not None
+            ]
         ),
         last_seen_at=max(
-            [value for value in [existing.last_seen_at if existing else None, discovered.discovered_at] if value is not None]
+            [
+                value
+                for value in [existing.last_seen_at if existing else None, discovered.discovered_at]
+                if value is not None
+            ]
         ),
         candidate_status=existing.candidate_status if existing else CandidateStatus.NEW,
         scrape_attempt_count=existing.scrape_attempt_count if existing else 0,
@@ -159,7 +172,9 @@ def persist_discovered_candidates(
     provenance_events: list[CandidateProvenance] = []
 
     for discovered in discovered_candidates:
-        canonical_url = str(discovered.canonical_url) if discovered.canonical_url is not None else None
+        canonical_url = (
+            str(discovered.canonical_url) if discovered.canonical_url is not None else None
+        )
         current_url = str(discovered.candidate_url)
         identity_keys = [value for value in [canonical_url, current_url] if value]
         existing: PersistentCandidate | None = None

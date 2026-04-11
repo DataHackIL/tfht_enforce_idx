@@ -168,7 +168,9 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         candidates = self._read_jsonl(self.paths.latest_candidates_path, PersistentCandidate)
         if statuses is not None:
             allowed = set(statuses)
-            candidates = [candidate for candidate in candidates if candidate.candidate_status in allowed]
+            candidates = [
+                candidate for candidate in candidates if candidate.candidate_status in allowed
+            ]
         if limit is not None:
             return candidates[:limit]
         return candidates
