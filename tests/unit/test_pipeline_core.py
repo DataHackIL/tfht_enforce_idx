@@ -989,6 +989,16 @@ class TestRunPipeline:
             await run_job_async(config)
 
     @pytest.mark.asyncio
+    async def test_run_job_async_rejects_scaffolded_discover_job_with_clear_message(self) -> None:
+        """Scaffolded but unimplemented jobs should fail with a specific placeholder message."""
+        config = Config(dataset_name="news_items", job_name="discover")
+
+        with pytest.raises(
+            ValueError, match="news_items/discover is scaffolded but not implemented yet"
+        ):
+            await run_job_async(config)
+
+    @pytest.mark.asyncio
     async def test_run_job_async_writes_run_metadata_via_operational_store(
         self, tmp_path: Path
     ) -> None:

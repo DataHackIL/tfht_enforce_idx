@@ -5,14 +5,19 @@ from pathlib import Path
 import pytest
 
 from denbust.config import (
+    BackfillConfig,
+    CandidatesConfig,
     Config,
     DedupConfig,
+    DiscoveryConfig,
+    DiscoveryQueryKind,
     GoogleDriveBackupConfig,
     ObjectStorageBackupConfig,
     OutputConfig,
     OutputFormat,
     ReleaseConfig,
     SourceConfig,
+    SourceDiscoveryConfig,
     SourceType,
     StoreConfig,
     load_config,
@@ -40,9 +45,22 @@ class TestConfig:
         assert config.store.seen_path is None
         assert config.store.runs_dir is None
         assert config.store.publication_dir is None
+        assert config.discovery.enabled is False
+        assert config.discovery.persist_candidates is True
+        assert config.discovery.default_query_kinds == [
+            DiscoveryQueryKind.BROAD,
+            DiscoveryQueryKind.SOURCE_TARGETED,
+        ]
+        assert config.source_discovery.enabled is True
+        assert config.candidates.discovery_runs_table == "discovery_runs"
+        assert config.backfill.enabled is False
         assert config.state_paths.seen_path == Path("data/news_items/ingest/seen.json")
         assert config.state_paths.runs_dir == Path("data/news_items/ingest/runs")
         assert config.state_paths.publication_dir == Path("data/news_items/ingest/publication")
+        assert config.discovery_state_paths.namespace_dir == Path("data/news_items/discover")
+        assert config.discovery_state_paths.latest_candidates_path == Path(
+            "data/news_items/discover/candidates/latest_candidates.jsonl"
+        )
 
     def test_custom_days(self) -> None:
         """Test custom days configuration."""
@@ -216,6 +234,81 @@ class TestConfig:
         assert config.state_paths.runs_dir == Path("custom/runs")
         assert config.state_paths.publication_dir == Path("custom/publication")
 
+    def test_source_discovery_config_normalizes_boolean_source_toggles(self) -> None:
+        """Per-source discovery config should accept shorthand booleans."""
+        config = Config.model_validate(
+            {
+                "source_discovery": {
+                    "sources": {
+                        "ynet": True,
+                        "mako": {"enabled": False},
+                    }
+                }
+            }
+        )
+
+        assert config.source_discovery.sources["ynet"].enabled is True
+        assert config.source_discovery.sources["mako"].enabled is False
+
+    def test_source_discovery_normalizer_passthrough_for_non_mapping(self) -> None:
+        """SourceDiscoveryConfig's pre-validator should leave non-mapping values untouched."""
+        sentinel = object()
+
+        assert SourceDiscoveryConfig._normalize_sources(sentinel) is sentinel
+        assert SourceDiscoveryConfig._normalize_sources(None) is None
+
+    def test_source_discovery_rejects_non_boolean_shorthand(self) -> None:
+        """Source shorthand should only accept actual booleans, not truthy strings."""
+        with pytest.raises(ValueError, match="sources entries must be mappings or booleans"):
+            SourceDiscoveryConfig.model_validate(
+                {
+                    "sources": {
+                        "ynet": "false",
+                    }
+                }
+            )
+
+    def test_discovery_config_parses_engine_blocks(self) -> None:
+        """Discovery engine settings should parse from YAML-like mappings."""
+        config = DiscoveryConfig.model_validate(
+            {
+                "enabled": True,
+                "engines": {
+                    "brave": {"enabled": True, "max_results_per_query": 25},
+                    "exa": {"enabled": True, "allow_find_similar": False},
+                    "google_cse": {"enabled": True, "cse_id_env": "CUSTOM_GOOGLE_CSE_ID"},
+                },
+            }
+        )
+
+        assert config.enabled is True
+        assert config.engines.brave.enabled is True
+        assert config.engines.brave.max_results_per_query == 25
+        assert config.engines.exa.allow_find_similar is False
+        assert config.engines.google_cse.cse_id_env == "CUSTOM_GOOGLE_CSE_ID"
+
+    def test_candidates_config_defaults(self) -> None:
+        """Candidate persistence defaults should match the design doc scaffolding."""
+        config = CandidatesConfig()
+
+        assert config.discovery_runs_table == "discovery_runs"
+        assert config.supabase_table == "persistent_candidates"
+        assert config.provenance_table == "candidate_provenance"
+        assert config.scrape_attempts_table == "scrape_attempts"
+        assert config.default_retry_backoff_hours == 24
+        assert config.max_retry_attempts == 10
+
+    def test_backfill_config_validation(self) -> None:
+        """Backfill settings should enforce positive queue limits."""
+        config = BackfillConfig()
+
+        assert config.batch_window_days == 7
+        assert config.max_candidates_per_run == 500
+        assert config.max_scrape_attempts_per_run == 100
+
+        with pytest.raises(ValueError):
+            BackfillConfig(batch_window_days=0)
+
     def test_store_normalizer_passthrough_for_non_mapping(self) -> None:
         """The pre-validator should pass through non-mapping values unchanged."""
         sentinel = object()
@@ -259,6 +352,20 @@ class TestConfig:
 
         assert GoogleDriveBackupConfig._apply_env_overrides(sentinel) is sentinel
         assert ObjectStorageBackupConfig._apply_env_overrides(sentinel) is sentinel
+
+    def test_discovery_env_properties(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Discovery API key helpers should honor configured env names."""
+        monkeypatch.setenv("DENBUST_BRAVE_SEARCH_API_KEY", "brave-key")
+        monkeypatch.setenv("DENBUST_EXA_API_KEY", "exa-key")
+        monkeypatch.setenv("DENBUST_GOOGLE_CSE_API_KEY", "google-key")
+        monkeypatch.setenv("DENBUST_GOOGLE_CSE_ID", "search-engine-id")
+
+        config = Config()
+
+        assert config.brave_search_api_key == "brave-key"
+        assert config.exa_api_key == "exa-key"
+        assert config.google_cse_api_key == "google-key"
+        assert config.google_cse_id == "search-engine-id"
 
     def test_phase_b_env_properties(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Phase B service credentials should be exposed through config properties."""
