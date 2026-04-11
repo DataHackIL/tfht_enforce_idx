@@ -1162,6 +1162,26 @@ class TestIceScraper:
         assert item is not None
         assert scraper._parse_article_item(item, cutoff) is None
 
+    def test_parse_article_item_keeps_same_day_cutoff_results(self) -> None:
+        """ICE items on the cutoff date should remain in-window for day-based lookbacks."""
+        scraper = self._create_scraper()
+        cutoff = datetime(2026, 3, 12, 18, 35, tzinfo=UTC)
+        item = BeautifulSoup(
+            """
+            <li>
+              <a href="/law/news/article/1086606">בית בושת אותר בתוך מקלט ציבורי</a>
+              <a href="/law/news/article/1086606">עיריית בת ים פתחה בחקירה</a>
+              <span>12/03/2026 07:46</span>
+            </li>
+            """,
+            "lxml",
+        ).li
+
+        assert item is not None
+        result = scraper._parse_article_item(item, cutoff)
+        assert result is not None
+        assert result.date == datetime(2026, 3, 12, 7, 46, tzinfo=UTC)
+
     @pytest.mark.asyncio
     async def test_rate_limit_sleeps_when_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Positive ICE rate limits should sleep between requests."""

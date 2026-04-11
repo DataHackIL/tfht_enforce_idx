@@ -193,7 +193,7 @@ class IceScraper(Source):
         if date is None:
             logger.debug("ice date parse failed, treating as recent: url=%s", url)
             date = datetime.now(UTC)
-        elif date < cutoff:
+        elif self._is_before_cutoff_window(date, cutoff):
             logger.debug("skip ice article reason=date_before_cutoff url=%s", url)
             return None
 
@@ -204,6 +204,10 @@ class IceScraper(Source):
             date=date,
             source_name=self._name,
         )
+
+    def _is_before_cutoff_window(self, date: datetime, cutoff: datetime) -> bool:
+        """Treat ICE search dates as day-window values for filtering stability."""
+        return date.date() < cutoff.date()
 
     def _parse_date(self, text: str) -> datetime | None:
         """Parse ICE's visible dd/mm/YYYY and optional time format."""
