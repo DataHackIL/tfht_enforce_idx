@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
+
+from pydantic import HttpUrl
 
 from denbust.data_models import RawArticle
 from denbust.discovery.base import SourceCandidateProducer, SourceDiscoveryContext
@@ -39,8 +42,8 @@ def raw_article_to_discovered_candidate(
     return DiscoveredCandidate(
         producer_name=article.source_name,
         producer_kind=ProducerKind.SOURCE_NATIVE,
-        candidate_url=str(article.url),
-        canonical_url=canonical_url,
+        candidate_url=article.url,
+        canonical_url=cast(HttpUrl, canonical_url),
         title=article.title,
         snippet=article.snippet,
         discovered_at=discovered_at or datetime.now(UTC),

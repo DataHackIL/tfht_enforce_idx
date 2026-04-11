@@ -33,7 +33,10 @@ class SourceDiscoveryContext(BaseModel):
 class DiscoveryEngine(Protocol):
     """Protocol for search-engine discovery adapters."""
 
-    name: str
+    @property
+    def name(self) -> str:
+        """Return the producer name."""
+        ...
 
     async def discover(
         self,
@@ -46,7 +49,10 @@ class DiscoveryEngine(Protocol):
 class SourceCandidateProducer(Protocol):
     """Protocol for source-native candidate producers."""
 
-    name: str
+    @property
+    def name(self) -> str:
+        """Return the producer name."""
+        ...
 
     async def discover_candidates(
         self,

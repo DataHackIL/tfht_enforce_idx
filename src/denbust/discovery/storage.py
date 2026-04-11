@@ -37,6 +37,10 @@ class DiscoveryPersistence(
 ):
     """Combined discovery persistence boundary."""
 
+    def close(self) -> None:
+        """Release any backend resources held by the persistence layer."""
+        return None
+
 
 class NullDiscoveryPersistence(DiscoveryPersistence):
     """No-op discovery persistence backend."""
