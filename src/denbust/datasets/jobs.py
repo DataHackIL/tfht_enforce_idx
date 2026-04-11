@@ -90,7 +90,7 @@ async def _run_unimplemented_scaffold_job(
 
 
 def ensure_default_jobs_registered() -> None:
-    """Register Phase A dataset jobs exactly once."""
+    """Register default dataset jobs exactly once."""
     global _REGISTERED
     if _REGISTERED:
         return
