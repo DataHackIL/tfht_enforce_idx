@@ -28,6 +28,7 @@ from denbust.discovery.source_native import (
 from denbust.discovery.state_paths import resolve_discovery_state_paths
 from denbust.discovery.storage import (
     CompositeDiscoveryPersistence,
+    DiscoveryPersistence,
     NullDiscoveryPersistence,
     StateRepoDiscoveryPersistence,
     SupabaseDiscoveryPersistence,
@@ -234,6 +235,7 @@ def test_persist_discovered_candidates_reuses_identity_map_and_sets_failed_statu
 def test_null_discovery_persistence_is_noop() -> None:
     """The null persistence backend should be safely inert."""
     store = NullDiscoveryPersistence()
+    assert DiscoveryPersistence.close(store) is None
 
     store.write_run(DiscoveryRun(run_id="run-1"))
     store.upsert_candidates([build_candidate()])
@@ -273,6 +275,7 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
     assert store.provenance_path == paths.candidates_dir / "candidate_provenance.jsonl"
     assert store.attempts_path == paths.candidates_dir / "scrape_attempts.jsonl"
     assert store.get_candidate("queued") is not None
+    assert store.get_candidate("missing") is None
     assert len(store.list_candidates()) == 2
     assert (
         store.list_candidates(statuses=[CandidateStatus.QUEUED], limit=1)[0].candidate_id
@@ -294,6 +297,7 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
     )
     assert len(store.list_provenance("queued", limit=1)) == 1
     assert len(store.list_attempts("backfill", limit=1)) == 1
+    assert len(store.list_attempts("backfill")) == 1
     assert paths.retry_queue_path.exists()
     assert paths.backfill_queue_path.exists()
     assert store.close() is None
@@ -441,6 +445,31 @@ def test_supabase_discovery_persistence_handles_empty_payload_shapes() -> None:
     store.upsert_candidates([])
     store.append_provenance([])
     store.append_attempts([])
+
+
+def test_supabase_discovery_persistence_finds_candidate_by_current_url() -> None:
+    """Current-url lookups should return a candidate when canonical_url is absent."""
+    client = FakeHttpClient([httpx.Response(200, json=[build_candidate().model_dump(mode="json")])])
+    store = SupabaseDiscoveryPersistence(
+        base_url="https://supabase.example.com",
+        service_role_key="service-role",
+        schema="public",
+        table_names={
+            "discovery_runs": "discovery_runs",
+            "persistent_candidates": "persistent_candidates",
+            "candidate_provenance": "candidate_provenance",
+            "scrape_attempts": "scrape_attempts",
+        },
+        client=client,
+    )
+
+    found = store.find_candidate_by_urls(
+        canonical_url=None,
+        current_url="https://www.ynet.co.il/news/article/abc?utm_source=test",
+    )
+
+    assert found is not None
+    assert found.candidate_id == "candidate-1"
 
 
 def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary() -> None:
