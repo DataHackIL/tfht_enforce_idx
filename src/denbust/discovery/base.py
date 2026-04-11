@@ -22,6 +22,8 @@ class SourceDiscoveryContext(BaseModel):
     """Shared execution context for source-native candidate producers."""
 
     run_id: str
+    days: int | None = None
+    keywords: list[str] = Field(default_factory=list)
     source_names: list[str] = Field(default_factory=list)
     date_from: datetime | None = None
     date_to: datetime | None = None

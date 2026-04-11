@@ -15,7 +15,7 @@ data jobs. Phase A introduced the shared platform spine. Phase B turns the first
 
 Today, the implemented dataset/jobs are:
 
-- `news_items / discover` scaffold only
+- `news_items / discover` (source-native candidate persistence only)
 - `news_items / ingest`
 - `news_items / release`
 - `news_items / backup`
@@ -75,6 +75,7 @@ Current defaults remain:
 Future-facing commands now exist as real `news_items` jobs:
 
 ```bash
+denbust run --dataset news_items --job discover --config agents/news/local.yaml
 denbust run --dataset news_items --job ingest --config agents/news/local.yaml
 denbust release --dataset news_items --config agents/release/news_items.yaml
 denbust backup --dataset news_items --config agents/backup/news_items.yaml
@@ -221,12 +222,17 @@ Still intentionally deferred:
 
 ## Discovery Layer Foundation
 
-PR 1 of the persistent multi-engine discovery work is now in place as scaffolding only. It adds:
+PR 2 of the persistent multi-engine discovery work now adds the first operational slice on top of
+the PR 1 foundation:
 
 - `src/denbust/discovery/` with durable candidate, provenance, scrape-attempt, and discovery-run
   models
 - config sections for `discovery`, `source_discovery`, `candidates`, and `backfill`
 - explicit state-repo path helpers for candidate-layer snapshots and queue files
+- source-native candidate normalization and merge/upsert persistence
+- a real `news_items / discover` job that fetches source-native candidates only and persists them
+- best-effort source-native candidate persistence during `news_items / ingest`, without changing the
+  existing ingest/release/backup flow
 - Supabase migrations for:
   - `discovery_runs`
   - `persistent_candidates`
@@ -234,7 +240,8 @@ PR 1 of the persistent multi-engine discovery work is now in place as scaffoldin
   - `scrape_attempts`
 
 This PR does not yet call Brave, Exa, or Google CSE, and it does not yet route the live ingest
-pipeline through the durable candidate queue. The current daily monitoring flow remains unchanged.
+pipeline through the durable candidate queue. The current daily monitoring flow remains behaviorally
+unchanged aside from persisting source-native candidate rows as an additive side effect.
 
 ## Config Layout
 

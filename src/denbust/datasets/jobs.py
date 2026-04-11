@@ -42,6 +42,22 @@ async def _run_news_items_ingest(
     )
 
 
+async def _run_news_items_discover(
+    config: Config,
+    config_path: Path | None,
+    days_override: int | None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    from denbust.pipeline import run_news_discover_job
+
+    return await run_news_discover_job(
+        config,
+        config_path=config_path,
+        days_override=days_override,
+        operational_store=operational_store,
+    )
+
+
 async def _run_scaffolded_release(
     config: Config,
     config_path: Path | None,
@@ -96,7 +112,7 @@ def ensure_default_jobs_registered() -> None:
         return
 
     register_job(DatasetName.NEWS_ITEMS, JobName.INGEST, _run_news_items_ingest)
-    register_job(DatasetName.NEWS_ITEMS, JobName.DISCOVER, _run_unimplemented_scaffold_job)
+    register_job(DatasetName.NEWS_ITEMS, JobName.DISCOVER, _run_news_items_discover)
     register_job(
         DatasetName.NEWS_ITEMS,
         JobName.SCRAPE_CANDIDATES,

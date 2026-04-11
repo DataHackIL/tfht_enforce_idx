@@ -989,14 +989,37 @@ class TestRunPipeline:
             await run_job_async(config)
 
     @pytest.mark.asyncio
-    async def test_run_job_async_rejects_scaffolded_discover_job_with_clear_message(self) -> None:
-        """Scaffolded but unimplemented jobs should fail with a specific placeholder message."""
-        config = Config(dataset_name="news_items", job_name="discover")
+    async def test_run_job_async_runs_discover_without_operational_store(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Discover jobs should persist candidates without requiring the operational store."""
+        config = Config(
+            dataset_name="news_items",
+            job_name="discover",
+            store={"state_root": tmp_path},
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources",
+            lambda _config: [FakeSource("ynet", [build_raw_article("https://www.ynet.co.il/item")])],
+        )
 
-        with pytest.raises(
-            ValueError, match="news_items/discover is scaffolded but not implemented yet"
-        ):
-            await run_job_async(config)
+        def fail_if_called(_config: Config) -> None:
+            raise AssertionError("create_operational_store should not be called for discover jobs")
+
+        monkeypatch.setattr("denbust.pipeline.create_operational_store", fail_if_called)
+
+        result = await run_job_async(config)
+
+        assert result.job_name == "discover"
+        assert result.raw_article_count == 1
+        assert result.unified_item_count == 1
+        assert result.fatal is False
+        candidate_lines = (
+            config.discovery_state_paths.latest_candidates_path.read_text(encoding="utf-8")
+            .strip()
+            .splitlines()
+        )
+        assert len(candidate_lines) == 1
 
     @pytest.mark.asyncio
     async def test_run_job_async_writes_run_metadata_via_operational_store(

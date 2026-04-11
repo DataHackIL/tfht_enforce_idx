@@ -42,6 +42,15 @@ class CandidateStore(ABC):
     ) -> list[PersistentCandidate]:
         """List durable candidates, optionally filtered by status."""
 
+    @abstractmethod
+    def find_candidate_by_urls(
+        self,
+        *,
+        canonical_url: str | None,
+        current_url: str,
+    ) -> PersistentCandidate | None:
+        """Fetch a single durable candidate by canonical or current URL."""
+
 
 class ProvenanceStore(ABC):
     """Persistence interface for append-only candidate provenance."""
