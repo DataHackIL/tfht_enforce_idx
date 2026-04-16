@@ -988,7 +988,9 @@ class TestRunPipelineAsync:
         classifier.classify_batch = AsyncMock(
             return_value=[build_classified_article("https://example.com/queued", relevant=True)]
         )
-        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])])
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
+        )
         monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
         monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
         monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)

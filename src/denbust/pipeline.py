@@ -861,9 +861,7 @@ async def run_news_ingest_job(
                     },
                 )
                 if scrape_batch.errors:
-                    result.warnings.append(
-                        f"candidate_scrape_failures={len(scrape_batch.errors)}"
-                    )
+                    result.warnings.append(f"candidate_scrape_failures={len(scrape_batch.errors)}")
                 passthrough_articles = [
                     article
                     for article in all_articles
@@ -882,9 +880,7 @@ async def run_news_ingest_job(
                     ingest_articles = list(all_articles)
             except Exception as exc:
                 logger.warning("Candidate scrape layer failed during ingest: %s", exc)
-                result.warnings.append(
-                    f"candidate_scrape_layer_failed={type(exc).__name__}: {exc}"
-                )
+                result.warnings.append(f"candidate_scrape_layer_failed={type(exc).__name__}: {exc}")
         except Exception as exc:
             logger.warning("Source-native candidate persistence failed during ingest: %s", exc)
             result.warnings.append(
@@ -993,9 +989,7 @@ async def run_news_scrape_candidates_job(
     result.raw_article_count = len(scrape_batch.raw_articles)
     if scrape_batch.errors:
         result.errors.extend(scrape_batch.errors)
-        result.warnings.append(
-            f"candidate_scrape_failures={len(scrape_batch.errors)}"
-        )
+        result.warnings.append(f"candidate_scrape_failures={len(scrape_batch.errors)}")
     if not scrape_batch.selected_candidates:
         return result.finish("no queued candidates eligible for scrape")
 

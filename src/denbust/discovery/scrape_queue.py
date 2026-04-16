@@ -51,7 +51,8 @@ def select_candidates_for_scrape(
     eligible = [
         candidate
         for candidate in candidates
-        if candidate.next_scrape_attempt_at is None or candidate.next_scrape_attempt_at <= current_time
+        if candidate.next_scrape_attempt_at is None
+        or candidate.next_scrape_attempt_at <= current_time
     ]
     ordered = sorted(
         eligible,
@@ -165,9 +166,7 @@ def _mark_attempt_failure(
         config.candidates.allow_retry_on_fetch_failure
         and status is not CandidateStatus.UNSUPPORTED_SOURCE
     ):
-        retry_at = finished_at + timedelta(
-            hours=config.candidates.default_retry_backoff_hours
-        )
+        retry_at = finished_at + timedelta(hours=config.candidates.default_retry_backoff_hours)
     return candidate.model_copy(
         update={
             "candidate_status": status,

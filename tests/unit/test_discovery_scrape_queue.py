@@ -112,7 +112,9 @@ def test_select_candidates_for_scrape_filters_retryable_due_candidates(tmp_path:
     selected = select_candidates_for_scrape(store, limit=10, now=due_time)
 
     assert {candidate.candidate_id for candidate in selected} == {"new", "failed_due"}
-    assert all(candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES for candidate in selected)
+    assert all(
+        candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES for candidate in selected
+    )
 
 
 @pytest.mark.asyncio
