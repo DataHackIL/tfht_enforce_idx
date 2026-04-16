@@ -1,262 +1,104 @@
 # AGENTS.md
 
-> **SYNC NOTE:** `CLAUDE.md` mirrors this file. Keep them in sync when updating repository guidance.
+`CLAUDE.md` must remain a symlink to this file.
 
----
+## Repo Rules
 
-## Project Overview
+- Use the repo-specific GitHub MCP when available; use local `git` only if no MCP for this repo is exposed.
+- Do not commit secrets, tokens, browser state, or personal config.
+- Keep `LOCAL_AGENTS.md` untracked; treat it as additive only.
+- Prefer editing checked-in agent context in `AGENTS.md`, `llms.txt`, and `.agent-plan.md`; do not move dynamic state back into `AGENTS.md`.
 
-**denbust** (מדד האכיפה) is a Python tool for monitoring enforcement of anti-brothel laws in Israel.
+## Branch And PR Rules
 
-### Project Phases
+- Default branch prefix for agent work: `codex/`.
+- Keep branches single-purpose.
+- Open PRs against `main`.
+- Preserve `CLAUDE.md -> AGENTS.md` when changing repo guidance.
 
-**Phase 1 (Current):** News monitoring
-- 4 sources: 2 RSS feeds (Ynet, Walla) + 2 scrapers (Mako, Maariv)
-- Scan the last X days for reports about brothel raids, prostitution arrests, pimping cases, trafficking, and closure orders
-- Classify relevance with an LLM, deduplicate the same story across sources, and output unified items
-- Output is currently available via CLI and SMTP email, with multi-output fanout through `output.formats`
+## Environment
 
-**Phase 2 (Future):** Court records
-- Scrape Israeli Courts for related proceedings
-- Correlate news stories with court cases
-- Track closure orders and reopenings
+- Python `>=3.11`
+- Install dev dependencies:
 
-**Phase 3 (Future):** Analytics
-- Historical enforcement database
-- Regional enforcement gap analysis
-- Web dashboard with statistics
-
----
-
-## Current Architecture
-
-```text
-┌─────────────────┐     ┌─────────────────────────┐
-│   RSS Sources   │     │   Scraper Sources       │
-│  (Ynet, Walla)  │     │ Mako, Maariv            │
-└────────┬────────┘     └────────┬────────────────┘
-         │ HTTP/RSS               │ Playwright + HTML parsing (Mako)
-         │ keyword + date filter  │ HTML parsing (Maariv)
-         └──────────┬─────────────┘
-                    ▼
-         LLM Classifier (relevance + category)
-                    │
-                    ▼
-         Deduplicator (cross-source grouping)
-                    │
-                    ▼
-         Output fanout (`cli`, `email`)
+```bash
+pip install -e ".[dev]"
 ```
 
-- **Primary language:** Python 3.11+
-- **Runtime:** CLI (`denbust scan`), cron or GitHub Actions for automation
-- **Current outputs:** `cli`, `email`
-- **Telegram note:** `telegram` still exists in config as an enum but is not implemented; the pipeline currently logs a warning and falls back to CLI output
-- **No secrets in repo:** all credentials stay in environment variables
+- Install browser runtime before live Mako runs:
 
----
-
-## What We Monitor
-
-### Primary Topics
-- Brothel raids and closures
-- Prostitution-related arrests
-- Pimp (סרסור) arrests and sentencing
-- Human trafficking cases
-- Administrative closure orders
-
-### Secondary Topics
-- Massage parlor / spa busts (fronts)
-- Online platform takedowns
-- Police operations targeting prostitution
-- Court sentences in related cases
-- Trafficking victim rescues
-
----
-
-## Repository Structure
-
-```text
-denbust/
-├── src/denbust/
-│   ├── __init__.py
-│   ├── cli.py                 # Typer CLI entry point
-│   ├── config.py              # Config model + env-backed properties
-│   ├── data_models.py         # RawArticle, ClassifiedArticle, UnifiedItem
-│   ├── pipeline.py            # Orchestration + output fanout
-│   ├── sources/
-│   │   ├── base.py            # Source protocol
-│   │   ├── rss.py             # RSS fetchers (Ynet, Walla)
-│   │   ├── mako.py            # Playwright-backed scraper
-│   │   └── maariv.py          # HTML scraper
-│   ├── classifier/
-│   │   └── relevance.py       # LLM classification
-│   ├── dedup/
-│   │   └── similarity.py      # Cross-source deduplication
-│   ├── output/
-│   │   ├── email.py           # SMTP report delivery
-│   │   └── formatter.py       # Console/report formatting
-│   └── store/
-│       └── seen.py            # Seen URL persistence
-├── data/
-│   ├── runs/                  # Per-run outputs (gitignored)
-│   └── seen.json              # Default seen-URL store (gitignored)
-├── agents/                    # Checked-in example configs
-├── tests/
-│   ├── fixtures/              # RSS XML + HTML fixtures
-│   ├── integration/
-│   ├── smoke/
-│   └── unit/
-├── .github/
-│   ├── workflows/
-│   └── skills/                # Repo-local guidance for agents and Copilot
-└── pyproject.toml
+```bash
+python -m playwright install chromium
 ```
 
----
+## Required Validation Commands
 
-## Development Guidelines
-
-### 1) Code Style & Quality
-- Python 3.11+ preferred
-- Full type annotations
-- Lint/format: Ruff
-- Type check: mypy
-- Tests: pytest
+Run the narrowest relevant checks for the files you changed. For cross-cutting changes, run the full set.
 
 ```bash
 ruff format .
 ruff check .
 mypy src/
-pytest
-```
-
-### 2) Legal & Ethical Constraints
-- Only use public, freely accessible sources
-- Prefer RSS over scraping when a stable feed exists
-- Respect robots.txt and anti-abuse boundaries
-- Never store PII beyond what appears in public news articles
-- Comply with Israeli privacy law
-
-### 3) Data Fetching
-- **RSS sources:** fetch the feed, then filter by keyword/date
-- **Mako:** browser-backed with Playwright + headless Chromium; searches and section pages are rendered before parsing
-- **Maariv:** HTML scraping with fixtures and mocked HTTP in tests
-- Keep request pacing conservative and identify the client clearly
-- Normalize Mako article URLs before deduplication or seen tracking so `?Partner=searchResults` does not create duplicate stories
-- Handle source failures per source/search path and continue the rest of the scan
-
-### 4) Classification
-- LLM classifies relevance, category, sub-category, and confidence
-- Prompts should stay short, Hebrew-aware, and grounded in article text
-- Log decisions for review
-- Never fabricate article details
-
-### 5) Deduplication
-- Same story from multiple sources should produce one unified item
-- Keep all source links on the unified item
-- Prefer canonical article URLs before similarity/dedup logic runs
-
-### 6) Output
-- Preferred config uses `output.formats`, not duplicate `format` keys
-- Example:
-
-```yaml
-output:
-  formats:
-    - cli
-    - email
-```
-
-- Legacy `output.format` is still accepted for backward compatibility, but `formats` is the preferred shape for new configs
-
----
-
-## Secrets & Configuration
-
-Never commit secrets. Use env vars:
-
-```text
-ANTHROPIC_API_KEY
-
-DENBUST_TELEGRAM_BOT_TOKEN   # Optional, Telegram mode is not implemented yet
-DENBUST_TELEGRAM_CHAT_ID     # Optional
-
-DENBUST_EMAIL_SMTP_HOST
-DENBUST_EMAIL_SMTP_PORT
-DENBUST_EMAIL_SMTP_USERNAME
-DENBUST_EMAIL_SMTP_PASSWORD
-DENBUST_EMAIL_FROM
-DENBUST_EMAIL_TO             # Comma-separated recipients
-DENBUST_EMAIL_USE_TLS
-DENBUST_EMAIL_SUBJECT
-```
-
-Notes:
-- `DENBUST_EMAIL_TO` accepts comma-separated recipients and is parsed into a list
-- Keep personal/local configs outside the repo when possible, for example under `~/.config/denbust/`
-- Do not rely on ignored files under `agents/local/` for durable personal setup across branch/worktree changes
-- Local runs can use an absolute config path:
-
-```bash
-denbust scan --config ~/.config/denbust/news-email.yaml
-```
-
----
-
-## Testing Guidance
-
-- No live network calls in tests
-- No live browser scraping in CI
-- Unit tests should cover config normalization, classifier parsing, dedup logic, output fanout, and store behavior
-- Integration tests should use mocked HTTP or mocked rendered HTML
-- Mako tests should exercise rendered-HTML helpers and fixtures, not live Mako pages
-
-Useful commands:
-
-```bash
 pytest -q
-pytest -q tests/integration -k Mako
-pytest -q tests/unit
 ```
 
----
+Useful targeted commands:
 
-## CI & Automation Guidance
+```bash
+pytest -q tests/unit
+pytest -q tests/integration -k Mako
+denbust scan --config agents/news/local.yaml
+denbust run --dataset news_items --job discover --config agents/news/local.yaml
+denbust run --dataset news_items --job scrape_candidates --config agents/news/local.yaml
+denbust release --dataset news_items --config agents/release/news_items.yaml
+denbust backup --dataset news_items --config agents/backup/news_items.yaml
+```
 
-Current workflow shape:
-- `pre-commit.ci` handles pre-commit checks
-- `.github/workflows/ci-test.yml` is the main CI workflow
-- `unit-tests` and `integration-tests` produce raw coverage artifacts used by the `coverage` job
-- `coverage` combines coverage data, generates `coverage.xml`, uploads the `coverage-xml` artifact, and uploads to Codecov
-- `pr-agent-context` runs both from the main PR workflow and from `.github/workflows/pr-agent-context-refresh.yml`
-- `pr-agent-context` now consumes the combined `coverage-xml` artifact directly for patch coverage
-- Validation workflows exist for `pyproject.toml` and `codecov.yml`
+## Code Standards
 
-When editing CI:
-- keep workflow responsibilities narrow
-- do not add duplicate coverage producers if the `coverage` job can be reused
-- prefer artifact reuse over reconstructing results in multiple places
+- Full type annotations are required.
+- Ruff is the formatter and linter of record.
+- Mypy runs in strict mode; keep new code strict-clean.
+- Keep public behavior and CLI names backward compatible unless the task explicitly changes them.
+- Prefer small, composable modules over large cross-cutting rewrites.
 
----
+## Architecture Boundaries
 
-## Quick Reference
+- Dataset/job identity is defined through `src/denbust/models/` and `src/denbust/datasets/`; do not hardcode ad hoc dataset/job routing elsewhere.
+- State-path resolution must go through:
+  - `src/denbust/store/state_paths.py`
+  - `src/denbust/discovery/state_paths.py`
+- Discovery/candidacy models live under `src/denbust/discovery/`; ingest/release/backup logic must consume those models instead of redefining candidate state.
+- `news_items` operational/public record schemas live in `src/denbust/news_items/models.py`; reuse them instead of introducing parallel row schemas.
+- Release and backup integrations belong under `src/denbust/publish/` and `src/denbust/news_items/`; avoid embedding publication logic inside unrelated modules.
+- Source adapters belong under `src/denbust/sources/`; source-specific scraping logic should not leak into CLI or config modules.
+- Config normalization lives in `src/denbust/config.py`; prefer env/YAML plumbing there instead of scattered `os.environ` reads.
 
-| Task | Command |
-|------|---------|
-| Install (dev) | `pip install -e ".[dev]"` |
-| Install Mako browser runtime | `python -m playwright install chromium` |
-| Run scan | `denbust scan --config agents/news.yaml` |
-| Run with external config | `denbust scan --config ~/.config/denbust/news-email.yaml` |
-| Tests | `pytest -q` |
-| Lint | `ruff check .` |
-| Format | `ruff format .` |
-| Type check | `mypy src/` |
+## Fetching And Data Handling Rules
 
----
+- Prefer public, stable interfaces; use RSS where a stable feed exists.
+- Keep source failures isolated per source/query path; do not abort the entire run on one source failure.
+- Normalize Mako URLs before deduplication or seen-state writes so query params do not fork duplicate records.
+- Do not fabricate article details or inferred facts beyond what exists in the source text and structured model outputs.
 
-## Local Agent Overrides (Optional, Untracked)
+## Config And Secrets
 
-- If `LOCAL_AGENTS.md` exists at repo root, treat it as additive local instructions
-- `LOCAL_AGENTS.md` must remain untracked
-- On conflicts, repository policy and security constraints take precedence
+- Keep durable personal config outside the repo, for example under `~/.config/denbust/`.
+- Prefer `output.formats` over legacy `output.format` in new config examples.
+- Supported sensitive env vars include:
+  - `ANTHROPIC_API_KEY`
+  - `DENBUST_*`
+- Never add secrets to fixtures, examples, docs, or workflow YAML.
+
+## Testing Constraints
+
+- No live network calls in tests.
+- No live browser scraping in CI tests.
+- Use fixtures/mocked HTTP/rendered HTML for source tests.
+- When changing discovery, ingestion, or persistence behavior, add or update tests in `tests/unit` or `tests/integration`.
+
+## CI Notes
+
+- Main CI workflow: `.github/workflows/ci-test.yml`
+- Reuse the existing coverage flow instead of adding duplicate coverage producers.
+- Prefer artifact reuse over recomputing the same coverage or validation outputs in multiple jobs.

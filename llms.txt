@@ -1,0 +1,109 @@
+# llms.txt
+
+High-density index for agents working in this repository.
+
+## Core Tree
+
+```text
+src/denbust/
+  cli.py                       Typer entrypoint and job commands
+  config.py                    YAML/env config normalization
+  pipeline.py                  legacy scan pipeline orchestration
+  data_models.py               raw/classified/unified article models
+  models/
+    common.py                  dataset/job identity and shared enums
+    policies.py                review/privacy/publication policy enums
+    runs.py                    run snapshot models
+  datasets/
+    registry.py                dataset/job registry
+    jobs.py                    dataset job wiring
+  sources/
+    base.py                    source protocol
+    rss.py                     RSS fetchers
+    mako.py                    browser-backed scraping
+    maariv.py                  HTML scraper
+    walla.py                   source adapter
+    haaretz.py                 source adapter
+    ice.py                     source adapter
+  discovery/
+    models.py                  candidate/provenance/scrape-attempt schemas
+    queries.py                 discovery query building
+    persistence.py             candidate persistence orchestration
+    storage.py                 candidate-layer store interface
+    scrape_queue.py            queued scrape flow
+    source_native.py           source-native candidacy
+    state_paths.py             discovery state layout
+  news_items/
+    models.py                  operational/public record schemas
+    ingest.py                  ingest job
+    enrich.py                  enrichment/summaries
+    normalize.py               canonical URLs and IDs
+    publication.py             public release shaping
+    release.py                 release job
+    backup.py                  backup job
+    daily_review.py            suspicious-run review flow
+  ops/
+    storage.py                 operational store interface
+    supabase.py                Supabase backend
+    factory.py                 store backend selection
+  publish/
+    base.py                    publication abstractions
+    release.py                 publisher execution
+    backup.py                  backup execution
+  store/
+    seen.py                    seen URL persistence
+    run_snapshots.py           per-run JSON snapshots
+    state_paths.py             dataset/job state layout
+  validation/
+    models.py                  validation row/result schemas
+    dataset.py                 validation set loading
+    evaluate.py                classifier evaluation
+    import_reviewed.py         reviewed-data import path
+  taxonomy/
+    loader.py                  taxonomy loading
+```
+
+## Schemas And Internal APIs
+
+- Core news/article schemas: `src/denbust/data_models.py`
+- Dataset/job identity and shared run models: `src/denbust/models/common.py`, `src/denbust/models/runs.py`
+- Policy/status enums: `src/denbust/models/policies.py`
+- `news_items` operational/public schemas: `src/denbust/news_items/models.py`
+- Discovery/candidacy schemas: `src/denbust/discovery/models.py`
+- Validation schemas: `src/denbust/validation/models.py`
+- Config API: `src/denbust/config.py`
+- CLI/internal command surface: `src/denbust/cli.py`
+- Dataset registry/internal job routing: `src/denbust/datasets/registry.py`, `src/denbust/datasets/jobs.py`
+- Operational storage interface: `src/denbust/ops/storage.py`
+- Discovery storage interface: `src/denbust/discovery/storage.py`
+- State path resolution: `src/denbust/store/state_paths.py`, `src/denbust/discovery/state_paths.py`
+
+## Config, Workflows, And Migrations
+
+- Package/tooling config: `pyproject.toml`
+- Example/news job configs: `agents/news/local.yaml`, `agents/news/github.yaml`, `agents/news.yaml`
+- Release config: `agents/release/news_items.yaml`
+- Backup config: `agents/backup/news_items.yaml`
+- Validation variants: `agents/validation/classifier_variants.yaml`
+- GitHub Actions: `.github/workflows/`
+- Supabase migrations: `supabase/migrations/`
+
+## Tests And Fixtures
+
+- Unit tests: `tests/unit/`
+- Integration tests: `tests/integration/`
+- Smoke tests: `tests/smoke/`
+- Fixtures: `tests/fixtures/`
+
+## State And Output Locations
+
+- Local dataset/job state root default: `data/`
+- Discovery state paths resolve under dataset/job namespaces via `state_paths.py`
+- Run snapshots: dataset/job `runs/` dirs under the resolved state root
+
+## Planning / Human Context
+
+- Phase C roadmap: `docs/PHASE_C_PLAN.md`
+- Discovery rollout roadmap: `docs/tfht_discovery_layer_implementation_plan.md`
+- Broader implementation backlog: `docs/IMPLEMENTATION_PLAN.md`
+- Current project report: `docs/2026_04_04_tfht_state_of_project_report.md`
