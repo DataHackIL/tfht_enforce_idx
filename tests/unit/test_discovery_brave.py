@@ -178,7 +178,9 @@ async def test_brave_search_engine_skips_non_list_results_and_non_dict_rows() ->
     responses = iter(
         [
             httpx.Response(200, json={"web": {"results": "not-a-list"}}),
-            httpx.Response(200, json={"web": {"results": ["bad-row", {"url": "https://ice.co.il/a"}]}}),
+            httpx.Response(
+                200, json={"web": {"results": ["bad-row", {"url": "https://ice.co.il/a"}]}}
+            ),
         ]
     )
 
