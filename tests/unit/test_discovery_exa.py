@@ -76,7 +76,9 @@ async def test_exa_search_engine_normalizes_results_and_renders_payload() -> Non
     assert candidates[0].producer_kind is ProducerKind.SEARCH_ENGINE
     assert candidates[0].source_hint == "ynet"
     assert candidates[0].rank == 1
-    assert str(candidates[0].candidate_url) == "https://www.ynet.co.il/news/article/abc?utm_source=exa"
+    assert (
+        str(candidates[0].candidate_url) == "https://www.ynet.co.il/news/article/abc?utm_source=exa"
+    )
     assert str(candidates[0].canonical_url) == "https://ynet.co.il/news/article/abc"
     assert candidates[0].snippet == "המשטרה פשטה על המקום."
     assert candidates[0].publication_datetime_hint == datetime(2026, 4, 15, 8, 0, tzinfo=UTC)

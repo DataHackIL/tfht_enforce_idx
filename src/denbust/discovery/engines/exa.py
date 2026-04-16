@@ -146,8 +146,12 @@ class ExaSearchEngine:
                     "result_id": result.get("id"),
                     "result_url": url,
                     "result_title": title if isinstance(title, str) else None,
-                    "result_published_date": published_date if isinstance(published_date, str) else None,
-                    "result_author": result.get("author") if isinstance(result.get("author"), str) else None,
+                    "result_published_date": published_date
+                    if isinstance(published_date, str)
+                    else None,
+                    "result_author": result.get("author")
+                    if isinstance(result.get("author"), str)
+                    else None,
                 },
             )
         except ValueError:
