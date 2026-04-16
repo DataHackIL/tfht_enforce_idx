@@ -184,7 +184,9 @@ async def test_google_cse_search_engine_ignores_invalid_publication_hints() -> N
 
 
 @pytest.mark.asyncio
-async def test_google_cse_search_engine_skips_non_dict_metatags_before_valid_publication_time() -> None:
+async def test_google_cse_search_engine_skips_non_dict_metatags_before_valid_publication_time() -> (
+    None
+):
     """Mixed metatag lists should ignore invalid entries and still extract publication time."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
