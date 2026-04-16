@@ -135,7 +135,9 @@ class GoogleCseSearchEngine:
                     "result_title": title if isinstance(title, str) else None,
                     "result_snippet": snippet if isinstance(snippet, str) else None,
                     "result_display_link": (
-                        result.get("displayLink") if isinstance(result.get("displayLink"), str) else None
+                        result.get("displayLink")
+                        if isinstance(result.get("displayLink"), str)
+                        else None
                     ),
                     "result_cache_id": (
                         result.get("cacheId") if isinstance(result.get("cacheId"), str) else None

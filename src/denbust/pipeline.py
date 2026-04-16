@@ -1200,7 +1200,12 @@ async def run_news_discover_job(
         result.fatal = True
         result.errors.append("source_discovery.persist_candidates is false")
         return result.finish("fatal: source-native candidate persistence disabled")
-    if not source_native_requested and not brave_can_run and not exa_can_run and not google_cse_can_run:
+    if (
+        not source_native_requested
+        and not brave_can_run
+        and not exa_can_run
+        and not google_cse_can_run
+    ):
         result.fatal = True
         result.errors.append("source_discovery.enabled is false")
         return result.finish("fatal: source-native discovery disabled")
