@@ -1699,7 +1699,9 @@ class TestRunPipelineAsync:
         )
 
         assert result.fatal is False
-        assert "source-native discovery skipped because no sources are configured" in result.warnings
+        assert (
+            "source-native discovery skipped because no sources are configured" in result.warnings
+        )
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_warns_on_brave_partial(
