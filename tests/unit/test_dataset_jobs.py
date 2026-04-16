@@ -10,6 +10,7 @@ import pytest
 from denbust.config import Config
 from denbust.datasets.jobs import (
     _run_news_items_ingest,
+    _run_news_items_scrape_candidates,
     _run_scaffolded_backup,
     _run_scaffolded_release,
 )
@@ -64,6 +65,33 @@ async def test_run_news_items_ingest_wrapper_passes_operational_store(
         config,
         config_path=Path("agents/news/local.yaml"),
         days_override=7,
+        operational_store=store,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_news_items_scrape_candidates_wrapper_calls_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scrape-candidates wrapper should delegate to the pipeline handler."""
+    expected = build_snapshot()
+    mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr("denbust.pipeline.run_news_scrape_candidates_job", mock)
+
+    config = Config(job_name="scrape_candidates")
+    store = object()
+    result = await _run_news_items_scrape_candidates(
+        config,
+        Path("agents/news/local.yaml"),
+        5,
+        operational_store=store,  # type: ignore[arg-type]
+    )
+
+    assert result is expected
+    mock.assert_awaited_once_with(
+        config,
+        config_path=Path("agents/news/local.yaml"),
+        days_override=5,
         operational_store=store,
     )
 

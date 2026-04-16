@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 import pytest
 from pydantic import HttpUrl
 
+import denbust.pipeline as pipeline_module
 from denbust.config import Config, OutputConfig, OutputFormat, SourceConfig, SourceType
 from denbust.data_models import (
     Category,
@@ -1029,6 +1030,173 @@ class TestRunPipelineAsync:
         assert "candidate_scrape_failures=1" in result.warnings
         assert result.unified_item_count == 1
         mark_seen_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_candidate_scrape_job_selects_candidates_and_closes_persistence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Queued candidate selection should close persistence before scraping."""
+
+        class FakePersistence:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        config = Config()
+        persistence = FakePersistence()
+        selected_candidates = [MagicMock(name="candidate-1"), MagicMock(name="candidate-2")]
+        scrape_mock = AsyncMock(
+            return_value=CandidateScrapeBatch(
+                selected_candidates=selected_candidates,
+                updated_candidates=[],
+                attempts=[],
+                raw_articles=[],
+                errors=[],
+            )
+        )
+        select_mock = MagicMock(return_value=selected_candidates)
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: persistence,
+        )
+        monkeypatch.setattr("denbust.pipeline.select_candidates_for_scrape", select_mock)
+        monkeypatch.setattr("denbust.pipeline._scrape_candidate_batch", scrape_mock)
+
+        sources = [FakeSource("ynet", [])]
+        result = await pipeline_module._run_candidate_scrape_job(
+            config=config,
+            sources=sources,
+            limit=3,
+        )
+
+        assert result.selected_candidates == selected_candidates
+        assert persistence.closed is True
+        select_mock.assert_called_once_with(persistence, limit=3)
+        scrape_mock.assert_awaited_once_with(
+            config=config,
+            candidates=selected_candidates,
+            sources=sources,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_news_ingest_job_warns_when_candidate_scrape_layer_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ingest should continue and warn when candidate scrape orchestration raises."""
+        source_article = build_raw_article("https://example.com/source-layer")
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[build_classified_article("https://example.com/source-layer")]
+        )
+        persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-ingest",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[MagicMock(name="candidate-1")],
+            provenance=[],
+        )
+        seen_store = MagicMock(count=0)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources",
+            lambda _config: [FakeSource("ynet", [source_article])],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([source_article], [])),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._persist_source_native_candidates",
+            AsyncMock(return_value=persisted),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._scrape_candidate_batch",
+            AsyncMock(side_effect=RuntimeError("scrape boom")),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
+        monkeypatch.setattr(
+            "denbust.pipeline.deduplicate_articles",
+            lambda articles, _deduplicator: [
+                build_unified_item(str(article.article.url)) for article in articles
+            ],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.build_operational_records",
+            AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr("denbust.pipeline.mark_seen", MagicMock())
+
+        result = await run_news_ingest_job(Config())
+
+        assert (
+            "candidate_scrape_layer_failed=RuntimeError: scrape boom" in result.warnings
+        )
+        assert result.raw_article_count == 1
+        assert result.unified_item_count == 1
+
+    @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_rejects_missing_api_key(self) -> None:
+        """The scrape-candidates job should fail clearly without an API key."""
+        result = await run_news_scrape_candidates_job(Config(job_name=JobName.SCRAPE_CANDIDATES))
+
+        assert result.fatal is True
+        assert result.errors == ["ANTHROPIC_API_KEY not set"]
+        assert result.result_summary == "fatal: missing anthropic api key"
+
+    @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_rejects_missing_sources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scrape-candidates job should fail clearly when no sources are configured."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+
+        result = await run_news_scrape_candidates_job(Config(job_name=JobName.SCRAPE_CANDIDATES))
+
+        assert result.fatal is True
+        assert result.errors == ["No sources configured"]
+        assert result.result_summary == "fatal: no sources configured"
+
+    @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_finishes_when_queue_is_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scrape-candidates job should finish cleanly when nothing is eligible."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
+        )
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
+        monkeypatch.setattr(
+            "denbust.pipeline._run_candidate_scrape_job",
+            AsyncMock(
+                return_value=CandidateScrapeBatch(
+                    selected_candidates=[],
+                    updated_candidates=[],
+                    attempts=[],
+                    raw_articles=[],
+                    errors=[],
+                )
+            ),
+        )
+
+        result = await run_news_scrape_candidates_job(Config(job_name=JobName.SCRAPE_CANDIDATES))
+
+        assert result.fatal is False
+        assert result.raw_article_count == 0
+        assert result.result_summary == "no queued candidates eligible for scrape"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
