@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -21,7 +22,12 @@ from denbust.data_models import (
     SubCategory,
     UnifiedItem,
 )
-from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus
+from denbust.discovery.models import (
+    CandidateStatus,
+    DiscoveryRun,
+    DiscoveryRunStatus,
+    PersistentCandidate,
+)
 from denbust.discovery.scrape_queue import CandidateScrapeBatch
 from denbust.discovery.source_native import PersistedSourceDiscovery
 from denbust.models.common import DatasetName, JobName
@@ -33,6 +39,7 @@ from denbust.pipeline import (
     _build_source_summaries,
     _build_suspicions,
     _persist_source_native_candidates,
+    _run_brave_discovery,
     _run_job_from_config,
     _run_source_native_discovery,
     _source_name_from_error,
@@ -93,6 +100,27 @@ def build_unified_item(url: str = "https://example.com/article") -> UnifiedItem:
         date=datetime(2026, 3, 1, tzinfo=UTC),
         category=Category.BROTHEL,
         sub_category=SubCategory.CLOSURE,
+    )
+
+
+def build_persistent_candidate(
+    candidate_id: str,
+    *,
+    current_url: str,
+) -> PersistentCandidate:
+    """Create a sample persistent candidate."""
+    return PersistentCandidate(
+        candidate_id=candidate_id,
+        current_url=HttpUrl(current_url),
+        canonical_url=HttpUrl(current_url),
+        titles=["פשיטה על בית בושת"],
+        snippets=["המשטרה ביצעה פשיטה."],
+        discovered_via=["source_native"],
+        discovery_queries=["בית בושת"],
+        source_hints=["test"],
+        first_seen_at=datetime(2026, 4, 11, 8, 0, tzinfo=UTC),
+        last_seen_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+        candidate_status=CandidateStatus.NEW,
     )
 
 
@@ -388,6 +416,147 @@ class TestFetchAndClassifyHelpers:
 
 class TestRunPipelineAsync:
     """Tests for async pipeline control flow."""
+
+    @pytest.mark.asyncio
+    async def test_run_brave_discovery_persists_empty_when_no_queries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Brave discovery should still persist an empty run when query building yields nothing."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["closed"] = True
+
+        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
+            del persistence
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        monkeypatch.setattr(
+            "denbust.pipeline.build_discovery_queries",
+            lambda *_args, **_kwargs: [],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: FakePersistence(),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates",
+            fake_persist_discovered_candidates,
+        )
+
+        persisted = await _run_brave_discovery(config=Config(), run_id="run-brave", days=4)
+
+        assert persisted.candidates == []
+        assert captured["candidates"] == []
+        assert cast(DiscoveryRun, captured["run"]).query_count == 0
+        assert captured["closed"] is True
+
+    @pytest.mark.asyncio
+    async def test_run_brave_discovery_records_missing_api_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Brave discovery should persist an error when enabled without an API key."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["closed"] = True
+
+        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
+            del persistence
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        monkeypatch.setattr(
+            "denbust.pipeline.build_discovery_queries",
+            lambda *_args, **_kwargs: [MagicMock()],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: FakePersistence(),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates",
+            fake_persist_discovered_candidates,
+        )
+
+        persisted = await _run_brave_discovery(
+            config=Config(discovery={"enabled": True, "engines": {"brave": {"enabled": True}}}),
+            run_id="run-brave",
+            days=4,
+        )
+
+        assert persisted.candidates == []
+        assert captured["candidates"] == []
+        assert cast(DiscoveryRun, captured["run"]).errors == [
+            "brave: missing DENBUST_BRAVE_SEARCH_API_KEY"
+        ]
+        assert captured["closed"] is True
+
+    @pytest.mark.asyncio
+    async def test_run_brave_discovery_catches_engine_errors_and_closes_resources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Engine failures should be recorded on the run and still close both engine and store."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["persistence_closed"] = True
+
+        class FakeEngine:
+            def __init__(self, **kwargs: object) -> None:
+                captured["engine_init"] = kwargs
+
+            async def discover(self, queries, context):
+                captured["queries"] = queries
+                captured["context"] = context
+                raise RuntimeError("boom")
+
+            async def aclose(self) -> None:
+                captured["engine_closed"] = True
+
+        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
+            del persistence
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        monkeypatch.setattr(
+            Config,
+            "brave_search_api_key",
+            property(lambda _self: "brave-key"),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.build_discovery_queries",
+            lambda *_args, **_kwargs: [MagicMock()],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: FakePersistence(),
+        )
+        monkeypatch.setattr("denbust.pipeline.BraveSearchEngine", FakeEngine)
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates",
+            fake_persist_discovered_candidates,
+        )
+
+        persisted = await _run_brave_discovery(
+            config=Config(discovery={"enabled": True, "engines": {"brave": {"enabled": True}}}),
+            run_id="run-brave",
+            days=6,
+        )
+
+        assert persisted.candidates == []
+        assert cast(DiscoveryRun, captured["run"]).errors == ["brave: RuntimeError: boom"]
+        assert captured["engine_closed"] is True
+        assert captured["persistence_closed"] is True
+        assert captured["engine_init"] == {"api_key": "brave-key", "max_results_per_query": 20}
+        assert captured["context"].metadata == {"days": 6, "engine": "brave"}
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_requires_api_key(
@@ -1282,7 +1451,7 @@ class TestRunPipelineAsync:
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_marks_failed_and_partial_runs(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Discover should surface failed runs as fatal and partial runs as warnings."""
         persisted = PersistedSourceDiscovery(
@@ -1305,7 +1474,7 @@ class TestRunPipelineAsync:
             AsyncMock(return_value=persisted),
         )
 
-        partial_result = await run_news_discover_job(Config())
+        partial_result = await run_news_discover_job(Config(store={"state_root": tmp_path}))
 
         assert partial_result.fatal is False
         assert (
@@ -1314,9 +1483,304 @@ class TestRunPipelineAsync:
         )
 
         persisted.run.status = DiscoveryRunStatus.FAILED
-        failed_result = await run_news_discover_job(Config())
+        failed_result = await run_news_discover_job(Config(store={"state_root": tmp_path}))
 
         assert failed_result.fatal is True
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_supports_brave_only_and_writes_metrics(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Brave discovery should run without configured sources and persist engine metrics."""
+        brave_persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=3,
+                merged_candidate_count=2,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-brave-1",
+                    current_url="https://www.ynet.co.il/news/article/1",
+                ),
+                build_persistent_candidate(
+                    "candidate-brave-2",
+                    current_url="https://www.mako.co.il/news/article/2",
+                ),
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave_persisted),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"enabled": False},
+                discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is False
+        assert result.raw_article_count == 3
+        assert result.unified_item_count == 2
+        metrics_payload = (
+            tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
+        ).read_text(encoding="utf-8")
+        assert '"brave": 2' in metrics_payload
+        assert '"source_native": 0' in metrics_payload
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_aggregates_brave_and_source_native_without_double_counting(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Merged candidate counts should be deduplicated across discovery producers."""
+        source_native = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:source_native",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=2,
+                merged_candidate_count=2,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-shared",
+                    current_url="https://www.ynet.co.il/news/article/shared",
+                ),
+                build_persistent_candidate(
+                    "candidate-source-only",
+                    current_url="https://www.walla.co.il/news/article/source-only",
+                ),
+            ],
+            provenance=[],
+        )
+        brave = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=3,
+                merged_candidate_count=2,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-shared",
+                    current_url="https://www.ynet.co.il/news/article/shared",
+                ),
+                build_persistent_candidate(
+                    "candidate-brave-only",
+                    current_url="https://www.mako.co.il/news/article/brave-only",
+                ),
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_source_native_discovery",
+            AsyncMock(return_value=source_native),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is False
+        assert result.raw_article_count == 5
+        assert result.unified_item_count == 3
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_marks_brave_failure_fatal_when_it_is_the_only_engine(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A failed Brave-only discovery run should surface as fatal."""
+        brave_persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.FAILED,
+                candidate_count=0,
+                merged_candidate_count=0,
+                errors=["brave: missing DENBUST_BRAVE_SEARCH_API_KEY"],
+            ),
+            candidates=[],
+            provenance=[],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave_persisted),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"enabled": False},
+                discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is True
+        assert result.errors == ["brave: missing DENBUST_BRAVE_SEARCH_API_KEY"]
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_fails_when_engine_persistence_disabled_and_no_source_native(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Engine-backed discover should fail early when engine persistence is disabled."""
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+
+        result = await run_news_discover_job(
+            Config(
+                source_discovery={"enabled": True, "persist_candidates": True},
+                discovery={
+                    "enabled": True,
+                    "persist_candidates": False,
+                    "engines": {"brave": {"enabled": True}},
+                },
+            )
+        )
+
+        assert result.fatal is True
+        assert result.errors == ["discovery.persist_candidates is false"]
+        assert result.result_summary == "fatal: engine candidate persistence disabled"
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_warns_when_source_native_skipped_for_no_sources_but_brave_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Source-native no-source skips should degrade to a warning when Brave remains active."""
+        brave_persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-brave-1",
+                    current_url="https://www.ynet.co.il/news/article/1",
+                )
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave_persisted),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is False
+        assert (
+            "source-native discovery skipped because no sources are configured" in result.warnings
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_warns_when_source_native_persistence_disabled_but_brave_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Source-native persistence-disabled skips should degrade to a warning when Brave runs."""
+        brave_persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-brave-1",
+                    current_url="https://www.ynet.co.il/news/article/1",
+                )
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave_persisted),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"persist_candidates": False},
+                discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is False
+        assert "source-native discovery skipped because persistence is disabled" in result.warnings
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_warns_on_brave_partial(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Brave partial runs should surface as warnings and still write metrics."""
+        brave_partial = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.PARTIAL,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-brave-1",
+                    current_url="https://www.ynet.co.il/news/article/1",
+                )
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave_partial),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"enabled": False},
+                discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+            )
+        )
+
+        assert "brave discovery completed with partial engine failures" in result.warnings
 
 
 class TestRunPipeline:

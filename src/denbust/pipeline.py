@@ -16,8 +16,10 @@ from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
 from denbust.datasets.jobs import ensure_default_jobs_registered
 from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
-from denbust.discovery.base import SourceDiscoveryContext
+from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
+from denbust.discovery.engines.brave import BraveSearchEngine
 from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus, PersistentCandidate
+from denbust.discovery.queries import build_discovery_queries
 from denbust.discovery.scrape_queue import (
     CandidateScrapeBatch,
     scrape_candidates,
@@ -29,6 +31,7 @@ from denbust.discovery.source_native import (
     persist_discovered_candidates,
     raw_article_to_discovered_candidate,
 )
+from denbust.discovery.state_paths import write_metrics_snapshot
 from denbust.discovery.storage import create_discovery_persistence
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
@@ -206,6 +209,23 @@ def _group_articles_by_source(articles: list[RawArticle]) -> dict[str, list[RawA
     return dict(grouped)
 
 
+def _write_discovery_engine_metrics(
+    config: Config,
+    *,
+    source_native_candidate_ids: set[str],
+    brave_candidate_ids: set[str],
+) -> None:
+    """Persist a lightweight engine overlap metrics snapshot."""
+    write_metrics_snapshot(
+        config.discovery_state_paths.engine_overlap_latest_path,
+        {
+            "source_native": len(source_native_candidate_ids),
+            "brave": len(brave_candidate_ids),
+            "shared_candidates": len(source_native_candidate_ids & brave_candidate_ids),
+        },
+    )
+
+
 async def _persist_source_native_candidates(
     *,
     config: Config,
@@ -280,6 +300,71 @@ async def _run_source_native_discovery(
         )
         return persisted
     finally:
+        persistence.close()
+
+
+async def _run_brave_discovery(
+    *,
+    config: Config,
+    run_id: str,
+    days: int,
+) -> PersistedSourceDiscovery:
+    """Run Brave-powered discovery and persist candidates into the durable layer."""
+    queries = build_discovery_queries(config, days=days)
+    discovery_run = DiscoveryRun(
+        run_id=run_id,
+        dataset_name=config.dataset_name,
+        job_name=config.job_name,
+        status=DiscoveryRunStatus.RUNNING,
+        query_count=len(queries),
+    )
+    persistence = create_discovery_persistence(config)
+    if not queries:
+        try:
+            return persist_discovered_candidates(
+                run=discovery_run,
+                discovered_candidates=[],
+                persistence=persistence,
+            )
+        finally:
+            persistence.close()
+
+    brave_api_key = config.brave_search_api_key
+    if not brave_api_key:
+        discovery_run.errors.append("brave: missing DENBUST_BRAVE_SEARCH_API_KEY")
+        try:
+            return persist_discovered_candidates(
+                run=discovery_run,
+                discovered_candidates=[],
+                persistence=persistence,
+            )
+        finally:
+            persistence.close()
+
+    engine = BraveSearchEngine(
+        api_key=brave_api_key,
+        max_results_per_query=config.discovery.engines.brave.max_results_per_query,
+    )
+    try:
+        try:
+            discovered_candidates = await engine.discover(
+                queries,
+                context=DiscoveryContext(
+                    run_id=run_id,
+                    max_results_per_query=config.discovery.engines.brave.max_results_per_query,
+                    metadata={"days": days, "engine": "brave"},
+                ),
+            )
+        except Exception as exc:
+            discovery_run.errors.append(f"brave: {type(exc).__name__}: {exc}")
+            discovered_candidates = []
+        return persist_discovered_candidates(
+            run=discovery_run,
+            discovered_candidates=discovered_candidates,
+            persistence=persistence,
+        )
+    finally:
+        await engine.aclose()
         persistence.close()
 
 
@@ -915,43 +1000,110 @@ async def run_news_discover_job(
     days_override: int | None = None,
     operational_store: OperationalStore | None = None,
 ) -> RunSnapshot:
-    """Run source-native discovery only and persist durable candidates."""
+    """Run configured discovery producers and persist durable candidates."""
     del operational_store
     days = days_override if days_override is not None else config.days
     result = _build_run_snapshot(config, config_path=config_path, days=days)
     sources = create_sources(config)
     result.source_count = len(sources)
-    if not config.source_discovery.enabled:
+    source_native_requested = config.source_discovery.enabled
+    brave_requested = config.discovery.enabled and config.discovery.engines.brave.enabled
+    source_native_can_run = (
+        source_native_requested and config.source_discovery.persist_candidates and bool(sources)
+    )
+    brave_can_run = brave_requested and config.discovery.persist_candidates
+
+    if brave_requested and not config.discovery.persist_candidates and not source_native_can_run:
         result.fatal = True
-        result.errors.append("source_discovery.enabled is false")
-        return result.finish("fatal: source-native discovery disabled")
-    if not config.source_discovery.persist_candidates:
+        result.errors.append("discovery.persist_candidates is false")
+        return result.finish("fatal: engine candidate persistence disabled")
+    if (
+        source_native_requested
+        and not config.source_discovery.persist_candidates
+        and not brave_can_run
+    ):
         result.fatal = True
         result.errors.append("source_discovery.persist_candidates is false")
         return result.finish("fatal: source-native candidate persistence disabled")
-    if not sources:
+    if not source_native_requested and not brave_can_run:
+        result.fatal = True
+        result.errors.append("source_discovery.enabled is false")
+        return result.finish("fatal: source-native discovery disabled")
+    if not sources and not brave_can_run:
         result.fatal = True
         result.errors.append("No sources configured")
         return result.finish("fatal: no sources configured")
 
-    persisted = await _run_source_native_discovery(
-        config=config,
-        sources=sources,
-        run_id=result.run_timestamp.astimezone(UTC).isoformat(),
-        days=days,
+    persisted_runs: list[tuple[str, PersistedSourceDiscovery]] = []
+    run_base = result.run_timestamp.astimezone(UTC).isoformat()
+
+    if source_native_can_run:
+        persisted_runs.append(
+            (
+                "source_native",
+                await _run_source_native_discovery(
+                    config=config,
+                    sources=sources,
+                    run_id=f"{run_base}:source_native",
+                    days=days,
+                ),
+            )
+        )
+    elif source_native_requested and not config.source_discovery.persist_candidates:
+        result.warnings.append("source-native discovery skipped because persistence is disabled")
+    elif source_native_requested and not sources:
+        result.warnings.append("source-native discovery skipped because no sources are configured")
+
+    if brave_can_run:
+        persisted_runs.append(
+            (
+                "brave",
+                await _run_brave_discovery(
+                    config=config,
+                    run_id=f"{run_base}:brave",
+                    days=days,
+                ),
+            )
+        )
+
+    source_native_candidate_ids: set[str] = set()
+    brave_candidate_ids: set[str] = set()
+    merged_candidate_ids: set[str] = set()
+    failed_runs = 0
+    for producer_name, persisted in persisted_runs:
+        result.raw_article_count += persisted.run.candidate_count
+        result.unseen_article_count += persisted.run.candidate_count
+        merged_candidate_ids.update(candidate.candidate_id for candidate in persisted.candidates)
+        result.errors.extend(persisted.run.errors)
+        if producer_name == "source_native":
+            source_native_candidate_ids = {
+                candidate.candidate_id for candidate in persisted.candidates
+            }
+            if persisted.run.status is DiscoveryRunStatus.PARTIAL:
+                result.warnings.append(
+                    "source-native discovery completed with partial source failures"
+                )
+        if producer_name == "brave":
+            brave_candidate_ids = {candidate.candidate_id for candidate in persisted.candidates}
+            if persisted.run.status is DiscoveryRunStatus.PARTIAL:
+                result.warnings.append("brave discovery completed with partial engine failures")
+        if persisted.run.status is DiscoveryRunStatus.FAILED:
+            failed_runs += 1
+
+    _write_discovery_engine_metrics(
+        config,
+        source_native_candidate_ids=source_native_candidate_ids,
+        brave_candidate_ids=brave_candidate_ids,
     )
-    result.raw_article_count = persisted.run.candidate_count
-    result.unseen_article_count = persisted.run.candidate_count
-    result.unified_item_count = persisted.run.merged_candidate_count
-    result.errors.extend(persisted.run.errors)
-    if persisted.run.status is DiscoveryRunStatus.FAILED:
+    result.unified_item_count = len(merged_candidate_ids)
+
+    if failed_runs == len(persisted_runs):
         result.fatal = True
-    if persisted.run.status is DiscoveryRunStatus.PARTIAL:
-        result.warnings.append("source-native discovery completed with partial source failures")
+
     result.finish(
-        "source-native discovery persisted "
-        f"{persisted.run.merged_candidate_count} candidate(s) from "
-        f"{persisted.run.candidate_count} discovered result(s)"
+        "discovery persisted "
+        f"{result.unified_item_count} merged candidate(s) from "
+        f"{result.raw_article_count} discovered result(s)"
     )
     return result
 
