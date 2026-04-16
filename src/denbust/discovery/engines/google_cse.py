@@ -26,6 +26,8 @@ class GoogleCseSearchEngine:
         client: httpx.AsyncClient | None = None,
         base_url: str = "https://customsearch.googleapis.com/customsearch/v1",
     ) -> None:
+        if max_results_per_query > 10:
+            raise ValueError("Google CSE supports at most 10 results per query")
         self._api_key = api_key
         self._cse_id = cse_id
         self._max_results_per_query = max_results_per_query
@@ -88,6 +90,7 @@ class GoogleCseSearchEngine:
             "num": min(
                 context.max_results_per_query or self._max_results_per_query,
                 self._max_results_per_query,
+                10,
             ),
         }
         if query.language == "he":

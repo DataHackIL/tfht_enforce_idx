@@ -93,6 +93,16 @@ async def test_google_cse_search_engine_normalizes_results_and_renders_params() 
     }
 
 
+def test_google_cse_search_engine_rejects_max_results_over_api_limit() -> None:
+    """Engine config should fail clearly when exceeding the Google CSE API cap."""
+    with pytest.raises(ValueError, match="at most 10 results per query"):
+        GoogleCseSearchEngine(
+            api_key="google-key",
+            cse_id="search-engine-id",
+            max_results_per_query=11,
+        )
+
+
 @pytest.mark.asyncio
 async def test_google_cse_search_engine_aclose_closes_owned_client() -> None:
     """Owned async clients should be closed by `aclose()`."""
@@ -223,3 +233,35 @@ async def test_google_cse_search_engine_skips_non_dict_metatags_before_valid_pub
 
     assert len(candidates) == 1
     assert candidates[0].publication_datetime_hint == datetime(2026, 4, 15, 10, 30, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_google_cse_search_engine_defensively_caps_request_num_to_api_limit() -> None:
+    """Request params should stay within the API limit even if internal state drifts."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["query"] = dict(request.url.params)
+        return httpx.Response(200, json={"items": []})
+
+    engine = GoogleCseSearchEngine(
+        api_key="google-key",
+        cse_id="search-engine-id",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        max_results_per_query=10,
+    )
+    engine._max_results_per_query = 25
+
+    candidates = await engine.discover(
+        [DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD)],
+        DiscoveryContext(run_id="run-5", max_results_per_query=50),
+    )
+    await engine.aclose()
+
+    assert candidates == []
+    assert captured["query"] == {
+        "key": "google-key",
+        "cx": "search-engine-id",
+        "q": "זנות",
+        "num": "10",
+    }
