@@ -166,6 +166,25 @@ def test_select_candidates_for_scrape_prioritizes_none_and_earlier_retry_times(
 
 
 @pytest.mark.asyncio
+async def test_scrape_candidates_returns_empty_batch_for_no_candidates(tmp_path: Path) -> None:
+    """An empty scrape pass should return an empty batch without persistence writes."""
+    store = build_store(tmp_path)
+
+    batch = await scrape_candidates(
+        config=Config(store={"state_root": tmp_path}),
+        persistence=store,
+        candidates=[],
+        sources=[],
+    )
+
+    assert batch.selected_candidates == []
+    assert batch.updated_candidates == []
+    assert batch.attempts == []
+    assert batch.raw_articles == []
+    assert batch.errors == []
+
+
+@pytest.mark.asyncio
 async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path: Path) -> None:
     """Successful source-adapter scrapes should yield raw articles and succeeded candidates."""
     store = build_store(tmp_path)

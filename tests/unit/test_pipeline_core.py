@@ -1197,6 +1197,53 @@ class TestRunPipelineAsync:
         assert result.result_summary == "no queued candidates eligible for scrape"
 
     @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_passes_days_override_to_scrape_layer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scrape layer should receive the effective days override, not the base config days."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(return_value=[])
+        seen_store = MagicMock(count=0)
+        captured: dict[str, object] = {}
+
+        async def fake_run_candidate_scrape_job(
+            *,
+            config: Config,
+            sources: list[FakeSource],
+            limit: int,
+        ) -> CandidateScrapeBatch:
+            captured["days"] = config.days
+            captured["limit"] = limit
+            captured["sources"] = [source.name for source in sources]
+            return CandidateScrapeBatch(
+                selected_candidates=[],
+                updated_candidates=[],
+                attempts=[],
+                raw_articles=[],
+                errors=[],
+            )
+
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
+        )
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline._run_candidate_scrape_job",
+            fake_run_candidate_scrape_job,
+        )
+
+        result = await run_news_scrape_candidates_job(
+            Config(job_name=JobName.SCRAPE_CANDIDATES, days=3, max_articles=7),
+            days_override=11,
+        )
+
+        assert result.result_summary == "no queued candidates eligible for scrape"
+        assert captured == {"days": 11, "limit": 7, "sources": ["test"]}
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("config", "error", "summary"),
         [

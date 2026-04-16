@@ -990,7 +990,7 @@ async def run_news_scrape_candidates_job(
     result.seen_count_before = seen_store.count
 
     scrape_batch = await _run_candidate_scrape_job(
-        config=config,
+        config=config.model_copy(update={"days": days}),
         sources=sources,
         limit=config.max_articles,
     )
