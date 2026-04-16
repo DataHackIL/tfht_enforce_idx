@@ -54,15 +54,16 @@ def select_candidates_for_scrape(
         if candidate.next_scrape_attempt_at is None
         or candidate.next_scrape_attempt_at <= current_time
     ]
+    max_datetime = datetime.max.replace(tzinfo=UTC)
     ordered = sorted(
         eligible,
         key=lambda candidate: (
-            candidate.retry_priority,
-            candidate.next_scrape_attempt_at or datetime.min.replace(tzinfo=UTC),
-            candidate.last_seen_at,
+            -candidate.retry_priority,
+            0 if candidate.next_scrape_attempt_at is None else 1,
+            candidate.next_scrape_attempt_at or max_datetime,
+            -candidate.last_seen_at.timestamp(),
             candidate.candidate_id,
         ),
-        reverse=True,
     )
     return ordered[:limit]
 
@@ -216,52 +217,81 @@ async def scrape_candidates(
 
         if source_name is not None:
             source = sources_by_name[source_name]
-            articles = source_articles_cache.get(source_name)
-            if articles is None:
-                articles = await source.fetch(days=config.days, keywords=config.keywords)
-                source_articles_cache[source_name] = articles
-            candidate_urls = _candidate_urls(in_progress)
-            article = next(
-                (
-                    candidate_article
-                    for candidate_article in articles
-                    if canonicalize_news_url(str(candidate_article.url)) in candidate_urls
-                ),
-                None,
-            )
-            finished_at = datetime.now(UTC)
-            if article is not None:
+            try:
+                articles = source_articles_cache.get(source_name)
+                if articles is None:
+                    articles = await source.fetch(days=config.days, keywords=config.keywords)
+                    source_articles_cache[source_name] = articles
+                candidate_urls = _candidate_urls(in_progress)
+                article = next(
+                    (
+                        candidate_article
+                        for candidate_article in articles
+                        if canonicalize_news_url(str(candidate_article.url)) in candidate_urls
+                    ),
+                    None,
+                )
+                finished_at = datetime.now(UTC)
+                if article is not None:
+                    candidate_attempts.append(
+                        _build_attempt(
+                            candidate_id=in_progress.candidate_id,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                            fetch_status=FetchStatus.SUCCESS,
+                            source_adapter_name=source_name,
+                            article=article,
+                            diagnostics={"matched_candidate_urls": sorted(candidate_urls)},
+                        )
+                    )
+                    updated_candidates.append(
+                        _mark_attempt_success(in_progress, candidate_attempts[-1], article)
+                    )
+                    raw_articles.append(article)
+                    attempts.extend(candidate_attempts)
+                    continue
+
                 candidate_attempts.append(
                     _build_attempt(
                         candidate_id=in_progress.candidate_id,
                         started_at=started_at,
                         finished_at=finished_at,
                         attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
-                        fetch_status=FetchStatus.SUCCESS,
+                        fetch_status=FetchStatus.FAILED,
                         source_adapter_name=source_name,
-                        article=article,
-                        diagnostics={"matched_candidate_urls": sorted(candidate_urls)},
+                        error_code="candidate_not_found",
+                        error_message=f"{source_name} adapter did not return the candidate URL",
+                    )
+                )
+            except Exception as exc:
+                finished_at = datetime.now(UTC)
+                error_message = f"{source_name} adapter failed: {type(exc).__name__}: {exc}"
+                candidate_attempts.append(
+                    _build_attempt(
+                        candidate_id=in_progress.candidate_id,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                        fetch_status=FetchStatus.FAILED,
+                        source_adapter_name=source_name,
+                        error_code="source_adapter_error",
+                        error_message=error_message,
                     )
                 )
                 updated_candidates.append(
-                    _mark_attempt_success(in_progress, candidate_attempts[-1], article)
+                    _mark_attempt_failure(
+                        in_progress,
+                        attempts=candidate_attempts,
+                        status=CandidateStatus.SCRAPE_FAILED,
+                        error_code="source_adapter_error",
+                        error_message=error_message,
+                        config=config,
+                    )
                 )
-                raw_articles.append(article)
                 attempts.extend(candidate_attempts)
+                errors.append(f"{in_progress.candidate_id}: {error_message}")
                 continue
-
-            candidate_attempts.append(
-                _build_attempt(
-                    candidate_id=in_progress.candidate_id,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
-                    fetch_status=FetchStatus.FAILED,
-                    source_adapter_name=source_name,
-                    error_code="candidate_not_found",
-                    error_message=f"{source_name} adapter did not return the candidate URL",
-                )
-            )
         else:
             finished_at = datetime.now(UTC)
             candidate_attempts.append(

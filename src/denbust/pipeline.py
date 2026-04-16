@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import sys
+from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -195,6 +196,14 @@ def _source_discovery_enabled_for_source(config: Config, source_name: str) -> bo
     if source_config is None:
         return True
     return source_config.enabled
+
+
+def _group_articles_by_source(articles: list[RawArticle]) -> dict[str, list[RawArticle]]:
+    """Group fetched articles by source name in a single pass."""
+    grouped: defaultdict[str, list[RawArticle]] = defaultdict(list)
+    for article in articles:
+        grouped[article.source_name].append(article)
+    return dict(grouped)
 
 
 async def _persist_source_native_candidates(
@@ -852,12 +861,11 @@ async def run_news_ingest_job(
                     candidates=persisted_source_discovery.candidates,
                     sources=sources,
                     preloaded_source_articles={
-                        source_name: [
-                            article
-                            for article in all_articles
-                            if article.source_name == source_name
-                        ]
-                        for source_name in source_names
+                        source_name: grouped_articles
+                        for source_name, grouped_articles in _group_articles_by_source(
+                            all_articles
+                        ).items()
+                        if source_name in source_names
                     },
                 )
                 if scrape_batch.errors:

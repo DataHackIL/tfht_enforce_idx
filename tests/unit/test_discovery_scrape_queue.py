@@ -78,6 +78,19 @@ class FakeSource:
         return self.articles
 
 
+class FailingSource(FakeSource):
+    """Source stub that raises from fetch."""
+
+    def __init__(self, name: str, error: Exception) -> None:
+        super().__init__(name, [])
+        self.error = error
+
+    async def fetch(self, days: int, keywords: list[str]) -> list[RawArticle]:
+        del days, keywords
+        self.calls += 1
+        raise self.error
+
+
 def build_store(tmp_path: Path) -> StateRepoDiscoveryPersistence:
     """Create a state-repo persistence backend rooted in pytest temp storage."""
     return StateRepoDiscoveryPersistence(
@@ -115,6 +128,41 @@ def test_select_candidates_for_scrape_filters_retryable_due_candidates(tmp_path:
     assert all(
         candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES for candidate in selected
     )
+
+
+def test_select_candidates_for_scrape_prioritizes_none_and_earlier_retry_times(
+    tmp_path: Path,
+) -> None:
+    """Selection should prefer immediate candidates and earlier due retries."""
+    store = build_store(tmp_path)
+    due_time = datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+    store.upsert_candidates(
+        [
+            build_candidate(
+                "later_due",
+                status=CandidateStatus.SCRAPE_FAILED,
+                next_scrape_attempt_at=due_time - timedelta(minutes=5),
+            ),
+            build_candidate(
+                "immediate",
+                status=CandidateStatus.NEW,
+                next_scrape_attempt_at=None,
+            ),
+            build_candidate(
+                "earlier_due",
+                status=CandidateStatus.SCRAPE_FAILED,
+                next_scrape_attempt_at=due_time - timedelta(hours=1),
+            ),
+        ]
+    )
+
+    selected = select_candidates_for_scrape(store, limit=10, now=due_time)
+
+    assert [candidate.candidate_id for candidate in selected] == [
+        "immediate",
+        "earlier_due",
+        "later_due",
+    ]
 
 
 @pytest.mark.asyncio
@@ -223,3 +271,50 @@ async def test_scrape_candidates_marks_unknown_sources_as_unsupported(tmp_path: 
     assert stored.next_scrape_attempt_at is None
     assert len(batch.attempts) == 2
     assert batch.attempts[0].fetch_status is FetchStatus.UNSUPPORTED
+
+
+@pytest.mark.asyncio
+async def test_scrape_candidates_records_adapter_exceptions_and_continues(
+    tmp_path: Path,
+) -> None:
+    """Adapter exceptions should fail only the affected candidate and continue the batch."""
+    store = build_store(tmp_path)
+    failing_candidate = build_candidate("candidate-fail", status=CandidateStatus.NEW)
+    succeeding_candidate = build_candidate(
+        "candidate-ok",
+        status=CandidateStatus.NEW,
+        current_url="https://www.mako.co.il/news/article/ok?utm_source=test",
+        canonical_url="https://www.mako.co.il/news/article/ok",
+        source_hint="mako",
+    )
+    store.upsert_candidates([failing_candidate, succeeding_candidate])
+    sources = [
+        FailingSource("ynet", RuntimeError("adapter boom")),
+        FakeSource(
+            "mako",
+            [build_raw_article("https://www.mako.co.il/news/article/ok?utm_source=test", source_name="mako")],
+        ),
+    ]
+
+    batch = await scrape_candidates(
+        config=Config(store={"state_root": tmp_path}),
+        persistence=store,
+        candidates=[failing_candidate, succeeding_candidate],
+        sources=sources,
+    )
+
+    failed = store.get_candidate("candidate-fail")
+    succeeded = store.get_candidate("candidate-ok")
+    assert failed is not None
+    assert failed.candidate_status is CandidateStatus.SCRAPE_FAILED
+    assert failed.next_scrape_attempt_at is not None
+    assert failed.last_scrape_error_code == "source_adapter_error"
+    assert "adapter boom" in (failed.last_scrape_error_message or "")
+    assert succeeded is not None
+    assert succeeded.candidate_status is CandidateStatus.SCRAPE_SUCCEEDED
+    assert len(batch.raw_articles) == 1
+    assert any(error == "candidate-fail: ynet adapter failed: RuntimeError: adapter boom" for error in batch.errors)
+    assert [attempt.fetch_status for attempt in batch.attempts] == [
+        FetchStatus.FAILED,
+        FetchStatus.SUCCESS,
+    ]
