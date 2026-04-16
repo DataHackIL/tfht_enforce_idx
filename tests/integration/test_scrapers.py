@@ -1437,7 +1437,9 @@ class TestIceScraper:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_fetch_stops_when_next_page_has_only_old_results(self) -> None:
+    async def test_fetch_stops_when_next_page_has_only_old_results(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Fetch should stop paginating when the next page contains no recent articles."""
         page_one = load_fixture("html/ice_search.html")
         page_two = """
@@ -1464,6 +1466,14 @@ class TestIceScraper:
         scraper = self._create_scraper()
         keyword = "בית בושת"
         page_three_url = scraper._build_search_url(keyword, page_number=3)
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:
+                del tz
+                return cls(2026, 4, 1, 12, 0, tzinfo=UTC)
+
+        monkeypatch.setattr("denbust.sources.ice.datetime", FrozenDateTime)
 
         respx.get(scraper._build_search_url(keyword)).mock(
             return_value=Response(200, text=page_one)
