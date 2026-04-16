@@ -181,3 +181,43 @@ async def test_google_cse_search_engine_ignores_invalid_publication_hints() -> N
 
     assert len(candidates) == 1
     assert candidates[0].publication_datetime_hint is None
+
+
+@pytest.mark.asyncio
+async def test_google_cse_search_engine_skips_non_dict_metatags_before_valid_publication_time() -> None:
+    """Mixed metatag lists should ignore invalid entries and still extract publication time."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "link": "https://www.ynet.co.il/news/article/def",
+                        "title": "כותרת",
+                        "snippet": "תקציר",
+                        "pagemap": {
+                            "metatags": [
+                                "not-a-dict",
+                                {"article:published_time": "2026-04-15T10:30:00Z"},
+                            ]
+                        },
+                    }
+                ]
+            },
+        )
+
+    engine = GoogleCseSearchEngine(
+        api_key="google-key",
+        cse_id="search-engine-id",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = await engine.discover(
+        [DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD)],
+        DiscoveryContext(run_id="run-4"),
+    )
+    await engine.aclose()
+
+    assert len(candidates) == 1
+    assert candidates[0].publication_datetime_hint == datetime(2026, 4, 15, 10, 30, tzinfo=UTC)
