@@ -58,6 +58,22 @@ async def _run_news_items_discover(
     )
 
 
+async def _run_news_items_scrape_candidates(
+    config: Config,
+    config_path: Path | None,
+    days_override: int | None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    from denbust.pipeline import run_news_scrape_candidates_job
+
+    return await run_news_scrape_candidates_job(
+        config,
+        config_path=config_path,
+        days_override=days_override,
+        operational_store=operational_store,
+    )
+
+
 async def _run_scaffolded_release(
     config: Config,
     config_path: Path | None,
@@ -116,7 +132,7 @@ def ensure_default_jobs_registered() -> None:
     register_job(
         DatasetName.NEWS_ITEMS,
         JobName.SCRAPE_CANDIDATES,
-        _run_unimplemented_scaffold_job,
+        _run_news_items_scrape_candidates,
     )
     register_job(
         DatasetName.NEWS_ITEMS,

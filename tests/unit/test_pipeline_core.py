@@ -21,6 +21,7 @@ from denbust.data_models import (
     UnifiedItem,
 )
 from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus
+from denbust.discovery.scrape_queue import CandidateScrapeBatch
 from denbust.discovery.source_native import PersistedSourceDiscovery
 from denbust.models.common import DatasetName, JobName
 from denbust.models.policies import PrivacyRisk
@@ -45,6 +46,7 @@ from denbust.pipeline import (
     run_job_async,
     run_news_discover_job,
     run_news_ingest_job,
+    run_news_scrape_candidates_job,
     run_pipeline,
     run_pipeline_async,
     run_release,
@@ -702,7 +704,7 @@ class TestRunPipelineAsync:
 
     @pytest.mark.asyncio
     async def test_run_news_ingest_job_records_privacy_mix_warning(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Successful ingest runs should summarize the privacy-risk mix."""
 
@@ -754,7 +756,10 @@ class TestRunPipelineAsync:
         monkeypatch.setattr("denbust.pipeline.mark_seen", fake_mark_seen)
 
         result = await run_news_ingest_job(
-            Config(output=OutputConfig(formats=[OutputFormat.CLI])),
+            Config(
+                output=OutputConfig(formats=[OutputFormat.CLI]),
+                store={"state_root": tmp_path},
+            ),
             operational_store=fake_store,
         )
 
@@ -879,6 +884,149 @@ class TestRunPipelineAsync:
         result = await run_news_ingest_job(Config(), operational_store=MagicMock())
 
         assert "source_native_candidate_persistence_failed=RuntimeError: boom" in result.warnings
+
+    @pytest.mark.asyncio
+    async def test_run_news_ingest_job_uses_candidate_scrape_results_and_passthrough_sources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ingest should use candidate-driven results while preserving disabled-source passthrough."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        seen_store = MagicMock(count=1)
+        source_scraped = RawArticle(
+            url=HttpUrl("https://www.ynet.co.il/news/article/1"),
+            title="כותרת ינט",
+            snippet="תקציר ינט",
+            date=datetime(2026, 4, 11, tzinfo=UTC),
+            source_name="ynet",
+        )
+        disabled_passthrough = RawArticle(
+            url=HttpUrl("https://www.walla.co.il/item/1"),
+            title="כותרת וואלה",
+            snippet="תקציר וואלה",
+            date=datetime(2026, 4, 11, tzinfo=UTC),
+            source_name="walla",
+        )
+        persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-ingest",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.INGEST,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[],
+            provenance=[],
+        )
+        scrape_batch = CandidateScrapeBatch(
+            selected_candidates=[],
+            updated_candidates=[],
+            attempts=[],
+            raw_articles=[source_scraped],
+            errors=[],
+        )
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            side_effect=lambda articles: [
+                build_classified_article(str(article.url), relevant=True) for article in articles
+            ]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources",
+            lambda _config: [FakeSource("ynet", []), FakeSource("walla", [])],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([source_scraped, disabled_passthrough], [])),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._persist_source_native_candidates",
+            AsyncMock(return_value=persisted),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._scrape_candidate_batch",
+            AsyncMock(return_value=scrape_batch),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
+        monkeypatch.setattr(
+            "denbust.pipeline.deduplicate_articles",
+            lambda articles, _deduplicator: [
+                build_unified_item(str(article.article.url)) for article in articles
+            ],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.build_operational_records",
+            AsyncMock(return_value=[]),
+        )
+        mark_seen_mock = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.mark_seen", mark_seen_mock)
+        operational_store = MagicMock()
+
+        result = await run_news_ingest_job(
+            Config(source_discovery={"sources": {"walla": False}}),
+            operational_store=operational_store,
+        )
+
+        assert result.raw_article_count == 2
+        classifier.classify_batch.assert_awaited_once()
+        classified_input = classifier.classify_batch.await_args.args[0]
+        assert [article.source_name for article in classified_input] == ["ynet", "walla"]
+        mark_seen_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_processes_scraped_queue(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scrape-candidates job should feed successful scraped articles into ingest processing."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        seen_store = MagicMock(count=0)
+        raw_article = build_raw_article("https://example.com/queued")
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[build_classified_article("https://example.com/queued", relevant=True)]
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline._run_candidate_scrape_job",
+            AsyncMock(
+                return_value=CandidateScrapeBatch(
+                    selected_candidates=[MagicMock()],
+                    updated_candidates=[],
+                    attempts=[],
+                    raw_articles=[raw_article],
+                    errors=["candidate-1: generic fetch fallback not implemented yet"],
+                )
+            ),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
+        monkeypatch.setattr(
+            "denbust.pipeline.deduplicate_articles",
+            lambda _articles, _deduplicator: [build_unified_item("https://example.com/queued")],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.build_operational_records",
+            AsyncMock(return_value=[]),
+        )
+        operational_store = MagicMock()
+        mark_seen_mock = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.mark_seen", mark_seen_mock)
+
+        result = await run_news_scrape_candidates_job(
+            Config(job_name=JobName.SCRAPE_CANDIDATES),
+            operational_store=operational_store,
+        )
+
+        assert result.raw_article_count == 1
+        assert result.errors == ["candidate-1: generic fetch fallback not implemented yet"]
+        assert "candidate_scrape_failures=1" in result.warnings
+        assert result.unified_item_count == 1
+        mark_seen_mock.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

@@ -76,6 +76,7 @@ Future-facing commands now exist as real `news_items` jobs:
 
 ```bash
 denbust run --dataset news_items --job discover --config agents/news/local.yaml
+denbust run --dataset news_items --job scrape_candidates --config agents/news/local.yaml
 denbust run --dataset news_items --job ingest --config agents/news/local.yaml
 denbust release --dataset news_items --config agents/release/news_items.yaml
 denbust backup --dataset news_items --config agents/backup/news_items.yaml
@@ -222,8 +223,8 @@ Still intentionally deferred:
 
 ## Discovery Layer Foundation
 
-PR 2 of the persistent multi-engine discovery work now adds the first operational slice on top of
-the PR 1 foundation:
+PR 3 of the persistent multi-engine discovery work now builds on the PR 1 foundation and the PR 2
+source-native persistence slice:
 
 - `src/denbust/discovery/` with durable candidate, provenance, scrape-attempt, and discovery-run
   models
@@ -231,17 +232,21 @@ the PR 1 foundation:
 - explicit state-repo path helpers for candidate-layer snapshots and queue files
 - source-native candidate normalization and merge/upsert persistence
 - a real `news_items / discover` job that fetches source-native candidates only and persists them
-- best-effort source-native candidate persistence during `news_items / ingest`, without changing the
-  existing ingest/release/backup flow
+- candidate selection / queueing helpers for retryable scrape work
+- scrape-attempt persistence and candidate status transitions underneath the ingest path
+- a real `news_items / scrape_candidates` job that drains queued candidates into article ingest
+- `news_items / ingest` now uses the candidate scrape layer for source-native candidates while
+  preserving the existing direct-fetch convenience flow as a compatibility fallback
 - Supabase migrations for:
   - `discovery_runs`
   - `persistent_candidates`
   - `candidate_provenance`
   - `scrape_attempts`
 
-This PR does not yet call Brave, Exa, or Google CSE, and it does not yet route the live ingest
-pipeline through the durable candidate queue. The current daily monitoring flow remains behaviorally
-unchanged aside from persisting source-native candidate rows as an additive side effect.
+This PR still does not call Brave, Exa, or Google CSE, and the generic fetch/extract fallback is
+only scaffolded structurally for retry bookkeeping. The current daily monitoring flow remains
+operational, but candidate selection, scrape attempts, and retryable failure state now exist as a
+real substrate under source-native ingest.
 
 ## Config Layout
 

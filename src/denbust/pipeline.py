@@ -16,7 +16,12 @@ from denbust.datasets.jobs import ensure_default_jobs_registered
 from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.discovery.base import SourceDiscoveryContext
-from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus
+from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus, PersistentCandidate
+from denbust.discovery.scrape_queue import (
+    CandidateScrapeBatch,
+    scrape_candidates,
+    select_candidates_for_scrape,
+)
 from denbust.discovery.source_native import (
     PersistedSourceDiscovery,
     SourceDiscoveryAdapter,
@@ -66,6 +71,7 @@ logger = logging.getLogger(__name__)
 
 _OPERATIONAL_STORE_JOBS = {
     JobName.INGEST,
+    JobName.SCRAPE_CANDIDATES,
     JobName.RELEASE,
     JobName.BACKUP,
 }
@@ -266,6 +272,172 @@ async def _run_source_native_discovery(
         return persisted
     finally:
         persistence.close()
+
+
+async def _scrape_candidate_batch(
+    *,
+    config: Config,
+    candidates: list[PersistentCandidate],
+    sources: list[Source],
+    preloaded_source_articles: dict[str, list[RawArticle]] | None = None,
+) -> CandidateScrapeBatch:
+    """Materialize durable candidates into raw articles and record scrape attempts."""
+    persistence = create_discovery_persistence(config)
+    try:
+        return await scrape_candidates(
+            config=config,
+            persistence=persistence,
+            candidates=candidates,
+            sources=sources,
+            preloaded_source_articles=preloaded_source_articles,
+        )
+    finally:
+        persistence.close()
+
+
+async def _run_candidate_scrape_job(
+    *,
+    config: Config,
+    sources: list[Source],
+    limit: int,
+) -> CandidateScrapeBatch:
+    """Select queued candidates and run the scrape-attempt layer."""
+    persistence = create_discovery_persistence(config)
+    try:
+        selected_candidates = select_candidates_for_scrape(
+            persistence,
+            limit=limit,
+        )
+    finally:
+        persistence.close()
+
+    return await _scrape_candidate_batch(
+        config=config,
+        candidates=selected_candidates,
+        sources=sources,
+    )
+
+
+async def _process_ingest_articles(
+    *,
+    config: Config,
+    result: RunSnapshot,
+    source_names: list[str],
+    sources: list[Source],
+    all_articles: list[RawArticle],
+    seen_store: SeenStore,
+    classifier: Classifier,
+    deduplicator: Deduplicator,
+    operational_store: OperationalStore | None,
+) -> RunSnapshot:
+    """Run the classifier/dedup/store portion of ingest over fetched articles."""
+    unseen_articles: list[RawArticle] = []
+    classified_articles: list[ClassifiedArticle] = []
+    unified_items: list[UnifiedItem] = []
+
+    if not all_articles:
+        logger.info("No articles found from any source")
+        result.seen_count_after = seen_store.count
+        result.finish("no articles found")
+        result.set_debug_payload(
+            _build_ingest_debug_payload(
+                result=result,
+                sources=sources,
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
+                unified_items=unified_items,
+            )
+        )
+        return result
+
+    unseen_articles = filter_seen(all_articles, seen_store)
+    result.unseen_article_count = len(unseen_articles)
+    if not unseen_articles:
+        logger.info("All articles were already seen")
+        result.seen_count_after = seen_store.count
+        result.finish("all fetched articles were already seen")
+        result.set_debug_payload(
+            _build_ingest_debug_payload(
+                result=result,
+                sources=sources,
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
+                unified_items=unified_items,
+            )
+        )
+        return result
+
+    if len(unseen_articles) > config.max_articles:
+        warning = (
+            f"Article count ({len(unseen_articles)}) exceeds max_articles threshold "
+            f"({config.max_articles}). Consider adding a pre-filter stage or reducing "
+            f"the number of days/sources. Proceeding with classification anyway."
+        )
+        logger.warning(warning)
+        result.warnings.append(warning)
+
+    classified_articles = await classifier.classify_batch(unseen_articles)
+    relevant_articles = [
+        article for article in classified_articles if article.classification.relevant
+    ]
+    result.relevant_article_count = len(relevant_articles)
+    if not relevant_articles:
+        logger.info("No relevant articles found")
+        result.seen_count_after = seen_store.count
+        result.set_debug_payload(
+            _build_ingest_debug_payload(
+                result=result.finish("no relevant articles found"),
+                sources=sources,
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
+                unified_items=unified_items,
+            )
+        )
+        return result
+
+    unified_items = deduplicate_articles(relevant_articles, deduplicator)
+    result.unified_item_count = len(unified_items)
+    result.items = unified_items
+
+    store = operational_store or create_operational_store(config)
+    records = await build_operational_records(
+        unified_items,
+        config=config,
+        operational_store=store,
+    )
+    store.upsert_records(
+        config.dataset_name.value,
+        [record.model_dump(mode="json") for record in records],
+    )
+    privacy_counts = summarize_privacy_mix(records)
+    if privacy_counts:
+        risk_summary = ", ".join(
+            f"{risk.value}:{count}"
+            for risk, count in sorted(privacy_counts.items(), key=lambda item: item[0].value)
+        )
+        result.warnings.append(f"privacy_risk_distribution={risk_summary}")
+
+    mark_seen(unified_items, seen_store)
+    result.seen_count_after = seen_store.count
+    result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
+    result.set_debug_payload(
+        _build_ingest_debug_payload(
+            result=result,
+            sources=sources,
+            source_names=source_names,
+            raw_articles=all_articles,
+            unseen_articles=unseen_articles,
+            classified_articles=classified_articles,
+            unified_items=unified_items,
+        )
+    )
+    return result
 
 
 def mark_seen(items: list[UnifiedItem], seen_store: SeenStore) -> None:
@@ -654,14 +826,12 @@ async def run_news_ingest_job(
         days=days,
         keywords=config.keywords,
     )
-    unseen_articles: list[RawArticle] = []
-    classified_articles: list[ClassifiedArticle] = []
-    unified_items: list[UnifiedItem] = []
     result.raw_article_count = len(all_articles)
     result.errors.extend(source_errors)
     if source_errors:
         result.warnings.append(f"{len(source_errors)} source(s) reported errors")
 
+    ingest_articles = list(all_articles)
     if (
         config.source_discovery.enabled
         and config.source_discovery.persist_candidates
@@ -676,115 +846,63 @@ async def run_news_ingest_job(
             result.warnings.append(
                 f"source_native_candidates_persisted={len(persisted_source_discovery.candidates)}"
             )
+            try:
+                scrape_batch = await _scrape_candidate_batch(
+                    config=config,
+                    candidates=persisted_source_discovery.candidates,
+                    sources=sources,
+                    preloaded_source_articles={
+                        source_name: [
+                            article
+                            for article in all_articles
+                            if article.source_name == source_name
+                        ]
+                        for source_name in source_names
+                    },
+                )
+                if scrape_batch.errors:
+                    result.warnings.append(
+                        f"candidate_scrape_failures={len(scrape_batch.errors)}"
+                    )
+                passthrough_articles = [
+                    article
+                    for article in all_articles
+                    if not _source_discovery_enabled_for_source(config, article.source_name)
+                ]
+                ingest_articles = [
+                    *scrape_batch.raw_articles,
+                    *[
+                        article
+                        for article in passthrough_articles
+                        if article not in scrape_batch.raw_articles
+                    ],
+                ]
+                if not ingest_articles and all_articles:
+                    result.warnings.append("candidate_scrape_layer_fell_back_to_direct_articles")
+                    ingest_articles = list(all_articles)
+            except Exception as exc:
+                logger.warning("Candidate scrape layer failed during ingest: %s", exc)
+                result.warnings.append(
+                    f"candidate_scrape_layer_failed={type(exc).__name__}: {exc}"
+                )
         except Exception as exc:
             logger.warning("Source-native candidate persistence failed during ingest: %s", exc)
             result.warnings.append(
                 f"source_native_candidate_persistence_failed={type(exc).__name__}: {exc}"
             )
 
-    if not all_articles:
-        logger.info("No articles found from any source")
-        result.seen_count_after = seen_store.count
-        result.finish("no articles found")
-        result.set_debug_payload(
-            _build_ingest_debug_payload(
-                result=result,
-                sources=sources,
-                source_names=source_names,
-                raw_articles=all_articles,
-                unseen_articles=unseen_articles,
-                classified_articles=classified_articles,
-                unified_items=unified_items,
-            )
-        )
-        return result
-
-    unseen_articles = filter_seen(all_articles, seen_store)
-    result.unseen_article_count = len(unseen_articles)
-    if not unseen_articles:
-        logger.info("All articles were already seen")
-        result.seen_count_after = seen_store.count
-        result.finish("all fetched articles were already seen")
-        result.set_debug_payload(
-            _build_ingest_debug_payload(
-                result=result,
-                sources=sources,
-                source_names=source_names,
-                raw_articles=all_articles,
-                unseen_articles=unseen_articles,
-                classified_articles=classified_articles,
-                unified_items=unified_items,
-            )
-        )
-        return result
-
-    if len(unseen_articles) > config.max_articles:
-        warning = (
-            f"Article count ({len(unseen_articles)}) exceeds max_articles threshold "
-            f"({config.max_articles}). Consider adding a pre-filter stage or reducing "
-            f"the number of days/sources. Proceeding with classification anyway."
-        )
-        logger.warning(warning)
-        result.warnings.append(warning)
-
-    classified_articles = await classifier.classify_batch(unseen_articles)
-    relevant_articles = [
-        article for article in classified_articles if article.classification.relevant
-    ]
-    result.relevant_article_count = len(relevant_articles)
-    if not relevant_articles:
-        logger.info("No relevant articles found")
-        result.seen_count_after = seen_store.count
-        result.set_debug_payload(
-            _build_ingest_debug_payload(
-                result=result.finish("no relevant articles found"),
-                sources=sources,
-                source_names=source_names,
-                raw_articles=all_articles,
-                unseen_articles=unseen_articles,
-                classified_articles=classified_articles,
-                unified_items=unified_items,
-            )
-        )
-        return result
-
-    unified_items = deduplicate_articles(relevant_articles, deduplicator)
-    result.unified_item_count = len(unified_items)
-    result.items = unified_items
-
-    store = operational_store or create_operational_store(config)
-    records = await build_operational_records(
-        unified_items,
+    result.raw_article_count = len(ingest_articles)
+    return await _process_ingest_articles(
         config=config,
-        operational_store=store,
+        result=result,
+        source_names=source_names,
+        sources=sources,
+        all_articles=ingest_articles,
+        seen_store=seen_store,
+        classifier=classifier,
+        deduplicator=deduplicator,
+        operational_store=operational_store,
     )
-    store.upsert_records(
-        config.dataset_name.value,
-        [record.model_dump(mode="json") for record in records],
-    )
-    privacy_counts = summarize_privacy_mix(records)
-    if privacy_counts:
-        risk_summary = ", ".join(
-            f"{risk.value}:{count}"
-            for risk, count in sorted(privacy_counts.items(), key=lambda item: item[0].value)
-        )
-        result.warnings.append(f"privacy_risk_distribution={risk_summary}")
-
-    mark_seen(unified_items, seen_store)
-    result.seen_count_after = seen_store.count
-    result.finish(f"ingest completed with {len(unified_items)} unified item(s)")
-    result.set_debug_payload(
-        _build_ingest_debug_payload(
-            result=result,
-            sources=sources,
-            source_names=source_names,
-            raw_articles=all_articles,
-            unseen_articles=unseen_articles,
-            classified_articles=classified_articles,
-            unified_items=unified_items,
-        )
-    )
-    return result
 
 
 async def run_news_discover_job(
@@ -832,6 +950,66 @@ async def run_news_discover_job(
         f"{persisted.run.candidate_count} discovered result(s)"
     )
     return result
+
+
+async def run_news_scrape_candidates_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    """Scrape queued candidates and feed successful results into the ingest path."""
+    days = days_override if days_override is not None else config.days
+    result = _build_run_snapshot(config, config_path=config_path, days=days)
+
+    if not config.anthropic_api_key:
+        result.fatal = True
+        result.errors.append("ANTHROPIC_API_KEY not set")
+        return result.finish("fatal: missing anthropic api key")
+
+    sources = create_sources(config)
+    source_names = [source.name for source in sources]
+    result.source_count = len(sources)
+    if not sources:
+        result.fatal = True
+        result.errors.append("No sources configured")
+        return result.finish("fatal: no sources configured")
+
+    classifier = create_classifier(
+        api_key=config.anthropic_api_key,
+        model=config.classifier.model,
+        system_prompt=config.classifier.system_prompt,
+        user_prompt_template=config.classifier.user_prompt_template,
+    )
+    deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
+    seen_store = create_seen_store(config.state_paths.seen_path)
+    result.seen_count_before = seen_store.count
+
+    scrape_batch = await _run_candidate_scrape_job(
+        config=config,
+        sources=sources,
+        limit=config.max_articles,
+    )
+    result.raw_article_count = len(scrape_batch.raw_articles)
+    if scrape_batch.errors:
+        result.errors.extend(scrape_batch.errors)
+        result.warnings.append(
+            f"candidate_scrape_failures={len(scrape_batch.errors)}"
+        )
+    if not scrape_batch.selected_candidates:
+        return result.finish("no queued candidates eligible for scrape")
+
+    return await _process_ingest_articles(
+        config=config,
+        result=result,
+        source_names=source_names,
+        sources=sources,
+        all_articles=scrape_batch.raw_articles,
+        seen_store=seen_store,
+        classifier=classifier,
+        deduplicator=deduplicator,
+        operational_store=operational_store,
+    )
 
 
 async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:
