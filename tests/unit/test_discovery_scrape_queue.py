@@ -292,7 +292,11 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
         FailingSource("ynet", RuntimeError("adapter boom")),
         FakeSource(
             "mako",
-            [build_raw_article("https://www.mako.co.il/news/article/ok?utm_source=test", source_name="mako")],
+            [
+                build_raw_article(
+                    "https://www.mako.co.il/news/article/ok?utm_source=test", source_name="mako"
+                )
+            ],
         ),
     ]
 
@@ -313,7 +317,10 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
     assert succeeded is not None
     assert succeeded.candidate_status is CandidateStatus.SCRAPE_SUCCEEDED
     assert len(batch.raw_articles) == 1
-    assert any(error == "candidate-fail: ynet adapter failed: RuntimeError: adapter boom" for error in batch.errors)
+    assert any(
+        error == "candidate-fail: ynet adapter failed: RuntimeError: adapter boom"
+        for error in batch.errors
+    )
     assert [attempt.fetch_status for attempt in batch.attempts] == [
         FetchStatus.FAILED,
         FetchStatus.SUCCESS,
