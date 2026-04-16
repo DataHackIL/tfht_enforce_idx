@@ -22,7 +22,9 @@ src/denbust/
     rss.py                     RSS fetchers
     mako.py                    browser-backed scraping
     maariv.py                  HTML scraper
-    walla.py haaretz.py ice.py source adapters
+    walla.py                   source adapter
+    haaretz.py                 source adapter
+    ice.py                     source adapter
   discovery/
     models.py                  candidate/provenance/scrape-attempt schemas
     queries.py                 discovery query building
