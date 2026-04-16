@@ -27,7 +27,10 @@ class DiscoveryStatePaths(BaseModel):
     latest_candidates_path: Path
     retry_queue_path: Path
     backfill_queue_path: Path
+    candidate_provenance_path: Path
+    scrape_attempts_path: Path
     engine_overlap_latest_path: Path
+    discovery_diagnostics_latest_path: Path
 
 
 def resolve_discovery_state_paths(
@@ -52,7 +55,10 @@ def resolve_discovery_state_paths(
         latest_candidates_path=candidates_dir / "latest_candidates.jsonl",
         retry_queue_path=candidates_dir / "retry_queue.jsonl",
         backfill_queue_path=candidates_dir / "backfill_queue.jsonl",
+        candidate_provenance_path=candidates_dir / "candidate_provenance.jsonl",
+        scrape_attempts_path=candidates_dir / "scrape_attempts.jsonl",
         engine_overlap_latest_path=metrics_dir / "engine_overlap_latest.json",
+        discovery_diagnostics_latest_path=metrics_dir / "discovery_diagnostics_latest.json",
     )
 
 

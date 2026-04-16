@@ -1861,9 +1861,13 @@ class TestRunPipelineAsync:
         metrics_payload = (
             tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
         ).read_text(encoding="utf-8")
+        diagnostics_payload = (
+            tmp_path / "news_items" / "discover" / "metrics" / "discovery_diagnostics_latest.json"
+        ).read_text(encoding="utf-8")
         assert '"brave": 2' in metrics_payload
         assert '"source_native": 0' in metrics_payload
         assert '"exa": 0' in metrics_payload
+        assert '"dataset_name": "news_items"' in diagnostics_payload
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_supports_exa_only_and_writes_metrics(
@@ -2264,11 +2268,15 @@ class TestRunPipelineAsync:
         metrics_payload = (
             tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
         ).read_text(encoding="utf-8")
+        diagnostics_payload = (
+            tmp_path / "news_items" / "discover" / "metrics" / "discovery_diagnostics_latest.json"
+        ).read_text(encoding="utf-8")
         assert '"google_cse": 2' in metrics_payload
         assert '"source_native_google_cse_shared": 1' in metrics_payload
         assert '"brave_google_cse_shared": 1' in metrics_payload
         assert '"exa_google_cse_shared": 1' in metrics_payload
         assert '"shared_all_candidates": 1' in metrics_payload
+        assert '"shared_candidates": 1' in diagnostics_payload
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_marks_brave_failure_fatal_when_it_is_the_only_engine(

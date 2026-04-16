@@ -109,11 +109,11 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
 
     @property
     def provenance_path(self) -> Path:
-        return self.paths.candidates_dir / "candidate_provenance.jsonl"
+        return self.paths.candidate_provenance_path
 
     @property
     def attempts_path(self) -> Path:
-        return self.paths.candidates_dir / "scrape_attempts.jsonl"
+        return self.paths.scrape_attempts_path
 
     def write_run(self, run: DiscoveryRun) -> None:
         write_discovery_run_snapshot(
