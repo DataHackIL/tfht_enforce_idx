@@ -41,6 +41,7 @@ from denbust.pipeline import (
     _persist_source_native_candidates,
     _run_brave_discovery,
     _run_exa_discovery,
+    _run_google_cse_discovery,
     _run_job_from_config,
     _run_source_native_discovery,
     _source_name_from_error,
@@ -694,6 +695,196 @@ class TestRunPipelineAsync:
             "engine": "exa",
             "allow_find_similar": True,
         }
+
+    @pytest.mark.asyncio
+    async def test_run_google_cse_discovery_persists_empty_when_no_queries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Google CSE discovery should still persist an empty run when query building yields nothing."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["closed"] = True
+
+        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
+            del persistence
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        monkeypatch.setattr("denbust.pipeline.build_discovery_queries", lambda *_a, **_k: [])
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: FakePersistence(),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates",
+            fake_persist_discovered_candidates,
+        )
+
+        persisted = await _run_google_cse_discovery(config=Config(), run_id="run-google", days=4)
+
+        assert persisted.candidates == []
+        assert captured["candidates"] == []
+        assert cast(DiscoveryRun, captured["run"]).query_count == 0
+        assert captured["closed"] is True
+
+    @pytest.mark.asyncio
+    async def test_run_google_cse_discovery_records_missing_credentials(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Google CSE discovery should persist an error when enabled without required credentials."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["closed"] = True
+
+        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
+            del persistence
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        monkeypatch.setattr(
+            "denbust.pipeline.build_discovery_queries",
+            lambda *_args, **_kwargs: [MagicMock()],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: FakePersistence(),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates",
+            fake_persist_discovered_candidates,
+        )
+
+        persisted = await _run_google_cse_discovery(
+            config=Config(
+                discovery={"enabled": True, "engines": {"google_cse": {"enabled": True}}}
+            ),
+            run_id="run-google",
+            days=4,
+        )
+
+        assert persisted.candidates == []
+        assert captured["candidates"] == []
+        assert cast(DiscoveryRun, captured["run"]).errors == [
+            "google_cse: missing DENBUST_GOOGLE_CSE_API_KEY"
+        ]
+        assert captured["closed"] is True
+
+    @pytest.mark.asyncio
+    async def test_run_google_cse_discovery_records_missing_cse_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Google CSE discovery should persist an error when the search engine id is missing."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["closed"] = True
+
+        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
+            del persistence
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        monkeypatch.setattr(Config, "google_cse_api_key", property(lambda _self: "google-key"))
+        monkeypatch.setattr(Config, "google_cse_id", property(lambda _self: None))
+        monkeypatch.setattr(
+            "denbust.pipeline.build_discovery_queries",
+            lambda *_args, **_kwargs: [MagicMock()],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: FakePersistence(),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates",
+            fake_persist_discovered_candidates,
+        )
+
+        persisted = await _run_google_cse_discovery(
+            config=Config(
+                discovery={"enabled": True, "engines": {"google_cse": {"enabled": True}}}
+            ),
+            run_id="run-google",
+            days=4,
+        )
+
+        assert persisted.candidates == []
+        assert captured["candidates"] == []
+        assert cast(DiscoveryRun, captured["run"]).errors == [
+            "google_cse: missing DENBUST_GOOGLE_CSE_ID"
+        ]
+        assert captured["closed"] is True
+
+    @pytest.mark.asyncio
+    async def test_run_google_cse_discovery_catches_engine_errors_and_closes_resources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Google CSE engine failures should be recorded on the run and still close both engine and store."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["persistence_closed"] = True
+
+        class FakeEngine:
+            def __init__(self, **kwargs: object) -> None:
+                captured["engine_init"] = kwargs
+
+            async def discover(self, queries, context):
+                captured["queries"] = queries
+                captured["context"] = context
+                raise RuntimeError("boom")
+
+            async def aclose(self) -> None:
+                captured["engine_closed"] = True
+
+        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
+            del persistence
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        monkeypatch.setattr(Config, "google_cse_api_key", property(lambda _self: "google-key"))
+        monkeypatch.setattr(Config, "google_cse_id", property(lambda _self: "search-engine-id"))
+        monkeypatch.setattr(
+            "denbust.pipeline.build_discovery_queries",
+            lambda *_args, **_kwargs: [MagicMock()],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence",
+            lambda _config: FakePersistence(),
+        )
+        monkeypatch.setattr("denbust.pipeline.GoogleCseSearchEngine", FakeEngine)
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates",
+            fake_persist_discovered_candidates,
+        )
+
+        persisted = await _run_google_cse_discovery(
+            config=Config(
+                discovery={"enabled": True, "engines": {"google_cse": {"enabled": True}}}
+            ),
+            run_id="run-google",
+            days=6,
+        )
+
+        assert persisted.candidates == []
+        assert cast(DiscoveryRun, captured["run"]).errors == ["google_cse: RuntimeError: boom"]
+        assert captured["engine_closed"] is True
+        assert captured["persistence_closed"] is True
+        assert captured["engine_init"] == {
+            "api_key": "google-key",
+            "cse_id": "search-engine-id",
+            "max_results_per_query": 10,
+        }
+        assert captured["context"].metadata == {"days": 6, "engine": "google_cse"}
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_requires_api_key(
@@ -1723,6 +1914,58 @@ class TestRunPipelineAsync:
         assert '"exa": 2' in metrics_payload
         assert '"source_native": 0' in metrics_payload
         assert '"brave": 0' in metrics_payload
+        assert '"google_cse": 0' in metrics_payload
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_supports_google_cse_only_and_writes_metrics(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Google CSE discovery should run without configured sources and persist engine metrics."""
+        google_persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:google_cse",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=2,
+                merged_candidate_count=2,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-google-1",
+                    current_url="https://www.ynet.co.il/news/article/1",
+                ),
+                build_persistent_candidate(
+                    "candidate-google-2",
+                    current_url="https://www.mako.co.il/news/article/2",
+                ),
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr(
+            "denbust.pipeline._run_google_cse_discovery",
+            AsyncMock(return_value=google_persisted),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"enabled": False},
+                discovery={"enabled": True, "engines": {"google_cse": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is False
+        assert result.raw_article_count == 2
+        assert result.unified_item_count == 2
+        metrics_payload = (
+            tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
+        ).read_text(encoding="utf-8")
+        assert '"google_cse": 2' in metrics_payload
+        assert '"source_native": 0' in metrics_payload
+        assert '"brave": 0' in metrics_payload
+        assert '"exa": 0' in metrics_payload
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_aggregates_brave_and_source_native_without_double_counting(
@@ -1894,6 +2137,137 @@ class TestRunPipelineAsync:
         assert '"source_native_brave_shared": 1' in metrics_payload
         assert '"source_native_exa_shared": 1' in metrics_payload
         assert '"brave_exa_shared": 1' in metrics_payload
+        assert '"shared_all_candidates": 0' in metrics_payload
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_aggregates_all_engines_and_source_native_overlaps(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Merged candidate counts and overlap metrics should include Google CSE too."""
+        source_native = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:source_native",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-shared-all",
+                    current_url="https://www.ynet.co.il/news/article/shared-all",
+                )
+            ],
+            provenance=[],
+        )
+        brave = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=2,
+                merged_candidate_count=2,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-shared-all",
+                    current_url="https://www.ynet.co.il/news/article/shared-all",
+                ),
+                build_persistent_candidate(
+                    "candidate-brave-only",
+                    current_url="https://www.mako.co.il/news/article/brave-only",
+                ),
+            ],
+            provenance=[],
+        )
+        exa = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:exa",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=2,
+                merged_candidate_count=2,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-shared-all",
+                    current_url="https://www.ynet.co.il/news/article/shared-all",
+                ),
+                build_persistent_candidate(
+                    "candidate-exa-only",
+                    current_url="https://www.maariv.co.il/news/article/exa-only",
+                ),
+            ],
+            provenance=[],
+        )
+        google_cse = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:google_cse",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=2,
+                merged_candidate_count=2,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-shared-all",
+                    current_url="https://www.ynet.co.il/news/article/shared-all",
+                ),
+                build_persistent_candidate(
+                    "candidate-google-only",
+                    current_url="https://www.walla.co.il/news/article/google-only",
+                ),
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_source_native_discovery",
+            AsyncMock(return_value=source_native),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_exa_discovery",
+            AsyncMock(return_value=exa),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_google_cse_discovery",
+            AsyncMock(return_value=google_cse),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                discovery={
+                    "enabled": True,
+                    "engines": {
+                        "brave": {"enabled": True},
+                        "exa": {"enabled": True},
+                        "google_cse": {"enabled": True},
+                    },
+                },
+            )
+        )
+
+        assert result.fatal is False
+        assert result.raw_article_count == 7
+        assert result.unified_item_count == 4
+        metrics_payload = (
+            tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
+        ).read_text(encoding="utf-8")
+        assert '"google_cse": 2' in metrics_payload
+        assert '"source_native_google_cse_shared": 1' in metrics_payload
+        assert '"brave_google_cse_shared": 1' in metrics_payload
+        assert '"exa_google_cse_shared": 1' in metrics_payload
         assert '"shared_all_candidates": 1' in metrics_payload
 
     @pytest.mark.asyncio
@@ -1965,6 +2339,41 @@ class TestRunPipelineAsync:
 
         assert result.fatal is True
         assert result.errors == ["exa: missing DENBUST_EXA_API_KEY"]
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_marks_google_cse_failure_fatal_when_it_is_the_only_engine(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A failed Google CSE-only discovery run should surface as fatal."""
+        google_persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:google_cse",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.FAILED,
+                candidate_count=0,
+                merged_candidate_count=0,
+                errors=["google_cse: missing DENBUST_GOOGLE_CSE_API_KEY"],
+            ),
+            candidates=[],
+            provenance=[],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr(
+            "denbust.pipeline._run_google_cse_discovery",
+            AsyncMock(return_value=google_persisted),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"enabled": False},
+                discovery={"enabled": True, "engines": {"google_cse": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is True
+        assert result.errors == ["google_cse: missing DENBUST_GOOGLE_CSE_API_KEY"]
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_fails_when_engine_persistence_disabled_and_no_source_native(
@@ -2144,6 +2553,44 @@ class TestRunPipelineAsync:
         )
 
         assert "exa discovery completed with partial engine failures" in result.warnings
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_warns_on_google_cse_partial(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Google CSE partial runs should surface as warnings and still write metrics."""
+        google_partial = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:google_cse",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.PARTIAL,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-google-1",
+                    current_url="https://www.ynet.co.il/news/article/1",
+                )
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr(
+            "denbust.pipeline._run_google_cse_discovery",
+            AsyncMock(return_value=google_partial),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"enabled": False},
+                discovery={"enabled": True, "engines": {"google_cse": {"enabled": True}}},
+            )
+        )
+
+        assert "google_cse discovery completed with partial engine failures" in result.warnings
 
 
 class TestRunPipeline:
