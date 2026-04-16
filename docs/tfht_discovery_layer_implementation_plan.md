@@ -1,6 +1,6 @@
 # Implementation Plan: Persistent Multi-Engine Discovery & Candidacy Layer
 
-This plan breaks the discovery/candidacy feature into a sequence of well-scoped PRs for `tfht_enforce_idx`.
+This plan breaks the discovery/candidacy feature into a sequence of well-scoped discovery-layer PRs for `tfht_enforce_idx`.
 
 It assumes the following design document exists in `docs/`:
 
@@ -16,9 +16,21 @@ It assumes the following design document exists in `docs/`:
 - Keep source-native candidacy as a first-class producer throughout.
 - Ensure each PR leaves the repo in a coherent, testable state.
 
+## Discovery-layer PR labeling
+
+To avoid confusion with GitHub pull request numbers, the discovery-layer rollout uses the prefix
+`DL-PR-XX` in planning documents:
+
+- `DL-PR-01`
+- `DL-PR-02`
+- `DL-PR-03`
+- ...
+
+These labels are planning identifiers, not GitHub PR numbers.
+
 ---
 
-## PR 1 — Discovery/Candidacy foundation (models, config, persistence scaffolding)
+## DL-PR-01 — Discovery/Candidacy foundation (models, config, persistence scaffolding)
 
 ### Goal
 Introduce the durable candidate layer without changing the production ingest behavior yet.
@@ -60,7 +72,7 @@ A mergeable persistence/config/model foundation that does not yet affect product
 
 ---
 
-## PR 2 — Source-native candidacy persistence
+## DL-PR-02 — Source-native candidacy persistence
 
 ### Goal
 Make existing source-native discovery write durable candidates.
@@ -90,7 +102,7 @@ The existing source-native system now persists durable candidates without breaki
 
 ---
 
-## PR 3 — Separate scrape-attempt layer and candidate-driven ingest
+## DL-PR-03 — Separate scrape-attempt layer and candidate-driven ingest
 
 ### Goal
 Introduce candidate-driven scraping and retryable scrape state.
@@ -129,7 +141,7 @@ A working durable candidate queue with retryable scrape state underneath the exi
 
 ---
 
-## PR 4 — Brave engine integration
+## DL-PR-04 — Brave engine integration
 
 ### Goal
 Add the first search-engine discovery path.
@@ -157,7 +169,7 @@ Search-engine discovery begins contributing durable candidates, starting with Br
 
 ---
 
-## PR 5 — Exa engine integration
+## DL-PR-05 — Exa engine integration
 
 ### Goal
 Add Exa as a semantic/AI-native discovery engine.
@@ -183,7 +195,7 @@ A second complementary discovery engine is integrated cleanly.
 
 ---
 
-## PR 6 — Google CSE integration
+## DL-PR-06 — Google CSE integration
 
 ### Goal
 Add recall-oriented search discovery via Google CSE.
@@ -215,7 +227,7 @@ The initial three-engine discovery layer is complete:
 
 ---
 
-## PR 7 — Discovery observability and overlap reporting
+## DL-PR-07 — Discovery observability and overlap reporting
 
 ### Goal
 Make the new layer measurable and debuggable.
@@ -243,7 +255,7 @@ You can now tell whether the discovery layer is actually helping.
 
 ---
 
-## PR 8 — Search-result-only fallback rows and partial retention
+## DL-PR-08 — Search-result-only fallback rows and partial retention
 
 ### Goal
 Retain value from promising candidates even when full scraping fails.
@@ -271,7 +283,7 @@ The system can retain useful low-confidence candidates without pretending they a
 
 ---
 
-## PR 9 — Backfill foundation
+## DL-PR-09 — Backfill foundation
 
 ### Goal
 Enable slow, systematic historical gap-closing from the candidate layer.
@@ -299,7 +311,7 @@ Historical discovery becomes operationally possible without overwhelming the pip
 
 ---
 
-## PR 10 — Source suggestion and social-targeted discovery support
+## DL-PR-10 — Source suggestion and social-targeted discovery support
 
 ### Goal
 Lay the groundwork for future source expansion and social/reference discovery.
@@ -324,7 +336,7 @@ The candidate layer now supports future expansion into new sources and social/re
 
 ---
 
-## PR 11 — Workflow and operations rollout
+## DL-PR-11 — Workflow and operations rollout
 
 ### Goal
 Expose the new layer safely in GitHub Actions and local operations.
@@ -355,7 +367,7 @@ The feature is operationally usable in CI/GitHub Actions.
 
 ---
 
-## Optional PR 12 — Self-healing scaffolding hooks
+## Optional DL-PR-12 — Self-healing scaffolding hooks
 
 ### Goal
 Add explicit hooks for the future AI-based self-healing phase without implementing it yet.
@@ -375,38 +387,38 @@ A clean on-ramp for the next large feature, but not the feature itself.
 
 The recommended order is:
 
-1. PR 1 — foundation
-2. PR 2 — source-native candidacy persistence
-3. PR 3 — scrape-attempt layer
-4. PR 4 — Brave
-5. PR 5 — Exa
-6. PR 6 — Google CSE
-7. PR 7 — observability
-8. PR 8 — fallback rows
-9. PR 9 — backfill foundation
-10. PR 10 — source suggestion + social-targeted support
-11. PR 11 — workflow rollout
-12. PR 12 — self-healing hooks (optional)
+1. DL-PR-01 — foundation
+2. DL-PR-02 — source-native candidacy persistence
+3. DL-PR-03 — scrape-attempt layer
+4. DL-PR-04 — Brave
+5. DL-PR-05 — Exa
+6. DL-PR-06 — Google CSE
+7. DL-PR-07 — observability
+8. DL-PR-08 — fallback rows
+9. DL-PR-09 — backfill foundation
+10. DL-PR-10 — source suggestion + social-targeted support
+11. DL-PR-11 — workflow rollout
+12. DL-PR-12 — self-healing hooks (optional)
 
 ---
 
 ## What should already be usable after each stage
 
-### After PR 3
+### After DL-PR-03
 - durable candidate queue exists
 - failed scraping is retryable
 - current system can be migrated onto the new substrate
 
-### After PR 6
+### After DL-PR-06
 - the core multi-engine discovery feature is functionally implemented
 
-### After PR 8
+### After DL-PR-08
 - candidate retention is mature enough for real-world imperfect scraping
 
-### After PR 9
+### After DL-PR-09
 - historical backfill becomes feasible
 
-### After PR 11
+### After DL-PR-11
 - the feature can be used operationally in CI/jobs
 
 ---

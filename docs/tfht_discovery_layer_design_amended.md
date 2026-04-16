@@ -1165,6 +1165,9 @@ The important separation is:
 
 ## Recommended implementation milestones
 
+The detailed rollout plan uses discovery-layer planning identifiers in the form `DL-PR-XX`
+to distinguish them from GitHub PR numbers. For example: `DL-PR-01`, `DL-PR-02`, `DL-PR-03`.
+
 ### Milestone 1 — persistent candidacy foundation
 - add persistent candidate models
 - add candidate provenance and scrape-attempt models
