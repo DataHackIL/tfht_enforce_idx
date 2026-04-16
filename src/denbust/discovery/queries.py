@@ -35,7 +35,7 @@ def _normalize_keywords(keywords: Iterable[str]) -> list[str]:
 def _source_domain(source: SourceConfig) -> str | None:
     if source.url:
         return urlparse(str(source.url)).netloc or None
-    if source.type is SourceType.SCRAPER:
+    if source.type == SourceType.SCRAPER:
         return _SCRAPER_SOURCE_DOMAINS.get(source.name)
     return None
 

@@ -1013,10 +1013,10 @@ async def run_news_discover_job(
     )
     brave_can_run = brave_requested and config.discovery.persist_candidates
 
-    if not source_native_requested and not brave_can_run:
+    if brave_requested and not config.discovery.persist_candidates and not source_native_can_run:
         result.fatal = True
-        result.errors.append("source_discovery.enabled is false")
-        return result.finish("fatal: source-native discovery disabled")
+        result.errors.append("discovery.persist_candidates is false")
+        return result.finish("fatal: engine candidate persistence disabled")
     if (
         source_native_requested
         and not config.source_discovery.persist_candidates
@@ -1025,10 +1025,10 @@ async def run_news_discover_job(
         result.fatal = True
         result.errors.append("source_discovery.persist_candidates is false")
         return result.finish("fatal: source-native candidate persistence disabled")
-    if brave_requested and not config.discovery.persist_candidates and not source_native_can_run:
+    if not source_native_requested and not brave_can_run:
         result.fatal = True
-        result.errors.append("discovery.persist_candidates is false")
-        return result.finish("fatal: engine candidate persistence disabled")
+        result.errors.append("source_discovery.enabled is false")
+        return result.finish("fatal: source-native discovery disabled")
     if not sources and not brave_can_run:
         result.fatal = True
         result.errors.append("No sources configured")
@@ -1065,11 +1065,6 @@ async def run_news_discover_job(
                 ),
             )
         )
-
-    if not persisted_runs:
-        result.fatal = True
-        result.errors.append("No discovery producers enabled")
-        return result.finish("fatal: no discovery producers enabled")
 
     source_native_candidate_ids: set[str] = set()
     brave_candidate_ids: set[str] = set()

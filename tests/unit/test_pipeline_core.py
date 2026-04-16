@@ -1704,6 +1704,47 @@ class TestRunPipelineAsync:
         )
 
     @pytest.mark.asyncio
+    async def test_run_news_discover_job_warns_when_source_native_persistence_disabled_but_brave_runs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Source-native persistence-disabled skips should degrade to a warning when Brave runs."""
+        brave_persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover:brave",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[
+                build_persistent_candidate(
+                    "candidate-brave-1",
+                    current_url="https://www.ynet.co.il/news/article/1",
+                )
+            ],
+            provenance=[],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            AsyncMock(return_value=brave_persisted),
+        )
+
+        result = await run_news_discover_job(
+            Config(
+                store={"state_root": tmp_path},
+                source_discovery={"persist_candidates": False},
+                discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+            )
+        )
+
+        assert result.fatal is False
+        assert "source-native discovery skipped because persistence is disabled" in result.warnings
+
+    @pytest.mark.asyncio
     async def test_run_news_discover_job_warns_on_brave_partial(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

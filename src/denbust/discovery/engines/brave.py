@@ -10,6 +10,7 @@ from pydantic import HttpUrl
 
 from denbust.discovery.base import DiscoveryContext
 from denbust.discovery.models import DiscoveredCandidate, DiscoveryQuery, ProducerKind
+from denbust.news_items.normalize import canonicalize_news_url
 
 
 class BraveSearchEngine:
@@ -61,7 +62,12 @@ class BraveSearchEngine:
             )
             response.raise_for_status()
             payload = response.json()
-            results = payload.get("web", {}).get("results", [])
+            if not isinstance(payload, dict):
+                continue
+            web = payload.get("web", {})
+            if not isinstance(web, dict):
+                continue
+            results = web.get("results", [])
             if not isinstance(results, list):
                 continue
             for index, result in enumerate(results, start=1):
@@ -96,22 +102,30 @@ class BraveSearchEngine:
                 publication_datetime_hint = datetime.fromisoformat(normalized)
             except ValueError:
                 publication_datetime_hint = None
-        parsed_url = HttpUrl(url)
-        return DiscoveredCandidate(
-            producer_name=self.name,
-            producer_kind=ProducerKind.SEARCH_ENGINE,
-            query_text=query.query_text,
-            candidate_url=parsed_url,
-            canonical_url=parsed_url,
-            title=result.get("title"),
-            snippet=result.get("description"),
-            publication_datetime_hint=publication_datetime_hint,
-            rank=rank,
-            source_hint=query.source_hint,
-            metadata={
-                "engine": self.name,
-                "query_kind": query.query_kind.value,
-                "preferred_domains": query.preferred_domains,
-                "raw_result": result,
-            },
-        )
+        try:
+            parsed_url = HttpUrl(url)
+            canonical_url = HttpUrl(canonicalize_news_url(url))
+            return DiscoveredCandidate(
+                producer_name=self.name,
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                query_text=query.query_text,
+                candidate_url=parsed_url,
+                canonical_url=canonical_url,
+                title=result.get("title"),
+                snippet=result.get("description"),
+                publication_datetime_hint=publication_datetime_hint,
+                rank=rank,
+                source_hint=query.source_hint,
+                metadata={
+                    "engine": self.name,
+                    "query_kind": query.query_kind.value,
+                    "preferred_domains": query.preferred_domains,
+                    "result_url": url,
+                    "result_title": result.get("title"),
+                    "result_description": result.get("description"),
+                    "result_page_age": result.get("page_age"),
+                    "result_age": result.get("age"),
+                },
+            )
+        except ValueError:
+            return None

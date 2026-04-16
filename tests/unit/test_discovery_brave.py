@@ -70,8 +70,15 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
     assert candidates[0].producer_kind is ProducerKind.SEARCH_ENGINE
     assert candidates[0].source_hint == "ynet"
     assert candidates[0].rank == 1
+    assert str(candidates[0].candidate_url) == "https://www.ynet.co.il/news/article/abc"
+    assert str(candidates[0].canonical_url) == "https://ynet.co.il/news/article/abc"
     assert candidates[0].publication_datetime_hint == datetime(2026, 4, 15, 8, 0, tzinfo=UTC)
     assert candidates[0].metadata["query_kind"] == "source_targeted"
+    assert candidates[0].metadata["result_url"] == "https://www.ynet.co.il/news/article/abc"
+    assert candidates[0].metadata["result_title"] == "פשיטה על בית בושת"
+    assert candidates[0].metadata["result_description"] == "המשטרה פשטה על המקום."
+    assert candidates[0].metadata["result_page_age"] == "2026-04-15T08:00:00Z"
+    assert "raw_result" not in candidates[0].metadata
 
 
 @pytest.mark.asyncio
@@ -105,4 +112,51 @@ async def test_brave_search_engine_skips_invalid_results() -> None:
 
     assert [str(candidate.candidate_url) for candidate in candidates] == [
         "https://www.mako.co.il/news/article/xyz"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_brave_search_engine_skips_non_object_payloads_and_invalid_urls() -> None:
+    """Malformed payloads and bad URLs should be ignored without failing the whole discovery call."""
+    responses = iter(
+        [
+            httpx.Response(200, json=[]),
+            httpx.Response(200, json={"web": []}),
+            httpx.Response(
+                200,
+                json={
+                    "web": {
+                        "results": [
+                            {"url": "not-a-url", "title": "bad"},
+                            {"url": "https://www.walla.co.il/item?utm_source=test", "title": "ok"},
+                        ]
+                    }
+                },
+            ),
+        ]
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return next(responses)
+
+    engine = BraveSearchEngine(
+        api_key="brave-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = await engine.discover(
+        [
+            DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD),
+            DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD),
+            DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD),
+        ],
+        DiscoveryContext(run_id="run-3"),
+    )
+    await engine.aclose()
+
+    assert [str(candidate.candidate_url) for candidate in candidates] == [
+        "https://www.walla.co.il/item?utm_source=test"
+    ]
+    assert [str(candidate.canonical_url) for candidate in candidates] == [
+        "https://walla.co.il/item"
     ]
