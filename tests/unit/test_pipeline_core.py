@@ -1138,9 +1138,7 @@ class TestRunPipelineAsync:
 
         result = await run_news_ingest_job(Config())
 
-        assert (
-            "candidate_scrape_layer_failed=RuntimeError: scrape boom" in result.warnings
-        )
+        assert "candidate_scrape_layer_failed=RuntimeError: scrape boom" in result.warnings
         assert result.raw_article_count == 1
         assert result.unified_item_count == 1
 
