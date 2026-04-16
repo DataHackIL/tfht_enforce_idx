@@ -15,6 +15,15 @@ from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
 from denbust.datasets.jobs import ensure_default_jobs_registered
 from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
+from denbust.discovery.base import SourceDiscoveryContext
+from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus
+from denbust.discovery.source_native import (
+    PersistedSourceDiscovery,
+    SourceDiscoveryAdapter,
+    persist_discovered_candidates,
+    raw_article_to_discovered_candidate,
+)
+from denbust.discovery.storage import create_discovery_persistence
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
 from denbust.news_items.annotations import (
@@ -54,6 +63,12 @@ from denbust.store.run_snapshots import (
 from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
+
+_OPERATIONAL_STORE_JOBS = {
+    JobName.INGEST,
+    JobName.RELEASE,
+    JobName.BACKUP,
+}
 
 
 def release_publication_dir(config: Config) -> Path:
@@ -166,6 +181,91 @@ def deduplicate_articles(
     items = deduplicator.deduplicate(articles)
     logger.info("Deduplicated to %s unique stories", len(items))
     return items
+
+
+def _source_discovery_enabled_for_source(config: Config, source_name: str) -> bool:
+    """Return whether source-native candidacy is enabled for a source."""
+    source_config = config.source_discovery.sources.get(source_name)
+    if source_config is None:
+        return True
+    return source_config.enabled
+
+
+async def _persist_source_native_candidates(
+    *,
+    config: Config,
+    raw_articles: list[RawArticle],
+    run_id: str,
+) -> PersistedSourceDiscovery:
+    """Persist source-native candidates derived from fetched source articles."""
+    discovery_run = DiscoveryRun(
+        run_id=run_id,
+        dataset_name=config.dataset_name,
+        job_name=config.job_name,
+        status=DiscoveryRunStatus.RUNNING,
+        query_count=0,
+    )
+    persistence = create_discovery_persistence(config)
+    try:
+        discovered_candidates = [
+            raw_article_to_discovered_candidate(article)
+            for article in raw_articles
+            if _source_discovery_enabled_for_source(config, article.source_name)
+        ]
+        return persist_discovered_candidates(
+            run=discovery_run,
+            discovered_candidates=discovered_candidates,
+            persistence=persistence,
+        )
+    finally:
+        persistence.close()
+
+
+async def _run_source_native_discovery(
+    *,
+    config: Config,
+    sources: list[Source],
+    run_id: str,
+    days: int,
+) -> PersistedSourceDiscovery:
+    """Fetch source-native candidates and persist them to the durable candidate layer."""
+    enabled_sources = [
+        source for source in sources if _source_discovery_enabled_for_source(config, source.name)
+    ]
+    discovery_run = DiscoveryRun(
+        run_id=run_id,
+        dataset_name=config.dataset_name,
+        job_name=config.job_name,
+        status=DiscoveryRunStatus.RUNNING,
+        query_count=len(enabled_sources),
+    )
+    context = SourceDiscoveryContext(
+        run_id=run_id,
+        source_names=[source.name for source in enabled_sources],
+        days=days,
+        keywords=config.keywords,
+    )
+    persistence = create_discovery_persistence(config)
+    try:
+        discovered_candidates = []
+        errors: list[str] = []
+        for source in enabled_sources:
+            adapter = SourceDiscoveryAdapter(source)
+            try:
+                discovered_candidates.extend(await adapter.discover_candidates(context))
+            except Exception as exc:
+                logger.exception("Error discovering candidates from %s: %s", source.name, exc)
+                errors.append(f"{source.name}: {exc}")
+
+        discovery_run.errors = errors
+        persisted = persist_discovered_candidates(
+            run=discovery_run,
+            discovered_candidates=discovered_candidates,
+            persistence=persistence,
+        )
+        return persisted
+    finally:
+        persistence.close()
 
 
 def mark_seen(items: list[UnifiedItem], seen_store: SeenStore) -> None:
@@ -562,6 +662,26 @@ async def run_news_ingest_job(
     if source_errors:
         result.warnings.append(f"{len(source_errors)} source(s) reported errors")
 
+    if (
+        config.source_discovery.enabled
+        and config.source_discovery.persist_candidates
+        and all_articles
+    ):
+        try:
+            persisted_source_discovery = await _persist_source_native_candidates(
+                config=config,
+                raw_articles=all_articles,
+                run_id=result.run_timestamp.astimezone(UTC).isoformat(),
+            )
+            result.warnings.append(
+                f"source_native_candidates_persisted={len(persisted_source_discovery.candidates)}"
+            )
+        except Exception as exc:
+            logger.warning("Source-native candidate persistence failed during ingest: %s", exc)
+            result.warnings.append(
+                f"source_native_candidate_persistence_failed={type(exc).__name__}: {exc}"
+            )
+
     if not all_articles:
         logger.info("No articles found from any source")
         result.seen_count_after = seen_store.count
@@ -663,6 +783,53 @@ async def run_news_ingest_job(
             classified_articles=classified_articles,
             unified_items=unified_items,
         )
+    )
+    return result
+
+
+async def run_news_discover_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    """Run source-native discovery only and persist durable candidates."""
+    del operational_store
+    days = days_override if days_override is not None else config.days
+    result = _build_run_snapshot(config, config_path=config_path, days=days)
+    sources = create_sources(config)
+    result.source_count = len(sources)
+    if not config.source_discovery.enabled:
+        result.fatal = True
+        result.errors.append("source_discovery.enabled is false")
+        return result.finish("fatal: source-native discovery disabled")
+    if not config.source_discovery.persist_candidates:
+        result.fatal = True
+        result.errors.append("source_discovery.persist_candidates is false")
+        return result.finish("fatal: source-native candidate persistence disabled")
+    if not sources:
+        result.fatal = True
+        result.errors.append("No sources configured")
+        return result.finish("fatal: no sources configured")
+
+    persisted = await _run_source_native_discovery(
+        config=config,
+        sources=sources,
+        run_id=result.run_timestamp.astimezone(UTC).isoformat(),
+        days=days,
+    )
+    result.raw_article_count = persisted.run.candidate_count
+    result.unseen_article_count = persisted.run.candidate_count
+    result.unified_item_count = persisted.run.merged_candidate_count
+    result.errors.extend(persisted.run.errors)
+    if persisted.run.status is DiscoveryRunStatus.FAILED:
+        result.fatal = True
+    if persisted.run.status is DiscoveryRunStatus.PARTIAL:
+        result.warnings.append("source-native discovery completed with partial source failures")
+    result.finish(
+        "source-native discovery persisted "
+        f"{persisted.run.merged_candidate_count} candidate(s) from "
+        f"{persisted.run.candidate_count} discovered result(s)"
     )
     return result
 
@@ -789,26 +956,30 @@ async def run_job_async(
     """Dispatch a dataset/job run through the registry."""
     ensure_default_jobs_registered()
     handler = require_job_handler(config.dataset_name, config.job_name)
-    store = operational_store or create_operational_store(config)
-    owns_store = operational_store is None
+    store: OperationalStore | None = operational_store
+    owns_store = False
+    if store is None and config.job_name in _OPERATIONAL_STORE_JOBS:
+        store = create_operational_store(config)
+        owns_store = True
     result: RunSnapshot | None = None
     try:
         result = await handler(config, config_path, days_override, store)
-        try:
-            store.write_run_metadata(result)
-        except Exception as exc:
-            logger.warning(
-                "Failed to persist operational run metadata for %s/%s: %s",
-                config.dataset_name.value,
-                config.job_name.value,
-                exc,
-            )
-            result.warnings.append(
-                f"operational_run_metadata_write_failed={type(exc).__name__}: {exc}"
-            )
+        if store is not None:
+            try:
+                store.write_run_metadata(result)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to persist operational run metadata for %s/%s: %s",
+                    config.dataset_name.value,
+                    config.job_name.value,
+                    exc,
+                )
+                result.warnings.append(
+                    f"operational_run_metadata_write_failed={type(exc).__name__}: {exc}"
+                )
         return result
     finally:
-        if owns_store:
+        if owns_store and store is not None:
             try:
                 store.close()
             except Exception as exc:

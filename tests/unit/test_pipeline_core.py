@@ -20,6 +20,8 @@ from denbust.data_models import (
     SubCategory,
     UnifiedItem,
 )
+from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus
+from denbust.discovery.source_native import PersistedSourceDiscovery
 from denbust.models.common import DatasetName, JobName
 from denbust.models.policies import PrivacyRisk
 from denbust.ops.storage import LocalJsonOperationalStore
@@ -28,7 +30,9 @@ from denbust.pipeline import (
     _build_problem_summary,
     _build_source_summaries,
     _build_suspicions,
+    _persist_source_native_candidates,
     _run_job_from_config,
+    _run_source_native_discovery,
     _source_name_from_error,
     classify_articles,
     create_sources,
@@ -39,6 +43,7 @@ from denbust.pipeline import (
     run_backup,
     run_job,
     run_job_async,
+    run_news_discover_job,
     run_news_ingest_job,
     run_pipeline,
     run_pipeline_async,
@@ -758,6 +763,198 @@ class TestRunPipelineAsync:
         assert result.seen_count_after == 3
         assert fake_store.upserts == [("news_items", [{"id": "row-1"}])]
 
+    @pytest.mark.asyncio
+    async def test_persist_source_native_candidates_skips_disabled_sources(
+        self, tmp_path: Path
+    ) -> None:
+        """Per-source source_discovery toggles should suppress disabled sources."""
+        config = Config(
+            source_discovery={"sources": {"ynet": False}},
+            store={"state_root": tmp_path},
+        )
+
+        persisted = await _persist_source_native_candidates(
+            config=config,
+            raw_articles=[
+                RawArticle(
+                    url=HttpUrl("https://www.ynet.co.il/item"),
+                    title="כתבה מיינט",
+                    snippet="תקציר",
+                    date=datetime(2026, 4, 11, tzinfo=UTC),
+                    source_name="ynet",
+                ),
+                RawArticle(
+                    url=HttpUrl("https://www.walla.co.il/item"),
+                    title="פשיטה נוספת",
+                    snippet="תקציר",
+                    date=datetime(2026, 4, 11, tzinfo=UTC),
+                    source_name="walla",
+                ),
+            ],
+            run_id="run-disabled-source",
+        )
+
+        assert len(persisted.candidates) == 1
+        assert persisted.candidates[0].source_hints == ["walla"]
+
+    @pytest.mark.asyncio
+    async def test_run_source_native_discovery_records_source_errors(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Discover should keep good source candidates and record failing sources."""
+
+        class FakePersistence:
+            def close(self) -> None:
+                pass
+
+            def write_run(self, run: DiscoveryRun) -> None:
+                self.run = run
+
+            def upsert_candidates(self, candidates: list[object]) -> None:
+                self.candidates = candidates
+
+            def append_provenance(self, provenance: list[object]) -> None:
+                self.provenance = provenance
+
+            def find_candidate_by_urls(
+                self, *, canonical_url: str | None, current_url: str | None
+            ) -> None:
+                del canonical_url, current_url
+                return None
+
+        async def fake_discover_candidates(self: object, _context: object) -> list[object]:
+            name = self._source.name
+            if name == "bad":
+                raise RuntimeError("boom")
+            from denbust.discovery.source_native import raw_article_to_discovered_candidate
+
+            return [
+                raw_article_to_discovered_candidate(build_raw_article("https://example.com/good"))
+            ]
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.logger", mock_logger)
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence", lambda _config: FakePersistence()
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.SourceDiscoveryAdapter.discover_candidates",
+            fake_discover_candidates,
+        )
+
+        persisted = await _run_source_native_discovery(
+            config=Config(),
+            sources=[FakeSource("bad", []), FakeSource("good", [])],
+            run_id="run-source-errors",
+            days=3,
+        )
+
+        assert persisted.run.errors == ["bad: boom"]
+        assert persisted.run.status is DiscoveryRunStatus.PARTIAL
+        mock_logger.exception.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_news_ingest_job_warns_when_source_native_persistence_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ingest should degrade to warnings if source-native persistence side effects fail."""
+        raw_article = build_raw_article()
+        seen_store = MagicMock(count=5)
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources",
+            AsyncMock(return_value=([raw_article], [])),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._persist_source_native_candidates",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda _articles, _seen_store: [])
+
+        result = await run_news_ingest_job(Config(), operational_store=MagicMock())
+
+        assert "source_native_candidate_persistence_failed=RuntimeError: boom" in result.warnings
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("config", "error", "summary"),
+        [
+            (
+                Config(source_discovery={"enabled": False}),
+                "source_discovery.enabled is false",
+                "fatal: source-native discovery disabled",
+            ),
+            (
+                Config(source_discovery={"persist_candidates": False}),
+                "source_discovery.persist_candidates is false",
+                "fatal: source-native candidate persistence disabled",
+            ),
+            (
+                Config(),
+                "No sources configured",
+                "fatal: no sources configured",
+            ),
+        ],
+    )
+    async def test_run_news_discover_job_rejects_invalid_configuration(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        config: Config,
+        error: str,
+        summary: str,
+    ) -> None:
+        """Discover should fail early for disabled persistence or missing sources."""
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+
+        result = await run_news_discover_job(config)
+
+        assert result.fatal is True
+        assert result.errors == [error]
+        assert result.result_summary == summary
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_marks_failed_and_partial_runs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Discover should surface failed runs as fatal and partial runs as warnings."""
+        persisted = PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id="run-discover",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.DISCOVER,
+                status=DiscoveryRunStatus.PARTIAL,
+                candidate_count=2,
+                merged_candidate_count=1,
+            ),
+            candidates=[],
+            provenance=[],
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_source_native_discovery",
+            AsyncMock(return_value=persisted),
+        )
+
+        partial_result = await run_news_discover_job(Config())
+
+        assert partial_result.fatal is False
+        assert (
+            "source-native discovery completed with partial source failures"
+            in partial_result.warnings
+        )
+
+        persisted.run.status = DiscoveryRunStatus.FAILED
+        failed_result = await run_news_discover_job(Config())
+
+        assert failed_result.fatal is True
+
 
 class TestRunPipeline:
     """Tests for the sync run_pipeline wrapper."""
@@ -989,14 +1186,39 @@ class TestRunPipeline:
             await run_job_async(config)
 
     @pytest.mark.asyncio
-    async def test_run_job_async_rejects_scaffolded_discover_job_with_clear_message(self) -> None:
-        """Scaffolded but unimplemented jobs should fail with a specific placeholder message."""
-        config = Config(dataset_name="news_items", job_name="discover")
+    async def test_run_job_async_runs_discover_without_operational_store(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Discover jobs should persist candidates without requiring the operational store."""
+        config = Config(
+            dataset_name="news_items",
+            job_name="discover",
+            store={"state_root": tmp_path},
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources",
+            lambda _config: [
+                FakeSource("ynet", [build_raw_article("https://www.ynet.co.il/item")])
+            ],
+        )
 
-        with pytest.raises(
-            ValueError, match="news_items/discover is scaffolded but not implemented yet"
-        ):
-            await run_job_async(config)
+        def fail_if_called(_config: Config) -> None:
+            raise AssertionError("create_operational_store should not be called for discover jobs")
+
+        monkeypatch.setattr("denbust.pipeline.create_operational_store", fail_if_called)
+
+        result = await run_job_async(config)
+
+        assert result.job_name == "discover"
+        assert result.raw_article_count == 1
+        assert result.unified_item_count == 1
+        assert result.fatal is False
+        candidate_lines = (
+            config.discovery_state_paths.latest_candidates_path.read_text(encoding="utf-8")
+            .strip()
+            .splitlines()
+        )
+        assert len(candidate_lines) == 1
 
     @pytest.mark.asyncio
     async def test_run_job_async_writes_run_metadata_via_operational_store(

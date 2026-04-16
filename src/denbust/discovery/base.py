@@ -22,6 +22,8 @@ class SourceDiscoveryContext(BaseModel):
     """Shared execution context for source-native candidate producers."""
 
     run_id: str
+    days: int | None = None
+    keywords: list[str] = Field(default_factory=list)
     source_names: list[str] = Field(default_factory=list)
     date_from: datetime | None = None
     date_to: datetime | None = None
@@ -31,7 +33,10 @@ class SourceDiscoveryContext(BaseModel):
 class DiscoveryEngine(Protocol):
     """Protocol for search-engine discovery adapters."""
 
-    name: str
+    @property
+    def name(self) -> str:
+        """Return the producer name."""
+        ...
 
     async def discover(
         self,
@@ -44,7 +49,10 @@ class DiscoveryEngine(Protocol):
 class SourceCandidateProducer(Protocol):
     """Protocol for source-native candidate producers."""
 
-    name: str
+    @property
+    def name(self) -> str:
+        """Return the producer name."""
+        ...
 
     async def discover_candidates(
         self,

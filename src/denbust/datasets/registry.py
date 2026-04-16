@@ -10,7 +10,10 @@ from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
 from denbust.ops.storage import OperationalStore
 
-JobHandler = Callable[[Config, Path | None, int | None, OperationalStore], Awaitable[RunSnapshot]]
+JobHandler = Callable[
+    [Config, Path | None, int | None, OperationalStore | None],
+    Awaitable[RunSnapshot],
+]
 
 _REGISTRY: dict[tuple[str, str], JobHandler] = {}
 

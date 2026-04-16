@@ -1,4 +1,4 @@
-"""Persistent discovery and candidacy layer scaffolding."""
+"""Persistent discovery and candidacy layer package."""
 
 from denbust.discovery.base import (
     DiscoveryContext,
@@ -33,7 +33,6 @@ from denbust.discovery.state_paths import (
     resolve_discovery_state_paths,
     write_candidate_jsonl,
     write_discovery_run_snapshot,
-    write_metrics_snapshot,
 )
 
 __all__ = [
@@ -63,5 +62,4 @@ __all__ = [
     "resolve_discovery_state_paths",
     "write_candidate_jsonl",
     "write_discovery_run_snapshot",
-    "write_metrics_snapshot",
 ]
