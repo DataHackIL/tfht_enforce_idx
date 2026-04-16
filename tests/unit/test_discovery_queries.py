@@ -62,3 +62,64 @@ def test_build_discovery_queries_respects_enabled_query_kinds() -> None:
     assert len(queries) == 1
     assert queries[0].query_kind is DiscoveryQueryKind.SOURCE_TARGETED
     assert queries[0].source_hint == "mako"
+
+
+def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() -> None:
+    """Blank/duplicate keywords and unusable sources should be skipped cleanly."""
+    config = Config(
+        keywords=["", "  ", "זנות", "זנות"],
+        sources=[
+            SourceConfig(name="disabled", type=SourceType.SCRAPER, enabled=False),
+            SourceConfig(name="unknown", type=SourceType.SCRAPER),
+            SourceConfig(name="rss-no-url", type=SourceType.RSS),
+            SourceConfig(name="mako", type=SourceType.SCRAPER),
+        ],
+        discovery={"enabled": True},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    broad_queries = [query for query in queries if query.query_kind is DiscoveryQueryKind.BROAD]
+    targeted_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
+    ]
+
+    assert len(broad_queries) == 1
+    assert len(targeted_queries) == 1
+    assert broad_queries[0].query_text == "זנות"
+    assert targeted_queries[0].source_hint == "mako"
+
+
+def test_build_discovery_queries_returns_empty_for_empty_keyword_set() -> None:
+    """If all keywords collapse away, no discovery queries should be built."""
+    config = Config(
+        keywords=["", "   "],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"enabled": True},
+    )
+
+    assert build_discovery_queries(config, days=3) == []
+
+
+def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> None:
+    """Duplicate source domains should not emit duplicate source-targeted queries."""
+    config = Config(
+        keywords=["זנות", "זנות"],
+        sources=[
+            SourceConfig(name="ynet", type=SourceType.RSS, url="https://www.ynet.co.il/feed.xml"),
+            SourceConfig(
+                name="ynet",
+                type=SourceType.RSS,
+                url="https://www.ynet.co.il/another-feed.xml",
+            ),
+        ],
+        discovery={"enabled": True},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+    targeted_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
+    ]
+
+    assert len(targeted_queries) == 1
+    assert targeted_queries[0].preferred_domains == ["www.ynet.co.il"]

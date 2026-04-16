@@ -82,6 +82,16 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
 
 
 @pytest.mark.asyncio
+async def test_brave_search_engine_aclose_closes_owned_client() -> None:
+    """Owned async clients should be closed by `aclose()`."""
+    engine = BraveSearchEngine(api_key="brave-key")
+
+    await engine.aclose()
+
+    assert engine._client.is_closed is True
+
+
+@pytest.mark.asyncio
 async def test_brave_search_engine_skips_invalid_results() -> None:
     """Malformed Brave payload rows should be ignored."""
 
@@ -160,3 +170,68 @@ async def test_brave_search_engine_skips_non_object_payloads_and_invalid_urls() 
     assert [str(candidate.canonical_url) for candidate in candidates] == [
         "https://walla.co.il/item"
     ]
+
+
+@pytest.mark.asyncio
+async def test_brave_search_engine_skips_non_list_results_and_non_dict_rows() -> None:
+    """Unexpected result container shapes should be skipped safely."""
+    responses = iter(
+        [
+            httpx.Response(200, json={"web": {"results": "not-a-list"}}),
+            httpx.Response(200, json={"web": {"results": ["bad-row", {"url": "https://ice.co.il/a"}]}}),
+        ]
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return next(responses)
+
+    engine = BraveSearchEngine(
+        api_key="brave-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = await engine.discover(
+        [
+            DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD),
+            DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD),
+        ],
+        DiscoveryContext(run_id="run-4"),
+    )
+    await engine.aclose()
+
+    assert [str(candidate.candidate_url) for candidate in candidates] == ["https://ice.co.il/a"]
+
+
+@pytest.mark.asyncio
+async def test_brave_search_engine_ignores_invalid_page_age() -> None:
+    """Unparseable page-age values should produce a candidate with no publication hint."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "web": {
+                    "results": [
+                        {
+                            "url": "https://www.mako.co.il/news/article/xyz",
+                            "title": "ok",
+                            "page_age": "not-a-datetime",
+                        }
+                    ]
+                }
+            },
+        )
+
+    engine = BraveSearchEngine(
+        api_key="brave-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = await engine.discover(
+        [DiscoveryQuery(query_text="זנות", query_kind=DiscoveryQueryKind.BROAD)],
+        DiscoveryContext(run_id="run-5"),
+    )
+    await engine.aclose()
+
+    assert len(candidates) == 1
+    assert candidates[0].publication_datetime_hint is None
