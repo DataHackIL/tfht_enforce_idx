@@ -203,6 +203,9 @@ A second complementary discovery engine is integrated cleanly.
 ### Goal
 Add recall-oriented search discovery via Google CSE.
 
+### Status
+Implemented.
+
 ### Scope
 - Add Google CSE adapter under `src/denbust/discovery/engines/google_cse.py`
 - Support:

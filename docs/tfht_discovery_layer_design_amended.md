@@ -1184,7 +1184,7 @@ to distinguish them from GitHub PR numbers. For example: `DL-PR-01`, `DL-PR-02`,
 
 ### Milestone 3 — Exa + Google CSE
 - add Exa (implemented)
-- add Google CSE (pending)
+- add Google CSE (implemented)
 - add overlap metrics
 - add queue health metrics
 
