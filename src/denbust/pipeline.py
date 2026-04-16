@@ -1009,9 +1009,7 @@ async def run_news_discover_job(
     source_native_requested = config.source_discovery.enabled
     brave_requested = config.discovery.enabled and config.discovery.engines.brave.enabled
     source_native_can_run = (
-        source_native_requested
-        and config.source_discovery.persist_candidates
-        and bool(sources)
+        source_native_requested and config.source_discovery.persist_candidates and bool(sources)
     )
     brave_can_run = brave_requested and config.discovery.persist_candidates
 
@@ -1019,7 +1017,11 @@ async def run_news_discover_job(
         result.fatal = True
         result.errors.append("source_discovery.enabled is false")
         return result.finish("fatal: source-native discovery disabled")
-    if source_native_requested and not config.source_discovery.persist_candidates and not brave_can_run:
+    if (
+        source_native_requested
+        and not config.source_discovery.persist_candidates
+        and not brave_can_run
+    ):
         result.fatal = True
         result.errors.append("source_discovery.persist_candidates is false")
         return result.finish("fatal: source-native candidate persistence disabled")
@@ -1079,7 +1081,9 @@ async def run_news_discover_job(
         merged_candidate_ids.update(candidate.candidate_id for candidate in persisted.candidates)
         result.errors.extend(persisted.run.errors)
         if producer_name == "source_native":
-            source_native_candidate_ids = {candidate.candidate_id for candidate in persisted.candidates}
+            source_native_candidate_ids = {
+                candidate.candidate_id for candidate in persisted.candidates
+            }
             if persisted.run.status is DiscoveryRunStatus.PARTIAL:
                 result.warnings.append(
                     "source-native discovery completed with partial source failures"
