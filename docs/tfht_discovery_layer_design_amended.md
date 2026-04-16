@@ -1183,8 +1183,8 @@ to distinguish them from GitHub PR numbers. For example: `DL-PR-01`, `DL-PR-02`,
 - final source-aware scraping from durable candidates
 
 ### Milestone 3 — Exa + Google CSE
-- add Exa
-- add Google CSE
+- add Exa (implemented)
+- add Google CSE (pending)
 - add overlap metrics
 - add queue health metrics
 

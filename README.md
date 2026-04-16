@@ -15,7 +15,7 @@ data jobs. Phase A introduced the shared platform spine. Phase B turns the first
 
 Today, the implemented dataset/jobs are:
 
-- `news_items / discover` (source-native + Brave candidate persistence)
+- `news_items / discover` (source-native + Brave + Exa candidate persistence)
 - `news_items / ingest`
 - `news_items / release`
 - `news_items / backup`
@@ -40,7 +40,7 @@ Planned future datasets:
 - Persists dataset/job-scoped seen state and per-run JSON snapshots
 - Scaffolds a persistent discovery/candidacy layer with dedicated Supabase tables and state-repo
   paths under `news_items/discover/`
-- Runs Brave as the first external discovery engine feeding the durable candidate layer
+- Runs Brave and Exa as external discovery engines feeding the durable candidate layer
 - Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
 
 ## Quick Start
@@ -218,13 +218,13 @@ What is implemented now:
 Still intentionally deferred:
 
 - additional dataset implementations beyond `news_items`
-- Exa and Google CSE engine integrations
+- Google CSE engine integration
 - richer human review tooling / admin UI
 - more advanced privacy policies beyond the current pragmatic gate
 
 ## Discovery Layer Foundation
 
-DL-PR-04 now builds on the earlier discovery milestones:
+DL-PR-05 now builds on the earlier discovery milestones:
 
 - `src/denbust/discovery/` with durable candidate, provenance, scrape-attempt, and discovery-run
   models
@@ -232,10 +232,11 @@ DL-PR-04 now builds on the earlier discovery milestones:
 - explicit state-repo path helpers for candidate-layer snapshots and queue files
 - source-native candidate normalization and merge/upsert persistence
 - a real `news_items / discover` job that persists source-native candidates and Brave-discovered
-  candidates into the same durable substrate
+  and Exa-discovered candidates into the same durable substrate
 - Brave query building for broad and source-targeted discovery searches
-- a dedicated `DENBUST_BRAVE_SEARCH_API_KEY` configuration path for the first external discovery
-  engine
+- Exa query execution for the same broad and source-targeted discovery searches
+- dedicated `DENBUST_BRAVE_SEARCH_API_KEY` and `DENBUST_EXA_API_KEY` configuration paths for
+  external discovery engines
 - candidate selection / queueing helpers for retryable scrape work
 - scrape-attempt persistence and candidate status transitions underneath the ingest path
 - a real `news_items / scrape_candidates` job that drains queued candidates into article ingest
@@ -247,10 +248,10 @@ DL-PR-04 now builds on the earlier discovery milestones:
   - `candidate_provenance`
   - `scrape_attempts`
 
-Exa and Google CSE are still intentionally deferred, and the generic fetch/extract fallback remains
+Google CSE is still intentionally deferred, and the generic fetch/extract fallback remains
 scaffolded structurally for retry bookkeeping. The current daily monitoring flow remains
-operational, but the durable candidate substrate now accepts both source-native discovery and Brave
-search results.
+operational, but the durable candidate substrate now accepts source-native discovery plus Brave and
+Exa search results.
 
 ## Config Layout
 

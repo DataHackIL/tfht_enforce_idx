@@ -174,6 +174,9 @@ Search-engine discovery begins contributing durable candidates, starting with Br
 ### Goal
 Add Exa as a semantic/AI-native discovery engine.
 
+### Status
+Implemented.
+
 ### Scope
 - Add Exa adapter under `src/denbust/discovery/engines/exa.py`
 - Support:

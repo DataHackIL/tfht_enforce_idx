@@ -18,6 +18,7 @@ from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
 from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
 from denbust.discovery.engines.brave import BraveSearchEngine
+from denbust.discovery.engines.exa import ExaSearchEngine
 from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus, PersistentCandidate
 from denbust.discovery.queries import build_discovery_queries
 from denbust.discovery.scrape_queue import (
@@ -214,6 +215,7 @@ def _write_discovery_engine_metrics(
     *,
     source_native_candidate_ids: set[str],
     brave_candidate_ids: set[str],
+    exa_candidate_ids: set[str],
 ) -> None:
     """Persist a lightweight engine overlap metrics snapshot."""
     write_metrics_snapshot(
@@ -221,7 +223,13 @@ def _write_discovery_engine_metrics(
         {
             "source_native": len(source_native_candidate_ids),
             "brave": len(brave_candidate_ids),
-            "shared_candidates": len(source_native_candidate_ids & brave_candidate_ids),
+            "exa": len(exa_candidate_ids),
+            "source_native_brave_shared": len(source_native_candidate_ids & brave_candidate_ids),
+            "source_native_exa_shared": len(source_native_candidate_ids & exa_candidate_ids),
+            "brave_exa_shared": len(brave_candidate_ids & exa_candidate_ids),
+            "shared_all_candidates": len(
+                source_native_candidate_ids & brave_candidate_ids & exa_candidate_ids
+            ),
         },
     )
 
@@ -357,6 +365,75 @@ async def _run_brave_discovery(
             )
         except Exception as exc:
             discovery_run.errors.append(f"brave: {type(exc).__name__}: {exc}")
+            discovered_candidates = []
+        return persist_discovered_candidates(
+            run=discovery_run,
+            discovered_candidates=discovered_candidates,
+            persistence=persistence,
+        )
+    finally:
+        await engine.aclose()
+        persistence.close()
+
+
+async def _run_exa_discovery(
+    *,
+    config: Config,
+    run_id: str,
+    days: int,
+) -> PersistedSourceDiscovery:
+    """Run Exa-powered discovery and persist candidates into the durable layer."""
+    queries = build_discovery_queries(config, days=days)
+    discovery_run = DiscoveryRun(
+        run_id=run_id,
+        dataset_name=config.dataset_name,
+        job_name=config.job_name,
+        status=DiscoveryRunStatus.RUNNING,
+        query_count=len(queries),
+    )
+    persistence = create_discovery_persistence(config)
+    if not queries:
+        try:
+            return persist_discovered_candidates(
+                run=discovery_run,
+                discovered_candidates=[],
+                persistence=persistence,
+            )
+        finally:
+            persistence.close()
+
+    exa_api_key = config.exa_api_key
+    if not exa_api_key:
+        discovery_run.errors.append("exa: missing DENBUST_EXA_API_KEY")
+        try:
+            return persist_discovered_candidates(
+                run=discovery_run,
+                discovered_candidates=[],
+                persistence=persistence,
+            )
+        finally:
+            persistence.close()
+
+    engine = ExaSearchEngine(
+        api_key=exa_api_key,
+        max_results_per_query=config.discovery.engines.exa.max_results_per_query,
+    )
+    try:
+        try:
+            discovered_candidates = await engine.discover(
+                queries,
+                context=DiscoveryContext(
+                    run_id=run_id,
+                    max_results_per_query=config.discovery.engines.exa.max_results_per_query,
+                    metadata={
+                        "days": days,
+                        "engine": "exa",
+                        "allow_find_similar": config.discovery.engines.exa.allow_find_similar,
+                    },
+                ),
+            )
+        except Exception as exc:
+            discovery_run.errors.append(f"exa: {type(exc).__name__}: {exc}")
             discovered_candidates = []
         return persist_discovered_candidates(
             run=discovery_run,
@@ -1008,12 +1085,18 @@ async def run_news_discover_job(
     result.source_count = len(sources)
     source_native_requested = config.source_discovery.enabled
     brave_requested = config.discovery.enabled and config.discovery.engines.brave.enabled
+    exa_requested = config.discovery.enabled and config.discovery.engines.exa.enabled
     source_native_can_run = (
         source_native_requested and config.source_discovery.persist_candidates and bool(sources)
     )
     brave_can_run = brave_requested and config.discovery.persist_candidates
+    exa_can_run = exa_requested and config.discovery.persist_candidates
 
-    if brave_requested and not config.discovery.persist_candidates and not source_native_can_run:
+    if (
+        (brave_requested or exa_requested)
+        and not config.discovery.persist_candidates
+        and not source_native_can_run
+    ):
         result.fatal = True
         result.errors.append("discovery.persist_candidates is false")
         return result.finish("fatal: engine candidate persistence disabled")
@@ -1021,15 +1104,16 @@ async def run_news_discover_job(
         source_native_requested
         and not config.source_discovery.persist_candidates
         and not brave_can_run
+        and not exa_can_run
     ):
         result.fatal = True
         result.errors.append("source_discovery.persist_candidates is false")
         return result.finish("fatal: source-native candidate persistence disabled")
-    if not source_native_requested and not brave_can_run:
+    if not source_native_requested and not brave_can_run and not exa_can_run:
         result.fatal = True
         result.errors.append("source_discovery.enabled is false")
         return result.finish("fatal: source-native discovery disabled")
-    if not sources and not brave_can_run:
+    if not sources and not brave_can_run and not exa_can_run:
         result.fatal = True
         result.errors.append("No sources configured")
         return result.finish("fatal: no sources configured")
@@ -1066,8 +1150,21 @@ async def run_news_discover_job(
             )
         )
 
+    if exa_can_run:
+        persisted_runs.append(
+            (
+                "exa",
+                await _run_exa_discovery(
+                    config=config,
+                    run_id=f"{run_base}:exa",
+                    days=days,
+                ),
+            )
+        )
+
     source_native_candidate_ids: set[str] = set()
     brave_candidate_ids: set[str] = set()
+    exa_candidate_ids: set[str] = set()
     merged_candidate_ids: set[str] = set()
     failed_runs = 0
     for producer_name, persisted in persisted_runs:
@@ -1087,6 +1184,10 @@ async def run_news_discover_job(
             brave_candidate_ids = {candidate.candidate_id for candidate in persisted.candidates}
             if persisted.run.status is DiscoveryRunStatus.PARTIAL:
                 result.warnings.append("brave discovery completed with partial engine failures")
+        if producer_name == "exa":
+            exa_candidate_ids = {candidate.candidate_id for candidate in persisted.candidates}
+            if persisted.run.status is DiscoveryRunStatus.PARTIAL:
+                result.warnings.append("exa discovery completed with partial engine failures")
         if persisted.run.status is DiscoveryRunStatus.FAILED:
             failed_runs += 1
 
@@ -1094,6 +1195,7 @@ async def run_news_discover_job(
         config,
         source_native_candidate_ids=source_native_candidate_ids,
         brave_candidate_ids=brave_candidate_ids,
+        exa_candidate_ids=exa_candidate_ids,
     )
     result.unified_item_count = len(merged_candidate_ids)
 
