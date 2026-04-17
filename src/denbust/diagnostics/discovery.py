@@ -10,7 +10,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from denbust.config import Config, OperationalProvider, load_config
-from denbust.discovery.models import CandidateStatus, PersistentCandidate, ScrapeAttempt
+from denbust.discovery.models import (
+    CandidateStatus,
+    FetchStatus,
+    PersistentCandidate,
+    ScrapeAttempt,
+)
 from denbust.discovery.state_paths import write_metrics_snapshot
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.ops.factory import create_operational_store
@@ -181,7 +186,11 @@ def build_discovery_diagnostic_report(
         if attempts_override is not None
         else _read_jsonl(paths.scrape_attempts_path, ScrapeAttempt)
     )
-    overlap_candidates = overlap_candidates_override or candidates
+    overlap_candidates = (
+        overlap_candidates_override
+        if overlap_candidates_override is not None
+        else candidates
+    )
     now = datetime.now(UTC)
     operational_urls: set[str] = set()
     operational_notes: list[str] = []
@@ -216,7 +225,11 @@ def build_discovery_diagnostic_report(
         report.notes.append("No persisted discovery candidates were found.")
     if not attempts:
         report.notes.append("No persisted scrape attempts were found.")
-    if not operational_urls and config.operational.provider is not OperationalProvider.NONE:
+    if (
+        include_operational_matches
+        and not operational_urls
+        and config.operational.provider is not OperationalProvider.NONE
+    ):
         report.notes.append(
             "No operational records were available for candidate-to-news-item matching."
         )
@@ -563,7 +576,7 @@ def _build_failure_summaries(
     candidate_by_id = {candidate.candidate_id: candidate for candidate in candidates}
     counts: Counter[str] = Counter()
     for attempt in attempts:
-        if attempt.fetch_status.value == "success":
+        if attempt.fetch_status is FetchStatus.SUCCESS:
             continue
         candidate = candidate_by_id.get(attempt.candidate_id)
         if key == "source":

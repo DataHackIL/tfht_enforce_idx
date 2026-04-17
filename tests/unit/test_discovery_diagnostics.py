@@ -243,6 +243,59 @@ def test_build_discovery_diagnostic_report_notes_when_operational_records_missin
     )
 
 
+def test_build_discovery_diagnostic_report_respects_empty_overlap_override(
+    tmp_path: Path,
+) -> None:
+    """An explicit empty overlap override should not fall back to durable candidates."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    StateRepoDiscoveryPersistence(config.discovery_state_paths).upsert_candidates(
+        [
+            _candidate(
+                "candidate-1",
+                url="https://www.ynet.co.il/news/article/1",
+                discovered_via=["ynet", "brave"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        overlap_candidates_override=[],
+    )
+
+    assert report.engine_overlap.source_native == 0
+    assert report.engine_overlap.brave == 0
+    assert report.source_search_coverage.total_candidates == 1
+
+
+def test_build_discovery_diagnostic_report_skipped_operational_matching_omits_missing_note(
+    tmp_path: Path,
+) -> None:
+    """Skip-mode should not also claim that no operational records were available."""
+    config = Config(
+        store={"state_root": tmp_path},
+        operational={
+            "provider": OperationalProvider.LOCAL_JSON,
+            "root_dir": tmp_path / "operational",
+        },
+    )
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        include_operational_matches=False,
+    )
+
+    assert "Operational record matching was skipped for this diagnostics artifact." in report.notes
+    assert (
+        "No operational records were available for candidate-to-news-item matching."
+        not in report.notes
+    )
+
+
 def test_render_discovery_diagnostic_report_includes_notes(tmp_path: Path) -> None:
     """Rendered reports should include notes when present."""
     config = Config(store={"state_root": tmp_path})
