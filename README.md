@@ -252,9 +252,18 @@ DL-PR-06 now builds on the earlier discovery milestones:
   - `candidate_provenance`
   - `scrape_attempts`
 
-The generic fetch/extract fallback remains scaffolded structurally for retry bookkeeping. The
-current daily monitoring flow remains operational, and the durable candidate substrate now accepts
-source-native discovery plus Brave, Exa, and Google CSE search results.
+The current daily monitoring flow remains operational, and the durable candidate substrate now
+accepts source-native discovery plus Brave, Exa, and Google CSE search results.
+
+DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
+
+- source-adapter successes now persist `content_basis = full_article_page`
+- generic fetch fallback can retain `content_basis = partial_page` when page metadata is recoverable
+- failed full scrapes can retain `content_basis = search_result_only` using discovery metadata
+- retained fallback candidates can materialize provisional internal-only `news_items` rows for
+  monitoring and review, while staying excluded from public release by default
+- discovery diagnostics now report candidate-basis counts so operators can distinguish full-page,
+  partial-page, and search-result-only retention
 
 ## Config Layout
 

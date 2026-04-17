@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from denbust.data_models import Category, SubCategory, UnifiedItem
+from denbust.discovery.models import ContentBasis
 from denbust.models.policies import (
     PrivacyRisk,
     PublicationStatus,
@@ -81,6 +82,8 @@ class NewsItemOperationalRecord(NewsItemPublicRecord):
     source_urls: list[str] = Field(default_factory=list)
     source_count: int = 1
     classification_confidence: str | None = None
+    record_confidence: str | None = None
+    content_basis: ContentBasis = ContentBasis.FULL_ARTICLE_PAGE
     suppression_reason: str | None = None
     summary_generation_model: str | None = None
     privacy_reason: str | None = None
@@ -97,6 +100,8 @@ class NewsItemOperationalRecord(NewsItemPublicRecord):
             "source_urls",
             "source_count",
             "classification_confidence",
+            "record_confidence",
+            "content_basis",
             "suppression_reason",
             "summary_generation_model",
             "privacy_reason",
@@ -170,6 +175,8 @@ class NewsItemOperationalRecord(NewsItemPublicRecord):
             source_urls=source_urls,
             source_count=len(source_urls),
             classification_confidence=classification_confidence,
+            record_confidence=classification_confidence or "medium",
+            content_basis=ContentBasis.FULL_ARTICLE_PAGE,
             suppression_reason=suppression_reason,
             summary_generation_model=summary_generation_model,
             privacy_reason=privacy_reason or enrichment.privacy_reason,

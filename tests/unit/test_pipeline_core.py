@@ -25,6 +25,7 @@ from denbust.data_models import (
 )
 from denbust.discovery.models import (
     CandidateStatus,
+    ContentBasis,
     DiscoveryRun,
     DiscoveryRunStatus,
     PersistentCandidate,
@@ -33,7 +34,8 @@ from denbust.discovery.scrape_queue import CandidateScrapeBatch
 from denbust.discovery.source_native import PersistedSourceDiscovery
 from denbust.discovery.storage import StateRepoDiscoveryPersistence
 from denbust.models.common import DatasetName, JobName
-from denbust.models.policies import PrivacyRisk
+from denbust.models.policies import PrivacyRisk, PublicationStatus, ReviewStatus
+from denbust.news_items.models import NewsItemEnrichment, NewsItemOperationalRecord
 from denbust.ops.storage import LocalJsonOperationalStore
 from denbust.pipeline import (
     _build_classifier_summary,
@@ -1421,6 +1423,7 @@ class TestRunPipelineAsync:
         scrape_batch = CandidateScrapeBatch(
             selected_candidates=[],
             updated_candidates=[],
+            fallback_candidates=[],
             attempts=[],
             raw_articles=[source_scraped],
             errors=[],
@@ -1500,6 +1503,7 @@ class TestRunPipelineAsync:
                 return_value=CandidateScrapeBatch(
                     selected_candidates=[MagicMock()],
                     updated_candidates=[],
+                    fallback_candidates=[],
                     attempts=[],
                     raw_articles=[raw_article],
                     errors=["candidate-1: generic fetch fallback not implemented yet"],
@@ -1531,6 +1535,159 @@ class TestRunPipelineAsync:
         mark_seen_mock.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_upserts_fallback_rows_without_marking_seen(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Fallback candidates should become provisional internal rows and remain unseen."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        seen_store = MagicMock(count=0)
+        fallback_candidate = build_persistent_candidate(
+            "candidate-fallback",
+            current_url="https://example.com/fallback",
+        ).model_copy(
+            update={
+                "content_basis": ContentBasis.SEARCH_RESULT_ONLY,
+                "metadata": {
+                    "fallback_title": "כותרת מגוגל",
+                    "fallback_snippet": "תקציר מגוגל",
+                    "fallback_source_name": "brave",
+                },
+            }
+        )
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[
+                build_classified_article("https://example.com/fallback", relevant=True),
+            ]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
+        )
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline._run_candidate_scrape_job",
+            AsyncMock(
+                return_value=CandidateScrapeBatch(
+                    selected_candidates=[fallback_candidate],
+                    updated_candidates=[fallback_candidate],
+                    fallback_candidates=[fallback_candidate],
+                    attempts=[],
+                    raw_articles=[],
+                    errors=[],
+                )
+            ),
+        )
+        mark_seen_mock = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.mark_seen", mark_seen_mock)
+        operational_store = LocalJsonOperationalStore(tmp_path / "ops")
+
+        result = await run_news_scrape_candidates_job(
+            Config(job_name=JobName.SCRAPE_CANDIDATES),
+            operational_store=operational_store,
+        )
+
+        rows = operational_store.fetch_records("news_items")
+        assert result.result_summary == "fallback retention completed with 1 provisional row(s)"
+        assert result.unified_item_count == 1
+        assert mark_seen_mock.call_count == 0
+        assert len(rows) == 1
+        assert rows[0]["publication_status"] == PublicationStatus.INTERNAL_ONLY.value
+        assert rows[0]["review_status"] == ReviewStatus.NEEDS_FACT_REVIEW.value
+        assert rows[0]["content_basis"] == ContentBasis.SEARCH_RESULT_ONLY.value
+        assert rows[0]["record_confidence"] == "low"
+        assert rows[0]["event_candidate_ids"] == ["candidate-fallback"]
+
+    @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_upgrades_existing_fallback_row_in_place(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A later full scrape should overwrite the provisional fallback row for the same URL."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        seen_store = MagicMock(count=0)
+        raw_article = build_raw_article("https://example.com/upgraded")
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[build_classified_article("https://example.com/upgraded", relevant=True)]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
+        )
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline._run_candidate_scrape_job",
+            AsyncMock(
+                return_value=CandidateScrapeBatch(
+                    selected_candidates=[MagicMock()],
+                    updated_candidates=[],
+                    fallback_candidates=[],
+                    attempts=[],
+                    raw_articles=[raw_article],
+                    errors=[],
+                )
+            ),
+        )
+        monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
+        monkeypatch.setattr(
+            "denbust.pipeline.deduplicate_articles",
+            lambda _articles, _deduplicator: [build_unified_item("https://example.com/upgraded")],
+        )
+        full_record = NewsItemOperationalRecord.from_unified_item(
+            build_unified_item("https://example.com/upgraded"),
+            retrieval_datetime=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+            enrichment=NewsItemEnrichment(
+                summary_one_sentence="סיכום מלא",
+                topic_tags=["brothel", "closure"],
+            ),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.build_operational_records",
+            AsyncMock(return_value=[full_record]),
+        )
+        mark_seen_mock = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.mark_seen", mark_seen_mock)
+        operational_store = LocalJsonOperationalStore(tmp_path / "ops")
+        operational_store.upsert_records(
+            "news_items",
+            [
+                NewsItemOperationalRecord.from_unified_item(
+                    build_unified_item("https://example.com/upgraded"),
+                    retrieval_datetime=datetime(2026, 4, 11, 8, 0, tzinfo=UTC),
+                    enrichment=NewsItemEnrichment(
+                        summary_one_sentence="סיכום זמני",
+                        topic_tags=["candidate-fallback"],
+                    ),
+                    review_status=ReviewStatus.NEEDS_FACT_REVIEW,
+                    publication_status=PublicationStatus.INTERNAL_ONLY,
+                )
+                .model_copy(
+                    update={
+                        "content_basis": ContentBasis.SEARCH_RESULT_ONLY,
+                        "record_confidence": "low",
+                        "event_candidate_ids": ["candidate-fallback"],
+                    }
+                )
+                .model_dump(mode="json")
+            ],
+        )
+
+        await run_news_scrape_candidates_job(
+            Config(job_name=JobName.SCRAPE_CANDIDATES),
+            operational_store=operational_store,
+        )
+
+        rows = operational_store.fetch_records("news_items")
+        assert len(rows) == 1
+        assert rows[0]["content_basis"] == ContentBasis.FULL_ARTICLE_PAGE.value
+        assert rows[0]["publication_status"] == PublicationStatus.APPROVED.value
+        assert rows[0]["review_status"] == ReviewStatus.NONE.value
+        assert rows[0]["record_confidence"] == "medium"
+        mark_seen_mock.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_run_candidate_scrape_job_selects_candidates_and_closes_persistence(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1550,6 +1707,7 @@ class TestRunPipelineAsync:
             return_value=CandidateScrapeBatch(
                 selected_candidates=selected_candidates,
                 updated_candidates=[],
+                fallback_candidates=[],
                 attempts=[],
                 raw_articles=[],
                 errors=[],
@@ -1682,6 +1840,7 @@ class TestRunPipelineAsync:
                 return_value=CandidateScrapeBatch(
                     selected_candidates=[],
                     updated_candidates=[],
+                    fallback_candidates=[],
                     attempts=[],
                     raw_articles=[],
                     errors=[],
@@ -1718,6 +1877,7 @@ class TestRunPipelineAsync:
             return CandidateScrapeBatch(
                 selected_candidates=[],
                 updated_candidates=[],
+                fallback_candidates=[],
                 attempts=[],
                 raw_articles=[],
                 errors=[],

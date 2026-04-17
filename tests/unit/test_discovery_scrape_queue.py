@@ -10,9 +10,15 @@ from pydantic import HttpUrl
 
 from denbust.config import Config
 from denbust.data_models import RawArticle
-from denbust.discovery.models import CandidateStatus, FetchStatus, PersistentCandidate
+from denbust.discovery.models import (
+    CandidateStatus,
+    ContentBasis,
+    FetchStatus,
+    PersistentCandidate,
+)
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
+    GenericFetchResult,
     scrape_candidates,
     select_candidates_for_scrape,
 )
@@ -179,6 +185,7 @@ async def test_scrape_candidates_returns_empty_batch_for_no_candidates(tmp_path:
 
     assert batch.selected_candidates == []
     assert batch.updated_candidates == []
+    assert batch.fallback_candidates == []
     assert batch.attempts == []
     assert batch.raw_articles == []
     assert batch.errors == []
@@ -203,7 +210,9 @@ async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path:
     stored = store.get_candidate("candidate-1")
     assert stored is not None
     assert stored.candidate_status is CandidateStatus.SCRAPE_SUCCEEDED
+    assert stored.content_basis is ContentBasis.FULL_ARTICLE_PAGE
     assert stored.scrape_attempt_count == 1
+    assert batch.fallback_candidates == []
     assert len(batch.raw_articles) == 1
     assert len(batch.attempts) == 1
     assert batch.attempts[0].fetch_status is FetchStatus.SUCCESS
@@ -217,24 +226,41 @@ async def test_scrape_candidates_retains_failed_candidate_for_retry(tmp_path: Pa
     candidate = build_candidate("candidate-2", status=CandidateStatus.SCRAPE_FAILED)
     store.upsert_candidates([candidate])
     source = FakeSource("ynet", [])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    batch = await scrape_candidates(
-        config=Config(store={"state_root": tmp_path}),
-        persistence=store,
-        candidates=[candidate],
-        sources=[source],
-    )
+    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+        return GenericFetchResult(
+            fetch_status=FetchStatus.FAILED,
+            error_code="generic_fetch_failed",
+            error_message="Generic fetch failed",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        batch = await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[source],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
 
     stored = store.get_candidate("candidate-2")
     assert stored is not None
     assert stored.candidate_status is CandidateStatus.SCRAPE_FAILED
+    assert stored.content_basis is ContentBasis.SEARCH_RESULT_ONLY
     assert stored.scrape_attempt_count == 2
     assert stored.next_scrape_attempt_at is not None
+    assert stored.needs_review is True
+    assert stored.self_heal_eligible is True
     assert [attempt.fetch_status for attempt in batch.attempts] == [
         FetchStatus.FAILED,
-        FetchStatus.UNSUPPORTED,
+        FetchStatus.FAILED,
     ]
     assert batch.raw_articles == []
+    assert [candidate.candidate_id for candidate in batch.fallback_candidates] == ["candidate-2"]
     assert len(store.list_attempts("candidate-2")) == 2
 
 
@@ -250,13 +276,26 @@ async def test_scrape_candidates_accumulates_attempt_count_across_retries(tmp_pa
     )
     store.upsert_candidates([candidate])
     source = FakeSource("ynet", [])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    batch = await scrape_candidates(
-        config=Config(store={"state_root": tmp_path}),
-        persistence=store,
-        candidates=[candidate],
-        sources=[source],
-    )
+    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+        return GenericFetchResult(
+            fetch_status=FetchStatus.FAILED,
+            error_code="generic_fetch_failed",
+            error_message="Generic fetch failed",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        batch = await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[source],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
 
     stored = store.get_candidate("candidate-3")
     assert stored is not None
@@ -266,8 +305,8 @@ async def test_scrape_candidates_accumulates_attempt_count_across_retries(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_scrape_candidates_marks_unknown_sources_as_unsupported(tmp_path: Path) -> None:
-    """Candidates without a matching source adapter should become unsupported."""
+async def test_scrape_candidates_retains_unknown_sources_as_search_results(tmp_path: Path) -> None:
+    """Candidates without a matching source adapter should retain search-result-only metadata."""
     store = build_store(tmp_path)
     candidate = build_candidate(
         "candidate-4",
@@ -276,20 +315,73 @@ async def test_scrape_candidates_marks_unknown_sources_as_unsupported(tmp_path: 
         current_url="https://unknown.example.com/article",
         canonical_url="https://unknown.example.com/article",
     )
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    batch = await scrape_candidates(
-        config=Config(store={"state_root": tmp_path}),
-        persistence=store,
-        candidates=[candidate],
-        sources=[],
-    )
+    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+        return GenericFetchResult(
+            fetch_status=FetchStatus.FAILED,
+            error_code="generic_fetch_failed",
+            error_message="Generic fetch failed",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        batch = await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
 
     stored = store.get_candidate("candidate-4")
     assert stored is not None
-    assert stored.candidate_status is CandidateStatus.UNSUPPORTED_SOURCE
+    assert stored.candidate_status is CandidateStatus.SCRAPE_FAILED
+    assert stored.content_basis is ContentBasis.SEARCH_RESULT_ONLY
+    assert stored.next_scrape_attempt_at is not None
+    assert len(batch.attempts) == 1
+    assert batch.attempts[0].fetch_status is FetchStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_scrape_candidates_retains_partial_page_metadata(tmp_path: Path) -> None:
+    """Generic fetches with limited metadata should become partial-page fallback rows."""
+    store = build_store(tmp_path)
+    candidate = build_candidate("candidate-5", status=CandidateStatus.NEW)
+    store.upsert_candidates([candidate])
+    source = FakeSource("ynet", [])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+        return GenericFetchResult(
+            fetch_status=FetchStatus.PARTIAL,
+            title="כותרת חלקית",
+            snippet="תיאור חלקי",
+            publication_datetime=datetime(2026, 4, 11, 12, 0, tzinfo=UTC),
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        batch = await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[source],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    stored = store.get_candidate("candidate-5")
+    assert stored is not None
+    assert stored.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    assert stored.content_basis is ContentBasis.PARTIAL_PAGE
     assert stored.next_scrape_attempt_at is None
-    assert len(batch.attempts) == 2
-    assert batch.attempts[0].fetch_status is FetchStatus.UNSUPPORTED
+    assert stored.needs_review is True
+    assert stored.self_heal_eligible is False
+    assert [candidate.candidate_id for candidate in batch.fallback_candidates] == ["candidate-5"]
 
 
 @pytest.mark.asyncio
@@ -313,18 +405,31 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
             "mako",
             [
                 build_raw_article(
-                    "https://www.mako.co.il/news/article/ok?utm_source=test", source_name="mako"
+            "https://www.mako.co.il/news/article/ok?utm_source=test", source_name="mako"
                 )
             ],
         ),
     ]
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    batch = await scrape_candidates(
-        config=Config(store={"state_root": tmp_path}),
-        persistence=store,
-        candidates=[failing_candidate, succeeding_candidate],
-        sources=sources,
-    )
+    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+        return GenericFetchResult(
+            fetch_status=FetchStatus.FAILED,
+            error_code="generic_fetch_failed",
+            error_message="Generic fetch failed",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        batch = await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[failing_candidate, succeeding_candidate],
+            sources=sources,
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
 
     failed = store.get_candidate("candidate-fail")
     succeeded = store.get_candidate("candidate-ok")
