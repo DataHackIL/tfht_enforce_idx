@@ -16,7 +16,7 @@ from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
 from denbust.datasets.jobs import ensure_default_jobs_registered
 from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
-from denbust.diagnostics import (
+from denbust.diagnostics.discovery import (
     build_discovery_diagnostic_report,
     persist_discovery_diagnostic_artifacts,
 )
