@@ -238,6 +238,9 @@ The initial three-engine discovery layer is complete:
 ### Goal
 Make the new layer measurable and debuggable.
 
+### Status
+Implemented.
+
 ### Scope
 - Add engine overlap report generation
 - Add source-native vs search-engine recall reporting

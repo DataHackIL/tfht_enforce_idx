@@ -41,6 +41,8 @@ Planned future datasets:
 - Scaffolds a persistent discovery/candidacy layer with dedicated Supabase tables and state-repo
   paths under `news_items/discover/`
 - Runs Brave, Exa, and Google CSE as external discovery engines feeding the durable candidate layer
+- Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
+  `denbust diagnose-discovery`
 - Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
 
 ## Quick Start
@@ -49,6 +51,7 @@ Planned future datasets:
 pip install -e ".[dev]"
 python -m playwright install chromium
 denbust scan --config agents/news/local.yaml
+denbust diagnose-discovery --config agents/news/local.yaml
 denbust release --config agents/release/news_items.yaml
 denbust backup --config agents/backup/news_items.yaml
 ```
@@ -542,9 +545,20 @@ For backup specifically:
 
 ## Documentation
 
+- [Agent Plan](.agent-plan.md) - Current operational priority pointer
+- [Repo Plan Summary](PLAN.md) - Human-friendly map of the main plan and active sub-plans
 - [Product Definition](docs/product_def.md) - Full project background (Hebrew)
 - [MVP Spec](docs/MVP_SPEC.md) - Phase 1 technical scope
 - [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) - Task breakdown
+- [Discovery Layer Rollout Plan](docs/tfht_discovery_layer_implementation_plan.md) - `DL-PR-*` sequence
+
+## Planning Workflow
+
+- When a PR is opened against a tracked plan item, the PR should update `.agent-plan.md`,
+  `README.md`, and the relevant human-facing plan document(s) in the same branch.
+- Those documentation updates should describe the state the repo is expected to be in after the PR
+  is merged, not the pre-merge state from before the work landed.
+- Plan-tracked PRs should not leave planning and docs surfaces one merge behind the code.
 
 ## Roadmap
 

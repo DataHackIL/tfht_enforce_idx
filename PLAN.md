@@ -26,40 +26,29 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: `DL-PR-07`
+## Current Next Focus: Post-`DL-PR-07` Discovery Work
 
-`DL-PR-07` is the next planned discovery-layer step. Its purpose is to make the discovery/candidacy layer measurable and debuggable, building on the existing `DL-PR-01` through `DL-PR-06` foundation.
+`DL-PR-07` is now merged via PR `#82`. The next default discovery-layer step in the rollout plan is `DL-PR-08`, while `DL-PR-09` remains queued immediately after it unless priorities are explicitly reordered.
 
-### What already exists
+### What `DL-PR-07` delivered
 
 - Candidate persistence, scrape attempts, and queue state already exist under `src/denbust/discovery/`.
 - A lightweight overlap artifact already exists at `state_repo/.../metrics/engine_overlap_latest.json`.
 - Discovery overlap/diagnostics generation already flows through `src/denbust/diagnostics/discovery.py`; the pipeline no longer keeps separate per-engine candidate ID sets.
 - The repo already has a diagnostics pattern in `src/denbust/diagnostics/source_health.py` and `src/denbust/cli.py`.
+- Discovery diagnostics now also emit a fuller `discovery_diagnostics_latest.json` artifact and a `denbust diagnose-discovery` CLI entry point.
 
-### What `DL-PR-07` still needs
+### What comes next
 
-1. Introduce a dedicated discovery diagnostics/reporting module under `src/denbust/diagnostics/` for discovery-layer observability.
-2. Define typed report models for:
-   - engine overlap
-   - source-native vs search-engine recall/coverage
-   - candidate-to-news-item conversion
-   - queue health
-3. Expand discovery metrics outputs beyond `engine_overlap_latest.json` to include a coherent report artifact set under `src/denbust/discovery/state_paths.py`.
-4. Add queue-health calculations from persisted candidates and scrape attempts:
-   - new candidates
-   - stale candidates
-   - failed candidates
-   - retry backlog
-5. Add conversion metrics from candidate state and downstream ingest results:
-   - scrape succeeded
-   - scrape failed
-   - partially scraped
-   - unsupported source
-   - candidate-to-news-item conversion counts/rates
-6. Add source-native vs search-engine coverage reporting using current candidate provenance and discovered-via metadata.
-7. Add a CLI entry point in `src/denbust/cli.py` for discovery diagnostics, following the same text/JSON pattern used by `diagnose-sources`.
-8. Add unit tests for report generation, artifact writing, and CLI behavior.
+1. `DL-PR-08` is the default next discovery PR in the rollout plan:
+   - search-result-only fallback rows
+   - partial retention
+   - lower-confidence review/publication handling
+2. `DL-PR-09` remains the next queued follow-up after that:
+   - backfill batches
+   - historical query generation
+   - backfill discover/scrape jobs
+3. Phase C follow-through is still open in parallel, so `.agent-plan.md` should be treated as the operational priority pointer when sequencing work.
 
 ### Likely code touchpoints
 
@@ -76,6 +65,11 @@ This repo currently has one main plan and two important sub-plans.
 
 ### Scope guardrails
 
-- Do not add backfill logic yet; that belongs to `DL-PR-09`.
+- Do not fold `DL-PR-09` backfill work into the next PR unless priorities are explicitly changed.
 - Do not add self-healing or event-table work yet.
-- Keep this PR focused on observability/reporting, not on changing scrape semantics or public-release policy.
+- Keep the next discovery PR focused on its slice rather than mixing in workflow rollout or later-stage architecture work.
+
+## Planning Workflow
+
+- When a PR is opened against a tracked plan item, the PR itself should update `.agent-plan.md`, `README.md`, and any relevant human-facing plan document so the repository reflects the state expected after that PR is merged.
+- Plan-tracked PRs should land with both implementation and planning/docs state aligned in the same merge.
