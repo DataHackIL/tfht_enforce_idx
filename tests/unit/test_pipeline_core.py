@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ from denbust.discovery.models import (
 )
 from denbust.discovery.scrape_queue import CandidateScrapeBatch
 from denbust.discovery.source_native import PersistedSourceDiscovery
+from denbust.discovery.storage import StateRepoDiscoveryPersistence
 from denbust.models.common import DatasetName, JobName
 from denbust.models.policies import PrivacyRisk
 from denbust.ops.storage import LocalJsonOperationalStore
@@ -1861,9 +1863,13 @@ class TestRunPipelineAsync:
         metrics_payload = (
             tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
         ).read_text(encoding="utf-8")
+        diagnostics_payload = (
+            tmp_path / "news_items" / "discover" / "metrics" / "discovery_diagnostics_latest.json"
+        ).read_text(encoding="utf-8")
         assert '"brave": 2' in metrics_payload
         assert '"source_native": 0' in metrics_payload
         assert '"exa": 0' in metrics_payload
+        assert '"dataset_name": "news_items"' in diagnostics_payload
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_supports_exa_only_and_writes_metrics(
@@ -2264,11 +2270,143 @@ class TestRunPipelineAsync:
         metrics_payload = (
             tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
         ).read_text(encoding="utf-8")
+        diagnostics_payload = (
+            tmp_path / "news_items" / "discover" / "metrics" / "discovery_diagnostics_latest.json"
+        ).read_text(encoding="utf-8")
         assert '"google_cse": 2' in metrics_payload
         assert '"source_native_google_cse_shared": 1' in metrics_payload
         assert '"brave_google_cse_shared": 1' in metrics_payload
         assert '"exa_google_cse_shared": 1' in metrics_payload
         assert '"shared_all_candidates": 1' in metrics_payload
+        assert '"shared_candidates": 1' in diagnostics_payload
+
+    @pytest.mark.asyncio
+    async def test_run_news_discover_job_uses_durable_diagnostics_and_run_overlap_metrics(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Diagnostics should come from durable state while overlap stays scoped to this run."""
+        config = Config(
+            store={"state_root": tmp_path},
+            operational={
+                "provider": "local_json",
+                "root_dir": tmp_path / "operational",
+            },
+            discovery={"enabled": True, "engines": {"brave": {"enabled": True}}},
+        )
+        persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+        persistence.upsert_candidates(
+            [
+                build_persistent_candidate(
+                    "candidate-shared",
+                    current_url="https://www.ynet.co.il/news/article/shared",
+                ).model_copy(update={"discovered_via": ["exa"]}),
+            ]
+        )
+        LocalJsonOperationalStore(tmp_path / "operational").upsert_records(
+            "news_items",
+            [
+                {
+                    "id": "news-item-1",
+                    "canonical_url": "https://www.ynet.co.il/news/article/shared",
+                    "publication_datetime": datetime.now(UTC).isoformat(),
+                }
+            ],
+        )
+
+        async def fake_run_source_native_discovery(
+            *,
+            config: Config,
+            sources: list[object],
+            run_id: str,
+            days: int,
+        ) -> PersistedSourceDiscovery:
+            del config, sources, days
+            candidate = build_persistent_candidate(
+                "candidate-shared",
+                current_url="https://www.ynet.co.il/news/article/shared",
+            ).model_copy(update={"discovered_via": ["exa", "source_native"]})
+            persistence.upsert_candidates([candidate])
+            return PersistedSourceDiscovery(
+                run=DiscoveryRun(
+                    run_id=run_id,
+                    dataset_name=DatasetName.NEWS_ITEMS,
+                    job_name=JobName.DISCOVER,
+                    status=DiscoveryRunStatus.SUCCEEDED,
+                    candidate_count=1,
+                    merged_candidate_count=1,
+                ),
+                candidates=[candidate],
+                provenance=[],
+            )
+
+        async def fake_run_brave_discovery(
+            *,
+            config: Config,
+            run_id: str,
+            days: int,
+        ) -> PersistedSourceDiscovery:
+            del config, days
+            candidate = build_persistent_candidate(
+                "candidate-brave-only",
+                current_url="https://www.mako.co.il/news/article/brave-only",
+            ).model_copy(update={"discovered_via": ["brave"]})
+            persistence.upsert_candidates([candidate])
+            return PersistedSourceDiscovery(
+                run=DiscoveryRun(
+                    run_id=run_id,
+                    dataset_name=DatasetName.NEWS_ITEMS,
+                    job_name=JobName.DISCOVER,
+                    status=DiscoveryRunStatus.SUCCEEDED,
+                    candidate_count=1,
+                    merged_candidate_count=1,
+                ),
+                candidates=[candidate],
+                provenance=[],
+            )
+
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [MagicMock(name="ynet")]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_source_native_discovery",
+            fake_run_source_native_discovery,
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_brave_discovery",
+            fake_run_brave_discovery,
+        )
+
+        result = await run_news_discover_job(config)
+
+        assert result.fatal is False
+        metrics_payload = json.loads(
+            (
+                tmp_path / "news_items" / "discover" / "metrics" / "engine_overlap_latest.json"
+            ).read_text(encoding="utf-8")
+        )
+        diagnostics_payload = json.loads(
+            (
+                tmp_path
+                / "news_items"
+                / "discover"
+                / "metrics"
+                / "discovery_diagnostics_latest.json"
+            ).read_text(encoding="utf-8")
+        )
+        per_producer = {
+            entry["producer_name"]: entry
+            for entry in diagnostics_payload["candidate_conversion"]["per_producer"]
+        }
+
+        assert metrics_payload["exa"] == 0
+        assert metrics_payload["source_native"] == 1
+        assert metrics_payload["brave"] == 1
+        assert per_producer["exa"]["candidate_count"] == 1
+        assert diagnostics_payload["operational_records_available"] is False
+        assert any(
+            "Operational record matching was skipped" in note
+            for note in diagnostics_payload["notes"]
+        )
 
     @pytest.mark.asyncio
     async def test_run_news_discover_job_marks_brave_failure_fatal_when_it_is_the_only_engine(

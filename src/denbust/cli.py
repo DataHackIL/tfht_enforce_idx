@@ -138,6 +138,47 @@ def diagnose_sources(
     typer.echo(render_source_diagnostic_report(report))
 
 
+@app.command("diagnose-discovery")
+def diagnose_discovery(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+    stale_days: Annotated[
+        int,
+        typer.Option("--stale-days", help="Age threshold for stale queued candidates"),
+    ] = 7,
+    format: Annotated[
+        DiagnosticOutputFormat,
+        typer.Option("--format", help="Output format"),
+    ] = DiagnosticOutputFormat.TEXT,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Optional JSON output path"),
+    ] = None,
+) -> None:
+    """Summarize discovery-layer overlap, queue health, and conversion diagnostics."""
+    from denbust.diagnostics import (
+        render_discovery_diagnostic_report,
+        run_discovery_diagnostics,
+    )
+
+    config_path = config or Path("agents/news/local.yaml")
+    report = run_discovery_diagnostics(
+        config_path=config_path,
+        stale_after_days=stale_days,
+    )
+
+    if output is not None:
+        output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+
+    if format == DiagnosticOutputFormat.JSON:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+
+    typer.echo(render_discovery_diagnostic_report(report))
+
+
 @app.command()
 def release(
     dataset: Annotated[

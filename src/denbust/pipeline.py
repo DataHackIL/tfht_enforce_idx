@@ -16,6 +16,10 @@ from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
 from denbust.datasets.jobs import ensure_default_jobs_registered
 from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
+from denbust.diagnostics.discovery import (
+    build_discovery_diagnostic_report,
+    persist_discovery_diagnostic_artifacts,
+)
 from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
 from denbust.discovery.engines.brave import BraveSearchEngine
 from denbust.discovery.engines.exa import ExaSearchEngine
@@ -33,7 +37,6 @@ from denbust.discovery.source_native import (
     persist_discovered_candidates,
     raw_article_to_discovered_candidate,
 )
-from denbust.discovery.state_paths import write_metrics_snapshot
 from denbust.discovery.storage import create_discovery_persistence
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
@@ -48,7 +51,7 @@ from denbust.news_items.ingest import (
     parse_suppression_rules,
     summarize_privacy_mix,
 )
-from denbust.news_items.normalize import canonicalize_news_url
+from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.news_items.publication import publish_release_bundle
 from denbust.news_items.release import (
     NewsItemsReleaseBuilder,
@@ -211,38 +214,31 @@ def _group_articles_by_source(articles: list[RawArticle]) -> dict[str, list[RawA
     return dict(grouped)
 
 
-def _write_discovery_engine_metrics(
+def _write_discovery_diagnostic_artifacts(
     config: Config,
     *,
-    source_native_candidate_ids: set[str],
-    brave_candidate_ids: set[str],
-    exa_candidate_ids: set[str],
-    google_cse_candidate_ids: set[str],
+    config_path: Path | None,
+    overlap_candidates: list[PersistentCandidate],
 ) -> None:
-    """Persist a lightweight engine overlap metrics snapshot."""
-    write_metrics_snapshot(
-        config.discovery_state_paths.engine_overlap_latest_path,
-        {
-            "source_native": len(source_native_candidate_ids),
-            "brave": len(brave_candidate_ids),
-            "exa": len(exa_candidate_ids),
-            "google_cse": len(google_cse_candidate_ids),
-            "source_native_brave_shared": len(source_native_candidate_ids & brave_candidate_ids),
-            "source_native_exa_shared": len(source_native_candidate_ids & exa_candidate_ids),
-            "source_native_google_cse_shared": len(
-                source_native_candidate_ids & google_cse_candidate_ids
-            ),
-            "brave_exa_shared": len(brave_candidate_ids & exa_candidate_ids),
-            "brave_google_cse_shared": len(brave_candidate_ids & google_cse_candidate_ids),
-            "exa_google_cse_shared": len(exa_candidate_ids & google_cse_candidate_ids),
-            "shared_all_candidates": len(
-                source_native_candidate_ids
-                & brave_candidate_ids
-                & exa_candidate_ids
-                & google_cse_candidate_ids
-            ),
-        },
-    )
+    """Persist the latest discovery diagnostics and overlap artifacts."""
+    persisted_candidates_available = config.discovery_state_paths.latest_candidates_path.exists()
+    persisted_attempts_available = config.discovery_state_paths.scrape_attempts_path.exists()
+    if persisted_candidates_available or persisted_attempts_available:
+        report = build_discovery_diagnostic_report(
+            config=config,
+            config_path=config_path,
+            overlap_candidates_override=overlap_candidates,
+            include_operational_matches=False,
+        )
+    else:
+        report = build_discovery_diagnostic_report(
+            config=config,
+            config_path=config_path,
+            candidates_override=overlap_candidates,
+            overlap_candidates_override=overlap_candidates,
+            include_operational_matches=False,
+        )
+    persist_discovery_diagnostic_artifacts(config=config, report=report)
 
 
 async def _persist_source_native_candidates(
@@ -1270,50 +1266,59 @@ async def run_news_discover_job(
             )
         )
 
-    source_native_candidate_ids: set[str] = set()
-    brave_candidate_ids: set[str] = set()
-    exa_candidate_ids: set[str] = set()
-    google_cse_candidate_ids: set[str] = set()
     merged_candidate_ids: set[str] = set()
+    merged_candidates_by_id: dict[str, PersistentCandidate] = {}
+    overlap_producers_by_candidate_id: dict[str, list[str]] = {}
     failed_runs = 0
     for producer_name, persisted in persisted_runs:
         result.raw_article_count += persisted.run.candidate_count
         result.unseen_article_count += persisted.run.candidate_count
         merged_candidate_ids.update(candidate.candidate_id for candidate in persisted.candidates)
+        for candidate in persisted.candidates:
+            existing_candidate = merged_candidates_by_id.get(candidate.candidate_id)
+            overlap_producers_by_candidate_id[candidate.candidate_id] = deduplicate_strings(
+                [
+                    *overlap_producers_by_candidate_id.get(candidate.candidate_id, []),
+                    producer_name,
+                ]
+            )
+            merged_candidates_by_id[candidate.candidate_id] = candidate.model_copy(
+                update={
+                    "discovered_via": deduplicate_strings(
+                        [
+                            *(existing_candidate.discovered_via if existing_candidate else []),
+                            *candidate.discovered_via,
+                            producer_name,
+                        ]
+                    )
+                }
+            )
         result.errors.extend(persisted.run.errors)
-        if producer_name == "source_native":
-            source_native_candidate_ids = {
-                candidate.candidate_id for candidate in persisted.candidates
-            }
-            if persisted.run.status is DiscoveryRunStatus.PARTIAL:
-                result.warnings.append(
-                    "source-native discovery completed with partial source failures"
-                )
-        if producer_name == "brave":
-            brave_candidate_ids = {candidate.candidate_id for candidate in persisted.candidates}
-            if persisted.run.status is DiscoveryRunStatus.PARTIAL:
-                result.warnings.append("brave discovery completed with partial engine failures")
-        if producer_name == "exa":
-            exa_candidate_ids = {candidate.candidate_id for candidate in persisted.candidates}
-            if persisted.run.status is DiscoveryRunStatus.PARTIAL:
-                result.warnings.append("exa discovery completed with partial engine failures")
-        if producer_name == "google_cse":
-            google_cse_candidate_ids = {
-                candidate.candidate_id for candidate in persisted.candidates
-            }
-            if persisted.run.status is DiscoveryRunStatus.PARTIAL:
-                result.warnings.append(
-                    "google_cse discovery completed with partial engine failures"
-                )
+        if producer_name == "source_native" and persisted.run.status is DiscoveryRunStatus.PARTIAL:
+            result.warnings.append("source-native discovery completed with partial source failures")
+        if producer_name == "brave" and persisted.run.status is DiscoveryRunStatus.PARTIAL:
+            result.warnings.append("brave discovery completed with partial engine failures")
+        if producer_name == "exa" and persisted.run.status is DiscoveryRunStatus.PARTIAL:
+            result.warnings.append("exa discovery completed with partial engine failures")
+        if producer_name == "google_cse" and persisted.run.status is DiscoveryRunStatus.PARTIAL:
+            result.warnings.append("google_cse discovery completed with partial engine failures")
         if persisted.run.status is DiscoveryRunStatus.FAILED:
             failed_runs += 1
 
-    _write_discovery_engine_metrics(
+    overlap_candidates = [
+        candidate.model_copy(
+            update={
+                "discovered_via": overlap_producers_by_candidate_id[candidate_id],
+                "source_discovery_only": overlap_producers_by_candidate_id[candidate_id]
+                == ["source_native"],
+            }
+        )
+        for candidate_id, candidate in merged_candidates_by_id.items()
+    ]
+    _write_discovery_diagnostic_artifacts(
         config,
-        source_native_candidate_ids=source_native_candidate_ids,
-        brave_candidate_ids=brave_candidate_ids,
-        exa_candidate_ids=exa_candidate_ids,
-        google_cse_candidate_ids=google_cse_candidate_ids,
+        config_path=config_path,
+        overlap_candidates=overlap_candidates,
     )
     result.unified_item_count = len(merged_candidate_ids)
 

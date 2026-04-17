@@ -9,7 +9,7 @@ import typer
 from typer.testing import CliRunner
 
 from denbust.cli import app
-from denbust.diagnostics import source_health
+from denbust.diagnostics import DiscoveryDiagnosticReport, source_health
 from denbust.models.common import DatasetName, JobName
 
 runner = CliRunner()
@@ -571,6 +571,108 @@ class TestCli:
 
         assert result.exit_code != 0
         assert "Unknown or disabled sources: ghost" in result.stderr
+
+    def test_diagnose_discovery_forwards_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """diagnose-discovery should forward its config and stale-days flags."""
+        captured: dict[str, object] = {}
+
+        def fake_run_discovery_diagnostics(
+            *,
+            config_path: Path,
+            stale_after_days: int = 7,
+        ) -> DiscoveryDiagnosticReport:
+            captured["config_path"] = config_path
+            captured["stale_after_days"] = stale_after_days
+            return DiscoveryDiagnosticReport(
+                config_path=str(config_path),
+                dataset_name="news_items",
+                stale_after_days=stale_after_days,
+                latest_candidates_path="candidates.jsonl",
+                scrape_attempts_path="attempts.jsonl",
+                operational_records_available=False,
+            )
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_discovery_diagnostics",
+            fake_run_discovery_diagnostics,
+        )
+        monkeypatch.setattr(
+            "denbust.diagnostics.render_discovery_diagnostic_report",
+            lambda report: f"rendered:{report.dataset_name}",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "diagnose-discovery",
+                "--config",
+                "agents/custom.yaml",
+                "--stale-days",
+                "11",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured == {
+            "config_path": Path("agents/custom.yaml"),
+            "stale_after_days": 11,
+        }
+        assert "rendered:news_items" in result.stdout
+
+    def test_diagnose_discovery_json_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """diagnose-discovery should emit machine-readable JSON when requested."""
+        report = DiscoveryDiagnosticReport(
+            config_path="agents/news/local.yaml",
+            dataset_name="news_items",
+            stale_after_days=7,
+            latest_candidates_path="candidates.jsonl",
+            scrape_attempts_path="attempts.jsonl",
+            operational_records_available=False,
+        )
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_discovery_diagnostics",
+            lambda **_kwargs: report,
+        )
+
+        result = runner.invoke(app, ["diagnose-discovery", "--format", "json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["dataset_name"] == "news_items"
+        assert payload["stale_after_days"] == 7
+
+    def test_diagnose_discovery_writes_output_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """diagnose-discovery should persist JSON output when --output is provided."""
+        report = DiscoveryDiagnosticReport(
+            config_path="agents/news/local.yaml",
+            dataset_name="news_items",
+            stale_after_days=7,
+            latest_candidates_path="candidates.jsonl",
+            scrape_attempts_path="attempts.jsonl",
+            operational_records_available=False,
+        )
+        output_path = tmp_path / "diagnostics.json"
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_discovery_diagnostics",
+            lambda **_kwargs: report,
+        )
+        monkeypatch.setattr(
+            "denbust.diagnostics.render_discovery_diagnostic_report",
+            lambda report: f"rendered:{report.dataset_name}",
+        )
+
+        result = runner.invoke(
+            app,
+            ["diagnose-discovery", "--output", str(output_path)],
+        )
+
+        assert result.exit_code == 0
+        assert "rendered:news_items" in result.stdout
+        assert json.loads(output_path.read_text(encoding="utf-8"))["dataset_name"] == "news_items"
 
     def test_validation_evaluate_uses_default_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """validation-evaluate should default to the tracked assets."""

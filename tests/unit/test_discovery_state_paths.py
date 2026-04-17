@@ -27,8 +27,14 @@ def test_resolve_discovery_state_paths_uses_discover_namespace() -> None:
     assert paths.latest_candidates_path == Path(
         "state_repo/news_items/discover/candidates/latest_candidates.jsonl"
     )
+    assert paths.scrape_attempts_path == Path(
+        "state_repo/news_items/discover/candidates/scrape_attempts.jsonl"
+    )
     assert paths.engine_overlap_latest_path == Path(
         "state_repo/news_items/discover/metrics/engine_overlap_latest.json"
+    )
+    assert paths.discovery_diagnostics_latest_path == Path(
+        "state_repo/news_items/discover/metrics/discovery_diagnostics_latest.json"
     )
 
 
