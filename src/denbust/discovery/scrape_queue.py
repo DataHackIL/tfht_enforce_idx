@@ -461,7 +461,9 @@ async def scrape_candidates(
 async def _fetch_partial_page(candidate: PersistentCandidate) -> GenericFetchResult:
     headers = {"User-Agent": "denbust-discovery/1.0"}
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=headers) as client:
+        async with httpx.AsyncClient(
+            timeout=15.0, follow_redirects=True, headers=headers
+        ) as client:
             response = await client.get(str(candidate.current_url))
             response.raise_for_status()
     except httpx.TimeoutException as exc:
@@ -473,7 +475,9 @@ async def _fetch_partial_page(candidate: PersistentCandidate) -> GenericFetchRes
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
         return GenericFetchResult(
-            fetch_status=FetchStatus.BLOCKED if status_code in {401, 403, 429} else FetchStatus.FAILED,
+            fetch_status=FetchStatus.BLOCKED
+            if status_code in {401, 403, 429}
+            else FetchStatus.FAILED,
             error_code=f"generic_fetch_http_{status_code}",
             error_message=f"Generic fetch returned HTTP {status_code}",
         )

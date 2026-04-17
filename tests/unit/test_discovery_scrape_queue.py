@@ -405,7 +405,7 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
             "mako",
             [
                 build_raw_article(
-            "https://www.mako.co.il/news/article/ok?utm_source=test", source_name="mako"
+                    "https://www.mako.co.il/news/article/ok?utm_source=test", source_name="mako"
                 )
             ],
         ),
