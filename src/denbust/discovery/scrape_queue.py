@@ -218,6 +218,7 @@ def _mark_attempt_failure(
 def _mark_partial_recovery(
     candidate: PersistentCandidate,
     *,
+    attempts: list[ScrapeAttempt],
     attempt: ScrapeAttempt,
     fetch_result: GenericFetchResult,
     source_name: str | None,
@@ -225,7 +226,7 @@ def _mark_partial_recovery(
     return candidate.model_copy(
         update={
             "candidate_status": CandidateStatus.PARTIALLY_SCRAPED,
-            "scrape_attempt_count": candidate.scrape_attempt_count + 1,
+            "scrape_attempt_count": candidate.scrape_attempt_count + len(attempts),
             "last_scrape_attempt_at": attempt.finished_at,
             "next_scrape_attempt_at": None,
             "last_scrape_error_code": None,
@@ -301,151 +302,158 @@ async def scrape_candidates(
     raw_articles: list[RawArticle] = []
     errors: list[str] = []
 
-    for queued_candidate in queued_candidates:
-        in_progress = queued_candidate.model_copy(
-            update={"candidate_status": CandidateStatus.SCRAPE_IN_PROGRESS}
-        )
-        persistence.upsert_candidates([in_progress])
+    headers = {"User-Agent": "denbust-discovery/1.0"}
+    async with httpx.AsyncClient(
+        timeout=15.0,
+        follow_redirects=True,
+        headers=headers,
+    ) as client:
+        for queued_candidate in queued_candidates:
+            in_progress = queued_candidate.model_copy(
+                update={"candidate_status": CandidateStatus.SCRAPE_IN_PROGRESS}
+            )
+            persistence.upsert_candidates([in_progress])
 
-        source_name = _select_source_name(in_progress, sources_by_name)
-        started_at = datetime.now(UTC)
-        article: RawArticle | None = None
-        candidate_attempts: list[ScrapeAttempt] = []
+            source_name = _select_source_name(in_progress, sources_by_name)
+            started_at = datetime.now(UTC)
+            article: RawArticle | None = None
+            candidate_attempts: list[ScrapeAttempt] = []
 
-        if source_name is not None:
-            source = sources_by_name[source_name]
-            try:
-                articles = source_articles_cache.get(source_name)
-                if articles is None:
-                    articles = await source.fetch(days=config.days, keywords=config.keywords)
-                    source_articles_cache[source_name] = articles
-                candidate_urls = _candidate_urls(in_progress)
-                article = next(
-                    (
-                        candidate_article
-                        for candidate_article in articles
-                        if canonicalize_news_url(str(candidate_article.url)) in candidate_urls
-                    ),
-                    None,
-                )
-                finished_at = datetime.now(UTC)
-                if article is not None:
+            if source_name is not None:
+                source = sources_by_name[source_name]
+                try:
+                    articles = source_articles_cache.get(source_name)
+                    if articles is None:
+                        articles = await source.fetch(days=config.days, keywords=config.keywords)
+                        source_articles_cache[source_name] = articles
+                    candidate_urls = _candidate_urls(in_progress)
+                    article = next(
+                        (
+                            candidate_article
+                            for candidate_article in articles
+                            if canonicalize_news_url(str(candidate_article.url)) in candidate_urls
+                        ),
+                        None,
+                    )
+                    finished_at = datetime.now(UTC)
+                    if article is not None:
+                        candidate_attempts.append(
+                            _build_attempt(
+                                candidate_id=in_progress.candidate_id,
+                                started_at=started_at,
+                                finished_at=finished_at,
+                                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                                fetch_status=FetchStatus.SUCCESS,
+                                source_adapter_name=source_name,
+                                article=article,
+                                diagnostics={"matched_candidate_urls": sorted(candidate_urls)},
+                            )
+                        )
+                        updated_candidates.append(
+                            _mark_attempt_success(in_progress, candidate_attempts[-1], article)
+                        )
+                        raw_articles.append(article)
+                        attempts.extend(candidate_attempts)
+                        continue
+
                     candidate_attempts.append(
                         _build_attempt(
                             candidate_id=in_progress.candidate_id,
                             started_at=started_at,
                             finished_at=finished_at,
                             attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
-                            fetch_status=FetchStatus.SUCCESS,
+                            fetch_status=FetchStatus.FAILED,
                             source_adapter_name=source_name,
-                            article=article,
-                            diagnostics={"matched_candidate_urls": sorted(candidate_urls)},
+                            error_code="candidate_not_found",
+                            error_message=f"{source_name} adapter did not return the candidate URL",
+                        )
+                    )
+                except Exception as exc:
+                    finished_at = datetime.now(UTC)
+                    error_message = f"{source_name} adapter failed: {type(exc).__name__}: {exc}"
+                    candidate_attempts.append(
+                        _build_attempt(
+                            candidate_id=in_progress.candidate_id,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                            fetch_status=FetchStatus.FAILED,
+                            source_adapter_name=source_name,
+                            error_code="source_adapter_error",
+                            error_message=error_message,
                         )
                     )
                     updated_candidates.append(
-                        _mark_attempt_success(in_progress, candidate_attempts[-1], article)
+                        _mark_attempt_failure(
+                            in_progress,
+                            attempts=candidate_attempts,
+                            status=CandidateStatus.SCRAPE_FAILED,
+                            error_code="source_adapter_error",
+                            error_message=error_message,
+                            config=config,
+                        )
                     )
-                    raw_articles.append(article)
                     attempts.extend(candidate_attempts)
+                    errors.append(f"{in_progress.candidate_id}: {error_message}")
                     continue
 
-                candidate_attempts.append(
-                    _build_attempt(
-                        candidate_id=in_progress.candidate_id,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
-                        fetch_status=FetchStatus.FAILED,
-                        source_adapter_name=source_name,
-                        error_code="candidate_not_found",
-                        error_message=f"{source_name} adapter did not return the candidate URL",
-                    )
+            generic_started_at = datetime.now(UTC)
+            fetch_result = await _fetch_partial_page(in_progress, client=client)
+            generic_finished_at = datetime.now(UTC)
+            candidate_attempts.append(
+                _build_attempt(
+                    candidate_id=in_progress.candidate_id,
+                    started_at=generic_started_at,
+                    finished_at=generic_finished_at,
+                    attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                    fetch_status=fetch_result.fetch_status,
+                    error_code=fetch_result.error_code,
+                    error_message=fetch_result.error_message,
+                    diagnostics=fetch_result.diagnostics,
                 )
-            except Exception as exc:
-                finished_at = datetime.now(UTC)
-                error_message = f"{source_name} adapter failed: {type(exc).__name__}: {exc}"
-                candidate_attempts.append(
-                    _build_attempt(
-                        candidate_id=in_progress.candidate_id,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
-                        fetch_status=FetchStatus.FAILED,
-                        source_adapter_name=source_name,
-                        error_code="source_adapter_error",
-                        error_message=error_message,
-                    )
+            )
+
+            if fetch_result.fetch_status is FetchStatus.PARTIAL and (
+                fetch_result.title or fetch_result.snippet
+            ):
+                partial_candidate = _mark_partial_recovery(
+                    in_progress,
+                    attempts=candidate_attempts,
+                    attempt=candidate_attempts[-1],
+                    fetch_result=fetch_result,
+                    source_name=source_name,
                 )
-                updated_candidates.append(
-                    _mark_attempt_failure(
-                        in_progress,
-                        attempts=candidate_attempts,
-                        status=CandidateStatus.SCRAPE_FAILED,
-                        error_code="source_adapter_error",
-                        error_message=error_message,
-                        config=config,
-                    )
-                )
+                updated_candidates.append(partial_candidate)
+                fallback_candidates.append(partial_candidate)
                 attempts.extend(candidate_attempts)
-                errors.append(f"{in_progress.candidate_id}: {error_message}")
                 continue
 
-        generic_started_at = datetime.now(UTC)
-        fetch_result = await _fetch_partial_page(in_progress)
-        generic_finished_at = datetime.now(UTC)
-        candidate_attempts.append(
-            _build_attempt(
-                candidate_id=in_progress.candidate_id,
-                started_at=generic_started_at,
-                finished_at=generic_finished_at,
-                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
-                fetch_status=fetch_result.fetch_status,
-                error_code=fetch_result.error_code,
-                error_message=fetch_result.error_message,
-                diagnostics=fetch_result.diagnostics,
-            )
-        )
-
-        if fetch_result.fetch_status is FetchStatus.PARTIAL and (
-            fetch_result.title or fetch_result.snippet
-        ):
-            partial_candidate = _mark_partial_recovery(
+            fallback_candidate = _mark_attempt_failure(
                 in_progress,
-                attempt=candidate_attempts[-1],
-                fetch_result=fetch_result,
-                source_name=source_name,
-            )
-            updated_candidates.append(partial_candidate)
-            fallback_candidates.append(partial_candidate)
-            attempts.extend(candidate_attempts)
-            continue
-
-        fallback_candidate = _mark_attempt_failure(
-            in_progress,
-            attempts=candidate_attempts,
-            status=CandidateStatus.SCRAPE_FAILED,
-            error_code=fetch_result.error_code or "generic_fetch_failed",
-            error_message=fetch_result.error_message or "Generic fetch failed",
-            config=config,
-            content_basis=ContentBasis.SEARCH_RESULT_ONLY,
-            needs_review=True,
-            metadata_updates=_fallback_metadata(
-                candidate=in_progress,
+                attempts=candidate_attempts,
+                status=CandidateStatus.SCRAPE_FAILED,
+                error_code=fetch_result.error_code or "generic_fetch_failed",
+                error_message=fetch_result.error_message or "Generic fetch failed",
+                config=config,
                 content_basis=ContentBasis.SEARCH_RESULT_ONLY,
-                title=fetch_result.title,
-                snippet=fetch_result.snippet,
-                publication_datetime=fetch_result.publication_datetime,
-                source_name=source_name,
-                fetch_result=fetch_result,
-            ),
-        )
-        updated_candidates.append(fallback_candidate)
-        fallback_candidates.append(fallback_candidate)
-        attempts.extend(candidate_attempts)
-        errors.append(
-            f"{in_progress.candidate_id}: "
-            f"{fetch_result.error_message or 'Generic fetch failed; retained search-result-only fallback'}"
-        )
+                needs_review=True,
+                metadata_updates=_fallback_metadata(
+                    candidate=in_progress,
+                    content_basis=ContentBasis.SEARCH_RESULT_ONLY,
+                    title=fetch_result.title,
+                    snippet=fetch_result.snippet,
+                    publication_datetime=fetch_result.publication_datetime,
+                    source_name=source_name,
+                    fetch_result=fetch_result,
+                ),
+            )
+            updated_candidates.append(fallback_candidate)
+            fallback_candidates.append(fallback_candidate)
+            attempts.extend(candidate_attempts)
+            errors.append(
+                f"{in_progress.candidate_id}: "
+                f"{fetch_result.error_message or 'Generic fetch failed; retained search-result-only fallback'}"
+            )
 
     persistence.append_attempts(attempts)
     persistence.upsert_candidates(updated_candidates)
@@ -459,14 +467,14 @@ async def scrape_candidates(
     )
 
 
-async def _fetch_partial_page(candidate: PersistentCandidate) -> GenericFetchResult:
-    headers = {"User-Agent": "denbust-discovery/1.0"}
+async def _fetch_partial_page(
+    candidate: PersistentCandidate,
+    *,
+    client: httpx.AsyncClient,
+) -> GenericFetchResult:
     try:
-        async with httpx.AsyncClient(
-            timeout=15.0, follow_redirects=True, headers=headers
-        ) as client:
-            response = await client.get(str(candidate.current_url))
-            response.raise_for_status()
+        response = await client.get(str(candidate.current_url))
+        response.raise_for_status()
     except httpx.TimeoutException as exc:
         return GenericFetchResult(
             fetch_status=FetchStatus.TIMEOUT,

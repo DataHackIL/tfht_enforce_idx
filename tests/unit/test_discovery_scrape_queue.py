@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
+from bs4 import BeautifulSoup
 from pydantic import HttpUrl
 
+import denbust.discovery.scrape_queue as scrape_queue_module
 from denbust.config import Config
 from denbust.data_models import RawArticle
 from denbust.discovery.models import (
@@ -228,7 +231,10 @@ async def test_scrape_candidates_retains_failed_candidate_for_retry(tmp_path: Pa
     source = FakeSource("ynet", [])
     original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
         return GenericFetchResult(
             fetch_status=FetchStatus.FAILED,
             error_code="generic_fetch_failed",
@@ -278,7 +284,10 @@ async def test_scrape_candidates_accumulates_attempt_count_across_retries(tmp_pa
     source = FakeSource("ynet", [])
     original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
         return GenericFetchResult(
             fetch_status=FetchStatus.FAILED,
             error_code="generic_fetch_failed",
@@ -317,7 +326,10 @@ async def test_scrape_candidates_retains_unknown_sources_as_search_results(tmp_p
     )
     original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
         return GenericFetchResult(
             fetch_status=FetchStatus.FAILED,
             error_code="generic_fetch_failed",
@@ -354,7 +366,10 @@ async def test_scrape_candidates_retains_partial_page_metadata(tmp_path: Path) -
     source = FakeSource("ynet", [])
     original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
         return GenericFetchResult(
             fetch_status=FetchStatus.PARTIAL,
             title="כותרת חלקית",
@@ -381,6 +396,8 @@ async def test_scrape_candidates_retains_partial_page_metadata(tmp_path: Path) -
     assert stored.next_scrape_attempt_at is None
     assert stored.needs_review is True
     assert stored.self_heal_eligible is False
+    assert stored.scrape_attempt_count == 2
+    assert stored.metadata["fallback_publication_datetime"] == "2026-04-11T12:00:00+00:00"
     assert [candidate.candidate_id for candidate in batch.fallback_candidates] == ["candidate-5"]
 
 
@@ -412,7 +429,10 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
     ]
     original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
 
-    async def fake_fetch_partial_page(_candidate: PersistentCandidate) -> GenericFetchResult:
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
         return GenericFetchResult(
             fetch_status=FetchStatus.FAILED,
             error_code="generic_fetch_failed",
@@ -449,3 +469,182 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
         FetchStatus.FAILED,
         FetchStatus.SUCCESS,
     ]
+
+
+@pytest.mark.asyncio
+async def test_scrape_candidates_records_fallback_metadata_for_final_url_and_diagnostics(
+    tmp_path: Path,
+) -> None:
+    """Search-result fallbacks should persist generic-fetch provenance for review."""
+    store = build_store(tmp_path)
+    candidate = build_candidate("candidate-6", status=CandidateStatus.NEW)
+    store.upsert_candidates([candidate])
+    source = FakeSource("ynet", [])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
+        return GenericFetchResult(
+            fetch_status=FetchStatus.FAILED,
+            error_code="generic_fetch_no_metadata",
+            error_message="Generic fetch returned a page without usable metadata",
+            title="כותרת מגוגל",
+            snippet="תקציר מגוגל",
+            final_url="https://www.ynet.co.il/news/article/abc?ref=final",
+            diagnostics={"content_type": "text/html"},
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[source],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    stored = store.get_candidate("candidate-6")
+    assert stored is not None
+    assert (
+        stored.metadata["fallback_final_url"] == "https://www.ynet.co.il/news/article/abc?ref=final"
+    )
+    assert stored.metadata["fallback_diagnostics"] == {"content_type": "text/html"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_partial_page_reuses_passed_client_and_extracts_metadata() -> None:
+    """Generic fetch helper should parse title, description, and publication metadata."""
+    html = """
+    <html>
+      <head>
+        <title>  Page Title  </title>
+        <meta property="og:description" content="  Page description  ">
+        <meta name="article:published_time" content="2026-04-11T12:00:00Z">
+      </head>
+    </html>
+    """
+    request = httpx.Request("GET", "https://example.com/article")
+    response = httpx.Response(
+        200,
+        request=request,
+        text=html,
+        headers={"content-type": "text/html; charset=utf-8"},
+    )
+
+    class FakeClient:
+        async def get(self, url: str) -> httpx.Response:
+            assert url == "https://www.ynet.co.il/news/article/abc?utm_source=test"
+            return response
+
+    result = await scrape_queue_module._fetch_partial_page(
+        build_candidate("candidate-7", status=CandidateStatus.NEW),
+        client=FakeClient(),
+    )
+
+    assert result.fetch_status is FetchStatus.PARTIAL
+    assert result.title == "Page Title"
+    assert result.snippet == "Page description"
+    assert result.final_url == "https://example.com/article"
+    assert result.diagnostics == {"content_type": "text/html; charset=utf-8"}
+    assert result.publication_datetime == datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_fetch_partial_page_returns_timeout_blocked_http_error_and_no_metadata() -> None:
+    """Generic fetch helper should classify timeout, blocked, transport, and no-metadata outcomes."""
+    candidate = build_candidate("candidate-8", status=CandidateStatus.NEW)
+    request = httpx.Request("GET", "https://example.com/article")
+
+    class TimeoutClient:
+        async def get(self, url: str) -> httpx.Response:
+            raise httpx.ReadTimeout("boom", request=httpx.Request("GET", url))
+
+    timeout_result = await scrape_queue_module._fetch_partial_page(
+        candidate, client=TimeoutClient()
+    )
+    assert timeout_result.fetch_status is FetchStatus.TIMEOUT
+    assert timeout_result.error_code == "generic_fetch_timeout"
+
+    blocked_response = httpx.Response(403, request=request)
+
+    class BlockedClient:
+        async def get(self, url: str) -> httpx.Response:
+            del url
+            raise httpx.HTTPStatusError("blocked", request=request, response=blocked_response)
+
+    blocked_result = await scrape_queue_module._fetch_partial_page(
+        candidate, client=BlockedClient()
+    )
+    assert blocked_result.fetch_status is FetchStatus.BLOCKED
+    assert blocked_result.error_code == "generic_fetch_http_403"
+
+    class ErrorClient:
+        async def get(self, url: str) -> httpx.Response:
+            raise httpx.RequestError("network", request=httpx.Request("GET", url))
+
+    error_result = await scrape_queue_module._fetch_partial_page(candidate, client=ErrorClient())
+    assert error_result.fetch_status is FetchStatus.FAILED
+    assert error_result.error_code == "generic_fetch_error"
+
+    no_meta_response = httpx.Response(
+        200,
+        request=request,
+        text="<html><head></head><body>hello</body></html>",
+        headers={"content-type": "text/html"},
+    )
+
+    class NoMetadataClient:
+        async def get(self, url: str) -> httpx.Response:
+            del url
+            return no_meta_response
+
+    no_meta_result = await scrape_queue_module._fetch_partial_page(
+        candidate, client=NoMetadataClient()
+    )
+    assert no_meta_result.fetch_status is FetchStatus.FAILED
+    assert no_meta_result.error_code == "generic_fetch_no_metadata"
+    assert no_meta_result.final_url == "https://example.com/article"
+    assert no_meta_result.diagnostics == {"content_type": "text/html"}
+
+
+def test_extract_partial_page_helpers_cover_meta_parsing_edge_cases() -> None:
+    """Metadata helpers should normalize values and accept ISO/RFC-2822 publication dates."""
+    html = """
+    <html>
+      <head>
+        <meta name="twitter:title" content="  Twitter title  ">
+        <meta name="description" content="  Summary text  ">
+        <meta name="pubdate" content="Tue, 11 Apr 2026 10:00:00 +0000">
+      </head>
+    </html>
+    """
+
+    parsed = scrape_queue_module._extract_partial_page_metadata(html)
+
+    assert parsed["title"] == "Twitter title"
+    assert parsed["snippet"] == "Summary text"
+    assert parsed["publication_datetime"] == datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+    assert scrape_queue_module._first_non_empty(None, "  ", " value ") == "value"
+    assert scrape_queue_module._first_non_empty(None, "  ") is None
+    assert scrape_queue_module._extract_partial_page_metadata(
+        '<meta name="description" content><meta name="date" content="2026-04-11T10:00:00">'
+    )["publication_datetime"] == datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+    assert (
+        scrape_queue_module._extract_partial_page_metadata(
+            '<meta name="description" content><meta name="date" content="2026-04-11T10:00:00">'
+        )["snippet"]
+        is None
+    )
+    assert (
+        scrape_queue_module._meta_content(
+            BeautifulSoup('<meta name="description">', "html.parser"),
+            name="description",
+        )
+        is None
+    )
+    assert scrape_queue_module._parse_publication_datetime("bad date") is None

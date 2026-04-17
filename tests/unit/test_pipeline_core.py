@@ -419,6 +419,144 @@ class TestFetchAndClassifyHelpers:
 
         assert items == expected
 
+    def test_fallback_helpers_cover_metadata_and_field_fallbacks(self) -> None:
+        """Fallback helper functions should normalize metadata and candidate-derived values."""
+        candidate = build_persistent_candidate(
+            "candidate-helper",
+            current_url="https://example.com/helper",
+        ).model_copy(
+            update={
+                "titles": ["  Candidate title  "],
+                "snippets": ["  Candidate snippet  "],
+                "source_hints": ["  hinted-source  "],
+                "discovered_via": ["  discovered-source  "],
+                "last_seen_at": datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+                "metadata": {
+                    "fallback_title": " ",
+                    "fallback_snippet": " ",
+                    "fallback_publication_datetime": "2026-04-11T10:00:00",
+                },
+            }
+        )
+
+        assert pipeline_module._fallback_source_name(candidate) == "  hinted-source  "
+        assert pipeline_module._fallback_publication_datetime(candidate) == datetime(
+            2026, 4, 11, 10, 0, tzinfo=UTC
+        )
+        assert pipeline_module._fallback_text(candidate) == (
+            "Candidate title",
+            "Candidate snippet",
+        )
+
+        fallback_article = pipeline_module._fallback_input_article(candidate)
+        assert fallback_article is not None
+        assert fallback_article.title == "Candidate title"
+        assert fallback_article.snippet == "Candidate snippet"
+        assert fallback_article.source_name == "  hinted-source  "
+
+        no_text_candidate = candidate.model_copy(
+            update={
+                "titles": [" "],
+                "snippets": [" "],
+                "source_hints": [" "],
+                "discovered_via": [" "],
+                "metadata": {},
+                "current_url": HttpUrl("https://sub.example.com/no-text"),
+                "canonical_url": HttpUrl("https://sub.example.com/no-text"),
+            }
+        )
+        assert pipeline_module._fallback_source_name(no_text_candidate) == "example.com"
+        assert pipeline_module._fallback_publication_datetime(no_text_candidate) == datetime(
+            2026, 4, 11, 9, 0, tzinfo=UTC
+        )
+        assert pipeline_module._fallback_input_article(no_text_candidate) is None
+
+        candidate_fallback = no_text_candidate.model_copy(
+            update={
+                "current_url": HttpUrl("https://localhost/no-domain"),
+                "canonical_url": HttpUrl("https://localhost/no-domain"),
+                "domain": None,
+            }
+        )
+        assert pipeline_module._fallback_source_name(candidate_fallback) == "candidate_fallback"
+
+        aware_publication_candidate = candidate.model_copy(
+            update={"metadata": {"fallback_publication_datetime": "2026-04-11T12:00:00+02:00"}}
+        )
+        assert pipeline_module._fallback_publication_datetime(
+            aware_publication_candidate
+        ) == datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+
+        invalid_publication_candidate = candidate.model_copy(
+            update={"metadata": {"fallback_publication_datetime": "not-a-date"}}
+        )
+        assert pipeline_module._fallback_publication_datetime(
+            invalid_publication_candidate
+        ) == datetime(2026, 4, 11, 9, 0, tzinfo=UTC)
+
+    @pytest.mark.asyncio
+    async def test_build_fallback_operational_records_skips_non_relevant_and_merges_rule_risk(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fallback operational rows should skip irrelevant candidates and elevate rule-based privacy risk."""
+        relevant_candidate = build_persistent_candidate(
+            "candidate-relevant",
+            current_url="https://example.com/relevant",
+        ).model_copy(
+            update={
+                "content_basis": ContentBasis.PARTIAL_PAGE,
+                "metadata": {
+                    "fallback_title": "Relevant title",
+                    "fallback_snippet": "Relevant summary",
+                    "fallback_source_name": "brave",
+                },
+            }
+        )
+        ignored_candidate = build_persistent_candidate(
+            "candidate-ignored",
+            current_url="https://example.com/ignored",
+        ).model_copy(
+            update={"metadata": {"fallback_title": "Ignored title", "fallback_snippet": "Ignored"}}
+        )
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[
+                build_classified_article("https://example.com/relevant", relevant=True),
+                build_classified_article("https://example.com/ignored", relevant=False),
+            ]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.fallback_enrichment",
+            lambda item: NewsItemEnrichment(
+                summary_one_sentence=f"Enriched: {item.headline}",
+                privacy_risk_level=PrivacyRisk.LOW,
+                privacy_reason="fallback default",
+            ),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.infer_privacy_risk",
+            lambda _text: (PrivacyRisk.HIGH, "rule-based high risk"),
+        )
+
+        records = await pipeline_module._build_fallback_operational_records(
+            candidates=[relevant_candidate, ignored_candidate],
+            classifier=classifier,
+        )
+
+        assert len(records) == 1
+        record = records[0]
+        assert record.event_candidate_ids == ["candidate-relevant"]
+        assert record.content_basis is ContentBasis.PARTIAL_PAGE
+        assert record.record_confidence == "low"
+        assert record.review_status is ReviewStatus.NEEDS_FACT_REVIEW
+        assert record.publication_status is PublicationStatus.INTERNAL_ONLY
+        assert record.annotation_source == "candidate_fallback"
+        assert record.privacy_risk_level is PrivacyRisk.HIGH
+        assert record.privacy_reason == "rule-based high risk"
+        assert record.source_name == "brave"
+        assert record.title == "Relevant title"
+        assert record.summary_one_sentence == "Enriched: Relevant title"
+
 
 class TestRunPipelineAsync:
     """Tests for async pipeline control flow."""
@@ -1686,6 +1824,49 @@ class TestRunPipelineAsync:
         assert rows[0]["review_status"] == ReviewStatus.NONE.value
         assert rows[0]["record_confidence"] == "medium"
         mark_seen_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_finishes_without_materializable_rows_and_closes_store(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fallback-only scrape passes with no classifiable rows should still close owned stores."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
+        )
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(return_value=[])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
+        fallback_candidate = build_persistent_candidate(
+            "candidate-empty-fallback",
+            current_url="https://example.com/empty-fallback",
+        ).model_copy(update={"titles": [" "], "snippets": [" "], "metadata": {}})
+        monkeypatch.setattr(
+            "denbust.pipeline._run_candidate_scrape_job",
+            AsyncMock(
+                return_value=CandidateScrapeBatch(
+                    selected_candidates=[fallback_candidate],
+                    updated_candidates=[fallback_candidate],
+                    fallback_candidates=[fallback_candidate],
+                    attempts=[],
+                    raw_articles=[],
+                    errors=[],
+                )
+            ),
+        )
+        created_store = MagicMock()
+        monkeypatch.setattr(
+            "denbust.pipeline.create_operational_store", lambda _config: created_store
+        )
+
+        result = await run_news_scrape_candidates_job(Config(job_name=JobName.SCRAPE_CANDIDATES))
+
+        assert result.result_summary == "candidate scrape completed with no materializable rows"
+        assert result.unified_item_count == 0
+        created_store.upsert_records.assert_not_called()
+        created_store.close.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_candidate_scrape_job_selects_candidates_and_closes_persistence(
