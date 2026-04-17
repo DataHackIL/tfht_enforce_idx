@@ -14,6 +14,7 @@
 - Default branch prefix for agent work: `codex/`.
 - Keep branches single-purpose.
 - Open PRs against `main`.
+- When a PR is opened against a tracked plan item, update `.agent-plan.md`, `README.md`, and any relevant human-facing plan document in that same PR so they reflect the expected post-merge state.
 - Preserve `CLAUDE.md -> AGENTS.md` when changing repo guidance.
 
 ## Environment
