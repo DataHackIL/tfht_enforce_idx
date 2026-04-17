@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 from denbust.config import Config
 from denbust.data_models import RawArticle
@@ -547,7 +548,7 @@ def _meta_content(
     if property_name is not None:
         attrs["property"] = property_name
     tag = soup.find("meta", attrs=attrs)
-    if tag is None:
+    if not isinstance(tag, Tag):
         return None
     value = tag.get("content")
     if not isinstance(value, str):
