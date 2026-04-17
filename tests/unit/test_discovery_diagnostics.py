@@ -239,8 +239,7 @@ def test_build_discovery_diagnostic_report_notes_when_operational_records_missin
     report = build_discovery_diagnostic_report(config=config)
 
     assert (
-        "No operational records were available for candidate-to-news-item matching."
-        in report.notes
+        "No operational records were available for candidate-to-news-item matching." in report.notes
     )
 
 
@@ -299,7 +298,9 @@ def test_load_operational_record_urls_handles_fetch_failure(
         def __init__(self) -> None:
             self.closed = False
 
-        def fetch_records(self, dataset_name: str, *, limit: int | None = None) -> list[dict[str, object]]:
+        def fetch_records(
+            self, dataset_name: str, *, limit: int | None = None
+        ) -> list[dict[str, object]]:
             del dataset_name, limit
             raise RuntimeError("fetch failed")
 

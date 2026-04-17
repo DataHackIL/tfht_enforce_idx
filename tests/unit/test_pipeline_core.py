@@ -2394,7 +2394,8 @@ class TestRunPipelineAsync:
             ).read_text(encoding="utf-8")
         )
         per_producer = {
-            entry["producer_name"]: entry for entry in diagnostics_payload["candidate_conversion"]["per_producer"]
+            entry["producer_name"]: entry
+            for entry in diagnostics_payload["candidate_conversion"]["per_producer"]
         }
 
         assert metrics_payload["exa"] == 0
