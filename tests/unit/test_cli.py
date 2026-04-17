@@ -642,6 +642,38 @@ class TestCli:
         assert payload["dataset_name"] == "news_items"
         assert payload["stale_after_days"] == 7
 
+    def test_diagnose_discovery_writes_output_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """diagnose-discovery should persist JSON output when --output is provided."""
+        report = DiscoveryDiagnosticReport(
+            config_path="agents/news/local.yaml",
+            dataset_name="news_items",
+            stale_after_days=7,
+            latest_candidates_path="candidates.jsonl",
+            scrape_attempts_path="attempts.jsonl",
+            operational_records_available=False,
+        )
+        output_path = tmp_path / "diagnostics.json"
+
+        monkeypatch.setattr(
+            "denbust.diagnostics.run_discovery_diagnostics",
+            lambda **_kwargs: report,
+        )
+        monkeypatch.setattr(
+            "denbust.diagnostics.render_discovery_diagnostic_report",
+            lambda report: f"rendered:{report.dataset_name}",
+        )
+
+        result = runner.invoke(
+            app,
+            ["diagnose-discovery", "--output", str(output_path)],
+        )
+
+        assert result.exit_code == 0
+        assert "rendered:news_items" in result.stdout
+        assert json.loads(output_path.read_text(encoding="utf-8"))["dataset_name"] == "news_items"
+
     def test_validation_evaluate_uses_default_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """validation-evaluate should default to the tracked assets."""
         captured: dict[str, object] = {}

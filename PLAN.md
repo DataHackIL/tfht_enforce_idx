@@ -34,7 +34,7 @@ This repo currently has one main plan and two important sub-plans.
 
 - Candidate persistence, scrape attempts, and queue state already exist under `src/denbust/discovery/`.
 - A lightweight overlap artifact already exists at `state_repo/.../metrics/engine_overlap_latest.json`.
-- The pipeline already aggregates per-engine candidate IDs in `src/denbust/pipeline.py`.
+- Discovery overlap/diagnostics generation already flows through `src/denbust/diagnostics/discovery.py`; the pipeline no longer keeps separate per-engine candidate ID sets.
 - The repo already has a diagnostics pattern in `src/denbust/diagnostics/source_health.py` and `src/denbust/cli.py`.
 
 ### What `DL-PR-07` still needs

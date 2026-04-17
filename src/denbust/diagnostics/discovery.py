@@ -147,6 +147,7 @@ def run_discovery_diagnostics(
     *,
     config_path: Path,
     stale_after_days: int = 7,
+    include_operational_matches: bool = True,
 ) -> DiscoveryDiagnosticReport:
     """Build a discovery-layer diagnostics report from persisted state."""
     config = load_config(config_path)
@@ -154,6 +155,7 @@ def run_discovery_diagnostics(
         config=config,
         config_path=config_path,
         stale_after_days=stale_after_days,
+        include_operational_matches=include_operational_matches,
     )
 
 
@@ -164,6 +166,8 @@ def build_discovery_diagnostic_report(
     stale_after_days: int = 7,
     candidates_override: list[PersistentCandidate] | None = None,
     attempts_override: list[ScrapeAttempt] | None = None,
+    overlap_candidates_override: list[PersistentCandidate] | None = None,
+    include_operational_matches: bool = True,
 ) -> DiscoveryDiagnosticReport:
     """Build a discovery observability report for the current persisted state."""
     paths = config.discovery_state_paths
@@ -177,8 +181,16 @@ def build_discovery_diagnostic_report(
         if attempts_override is not None
         else _read_jsonl(paths.scrape_attempts_path, ScrapeAttempt)
     )
+    overlap_candidates = overlap_candidates_override or candidates
     now = datetime.now(UTC)
-    operational_urls, operational_notes = _load_operational_record_urls(config)
+    operational_urls: set[str] = set()
+    operational_notes: list[str] = []
+    if include_operational_matches:
+        operational_urls, operational_notes = _load_operational_record_urls(config)
+    elif config.operational.provider is not OperationalProvider.NONE:
+        operational_notes.append(
+            "Operational record matching was skipped for this diagnostics artifact."
+        )
     report = DiscoveryDiagnosticReport(
         config_path=str(config_path) if config_path is not None else "<in-memory-config>",
         dataset_name=config.dataset_name.value,
@@ -187,7 +199,7 @@ def build_discovery_diagnostic_report(
         scrape_attempts_path=str(paths.scrape_attempts_path),
         operational_records_available=bool(operational_urls),
         notes=operational_notes,
-        engine_overlap=_build_engine_overlap_metrics(candidates),
+        engine_overlap=_build_engine_overlap_metrics(overlap_candidates),
         source_search_coverage=_build_source_search_coverage(candidates),
         queue_health=_build_queue_health_metrics(
             candidates, now=now, stale_after_days=stale_after_days

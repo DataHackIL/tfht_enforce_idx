@@ -218,14 +218,26 @@ def _write_discovery_diagnostic_artifacts(
     config: Config,
     *,
     config_path: Path | None,
-    candidates: list[PersistentCandidate],
+    overlap_candidates: list[PersistentCandidate],
 ) -> None:
     """Persist the latest discovery diagnostics and overlap artifacts."""
-    report = build_discovery_diagnostic_report(
-        config=config,
-        config_path=config_path,
-        candidates_override=candidates,
-    )
+    persisted_candidates_available = config.discovery_state_paths.latest_candidates_path.exists()
+    persisted_attempts_available = config.discovery_state_paths.scrape_attempts_path.exists()
+    if persisted_candidates_available or persisted_attempts_available:
+        report = build_discovery_diagnostic_report(
+            config=config,
+            config_path=config_path,
+            overlap_candidates_override=overlap_candidates,
+            include_operational_matches=False,
+        )
+    else:
+        report = build_discovery_diagnostic_report(
+            config=config,
+            config_path=config_path,
+            candidates_override=overlap_candidates,
+            overlap_candidates_override=overlap_candidates,
+            include_operational_matches=False,
+        )
     persist_discovery_diagnostic_artifacts(config=config, report=report)
 
 
@@ -1256,6 +1268,7 @@ async def run_news_discover_job(
 
     merged_candidate_ids: set[str] = set()
     merged_candidates_by_id: dict[str, PersistentCandidate] = {}
+    overlap_producers_by_candidate_id: dict[str, list[str]] = {}
     failed_runs = 0
     for producer_name, persisted in persisted_runs:
         result.raw_article_count += persisted.run.candidate_count
@@ -1263,11 +1276,18 @@ async def run_news_discover_job(
         merged_candidate_ids.update(candidate.candidate_id for candidate in persisted.candidates)
         for candidate in persisted.candidates:
             existing_candidate = merged_candidates_by_id.get(candidate.candidate_id)
+            overlap_producers_by_candidate_id[candidate.candidate_id] = deduplicate_strings(
+                [
+                    *overlap_producers_by_candidate_id.get(candidate.candidate_id, []),
+                    producer_name,
+                ]
+            )
             merged_candidates_by_id[candidate.candidate_id] = candidate.model_copy(
                 update={
                     "discovered_via": deduplicate_strings(
                         [
                             *(existing_candidate.discovered_via if existing_candidate else []),
+                            *candidate.discovered_via,
                             producer_name,
                         ]
                     )
@@ -1285,10 +1305,20 @@ async def run_news_discover_job(
         if persisted.run.status is DiscoveryRunStatus.FAILED:
             failed_runs += 1
 
+    overlap_candidates = [
+        candidate.model_copy(
+            update={
+                "discovered_via": overlap_producers_by_candidate_id[candidate_id],
+                "source_discovery_only": overlap_producers_by_candidate_id[candidate_id]
+                == ["source_native"],
+            }
+        )
+        for candidate_id, candidate in merged_candidates_by_id.items()
+    ]
     _write_discovery_diagnostic_artifacts(
         config,
         config_path=config_path,
-        candidates=list(merged_candidates_by_id.values()),
+        overlap_candidates=overlap_candidates,
     )
     result.unified_item_count = len(merged_candidate_ids)
 
