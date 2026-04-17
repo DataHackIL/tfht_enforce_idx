@@ -187,9 +187,7 @@ def build_discovery_diagnostic_report(
         else _read_jsonl(paths.scrape_attempts_path, ScrapeAttempt)
     )
     overlap_candidates = (
-        overlap_candidates_override
-        if overlap_candidates_override is not None
-        else candidates
+        overlap_candidates_override if overlap_candidates_override is not None else candidates
     )
     now = datetime.now(UTC)
     operational_urls: set[str] = set()
