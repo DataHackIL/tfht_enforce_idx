@@ -22,6 +22,7 @@ from denbust.diagnostics.discovery import (
 )
 from denbust.discovery.models import (
     CandidateStatus,
+    ContentBasis,
     FetchStatus,
     PersistentCandidate,
     ScrapeAttempt,
@@ -41,6 +42,7 @@ def _candidate(
     first_seen_at: datetime,
     last_seen_at: datetime,
     next_scrape_attempt_at: datetime | None = None,
+    content_basis: ContentBasis = ContentBasis.CANDIDATE_ONLY,
 ) -> PersistentCandidate:
     return PersistentCandidate(
         candidate_id=candidate_id,
@@ -51,6 +53,7 @@ def _candidate(
         titles=[candidate_id],
         snippets=[candidate_id],
         candidate_status=status,
+        content_basis=content_basis,
         first_seen_at=first_seen_at,
         last_seen_at=last_seen_at,
         next_scrape_attempt_at=next_scrape_attempt_at,
@@ -77,6 +80,7 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
                 status=CandidateStatus.SCRAPE_SUCCEEDED,
                 first_seen_at=now - timedelta(days=2),
                 last_seen_at=now - timedelta(hours=2),
+                content_basis=ContentBasis.FULL_ARTICLE_PAGE,
             ),
             _candidate(
                 "candidate-source-only",
@@ -94,6 +98,7 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
                 first_seen_at=now - timedelta(days=3),
                 last_seen_at=now - timedelta(days=2),
                 next_scrape_attempt_at=now - timedelta(hours=1),
+                content_basis=ContentBasis.SEARCH_RESULT_ONLY,
             ),
             _candidate(
                 "candidate-google-partial",
@@ -103,6 +108,7 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
                 first_seen_at=now - timedelta(days=1),
                 last_seen_at=now - timedelta(hours=3),
                 next_scrape_attempt_at=now + timedelta(hours=12),
+                content_basis=ContentBasis.PARTIAL_PAGE,
             ),
         ]
     )
@@ -159,9 +165,13 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
     assert report.queue_health.new_candidates == 1
     assert report.queue_health.scrape_failed_candidates == 1
     assert report.queue_health.partially_scraped_candidates == 1
+    assert report.queue_health.search_result_only_candidates == 1
+    assert report.queue_health.partial_page_candidates == 1
+    assert report.queue_health.full_article_page_candidates == 1
     assert report.queue_health.stale_candidates == 1
     assert report.queue_health.retry_backlog_candidates == 1
     assert report.candidate_conversion.scrape_succeeded_candidates == 1
+    assert report.candidate_conversion.search_result_only_candidates == 1
     assert report.candidate_conversion.operational_record_matches == 1
     assert report.candidate_conversion.per_producer[0].candidate_count >= 1
     assert report.top_failure_sources[0].name == "mako"

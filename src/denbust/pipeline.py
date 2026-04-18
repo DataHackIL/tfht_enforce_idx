@@ -12,7 +12,7 @@ from pathlib import Path
 
 from denbust.classifier.relevance import Classifier, create_classifier
 from denbust.config import Config, OutputFormat, SourceType, load_config
-from denbust.data_models import ClassifiedArticle, RawArticle, UnifiedItem
+from denbust.data_models import ClassifiedArticle, RawArticle, SourceReference, UnifiedItem
 from denbust.datasets.jobs import ensure_default_jobs_registered
 from denbust.datasets.registry import require_job_handler
 from denbust.dedup.similarity import Deduplicator, create_deduplicator
@@ -24,7 +24,11 @@ from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
 from denbust.discovery.engines.brave import BraveSearchEngine
 from denbust.discovery.engines.exa import ExaSearchEngine
 from denbust.discovery.engines.google_cse import GoogleCseSearchEngine
-from denbust.discovery.models import DiscoveryRun, DiscoveryRunStatus, PersistentCandidate
+from denbust.discovery.models import (
+    DiscoveryRun,
+    DiscoveryRunStatus,
+    PersistentCandidate,
+)
 from denbust.discovery.queries import build_discovery_queries
 from denbust.discovery.scrape_queue import (
     CandidateScrapeBatch,
@@ -39,6 +43,7 @@ from denbust.discovery.source_native import (
 )
 from denbust.discovery.storage import create_discovery_persistence
 from denbust.models.common import DatasetName, JobName
+from denbust.models.policies import PublicationStatus, ReviewStatus
 from denbust.models.runs import RunSnapshot
 from denbust.news_items.annotations import (
     apply_manual_annotations,
@@ -46,12 +51,15 @@ from denbust.news_items.annotations import (
     parse_news_item_corrections,
 )
 from denbust.news_items.backup import execute_latest_backup
+from denbust.news_items.enrich import fallback_enrichment
 from denbust.news_items.ingest import (
     build_operational_records,
     parse_suppression_rules,
     summarize_privacy_mix,
 )
+from denbust.news_items.models import NewsItemOperationalRecord
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
+from denbust.news_items.policy import infer_privacy_risk, merge_privacy_risk
 from denbust.news_items.publication import publish_release_bundle
 from denbust.news_items.release import (
     NewsItemsReleaseBuilder,
@@ -196,6 +204,151 @@ def deduplicate_articles(
     items = deduplicator.deduplicate(articles)
     logger.info("Deduplicated to %s unique stories", len(items))
     return items
+
+
+def _fallback_source_name(candidate: PersistentCandidate) -> str:
+    metadata = candidate.metadata
+    source_name = metadata.get("fallback_source_name")
+    if isinstance(source_name, str) and source_name.strip():
+        return source_name.strip()
+    for value in [*candidate.source_hints, *candidate.discovered_via]:
+        if value.strip():
+            return value.strip()
+    return candidate.domain or "candidate_fallback"
+
+
+def _fallback_publication_datetime(candidate: PersistentCandidate) -> datetime:
+    value = candidate.metadata.get("fallback_publication_datetime")
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
+    return candidate.last_seen_at
+
+
+def _fallback_text(candidate: PersistentCandidate) -> tuple[str | None, str | None]:
+    metadata = candidate.metadata
+    title = metadata.get("fallback_title")
+    if not isinstance(title, str) or not title.strip():
+        title = next((item for item in candidate.titles if item.strip()), None)
+    snippet = metadata.get("fallback_snippet")
+    if not isinstance(snippet, str) or not snippet.strip():
+        snippet = next((item for item in candidate.snippets if item.strip()), None)
+    normalized_title = " ".join(title.split()).strip() if isinstance(title, str) else None
+    normalized_snippet = " ".join(snippet.split()).strip() if isinstance(snippet, str) else None
+    return normalized_title or None, normalized_snippet or None
+
+
+def _fallback_input_article(candidate: PersistentCandidate) -> RawArticle | None:
+    title, snippet = _fallback_text(candidate)
+    if title is None and snippet is None:
+        return None
+    return RawArticle(
+        url=candidate.canonical_url or candidate.current_url,
+        title=title or snippet or str(candidate.current_url),
+        snippet=snippet or title or "",
+        date=_fallback_publication_datetime(candidate),
+        source_name=_fallback_source_name(candidate),
+    )
+
+
+def _fallback_combined_privacy_input(item: UnifiedItem) -> str:
+    return " ".join(
+        segment
+        for segment in (
+            item.headline,
+            item.summary,
+            item.taxonomy_category_id or "",
+            item.taxonomy_subcategory_id or "",
+            item.category.value,
+            item.sub_category.value if item.sub_category else "",
+        )
+        if segment
+    )
+
+
+def _build_fallback_unified_item(
+    candidate: PersistentCandidate,
+    article: RawArticle,
+    classified_article: ClassifiedArticle,
+) -> UnifiedItem:
+    classification = classified_article.classification
+    return UnifiedItem(
+        headline=article.title,
+        summary=article.snippet or article.title,
+        sources=[SourceReference(source_name=article.source_name, url=article.url)],
+        date=article.date,
+        enforcement_related=classification.enforcement_related,
+        index_relevant=classification.index_relevant,
+        taxonomy_version=classification.taxonomy_version,
+        taxonomy_category_id=classification.taxonomy_category_id,
+        taxonomy_subcategory_id=classification.taxonomy_subcategory_id,
+        category=classification.category,
+        sub_category=classification.sub_category,
+        canonical_url=candidate.canonical_url or candidate.current_url,
+        primary_source_name=article.source_name,
+    )
+
+
+async def _build_fallback_operational_records(
+    *,
+    candidates: list[PersistentCandidate],
+    classifier: Classifier,
+) -> list[NewsItemOperationalRecord]:
+    fallback_inputs: list[tuple[PersistentCandidate, RawArticle]] = []
+    for candidate in candidates:
+        article = _fallback_input_article(candidate)
+        if article is not None:
+            fallback_inputs.append((candidate, article))
+    if not fallback_inputs:
+        return []
+
+    classified = await classifier.classify_batch([article for _, article in fallback_inputs])
+    if len(classified) != len(fallback_inputs):
+        raise ValueError(
+            "classifier.classify_batch() returned "
+            f"{len(classified)} results for {len(fallback_inputs)} fallback inputs"
+        )
+    records: list[NewsItemOperationalRecord] = []
+    retrieval_datetime = datetime.now(UTC)
+    for (candidate, article), classified_article in zip(fallback_inputs, classified, strict=True):
+        classification = classified_article.classification
+        if not classification.relevant:
+            continue
+        item = _build_fallback_unified_item(candidate, article, classified_article)
+        enrichment = fallback_enrichment(item)
+        rule_risk, rule_reason = infer_privacy_risk(_fallback_combined_privacy_input(item))
+        privacy_risk = merge_privacy_risk(enrichment.privacy_risk_level, rule_risk)
+        if privacy_risk is not enrichment.privacy_risk_level:
+            enrichment = enrichment.model_copy(
+                update={
+                    "privacy_risk_level": privacy_risk,
+                    "privacy_reason": rule_reason or enrichment.privacy_reason,
+                }
+            )
+        record = NewsItemOperationalRecord.from_unified_item(
+            item,
+            retrieval_datetime=retrieval_datetime,
+            enrichment=enrichment,
+            classification_confidence=classification.confidence,
+            review_status=ReviewStatus.NEEDS_FACT_REVIEW,
+            publication_status=PublicationStatus.INTERNAL_ONLY,
+            privacy_reason=rule_reason or enrichment.privacy_reason,
+        ).model_copy(
+            update={
+                "event_candidate_ids": [candidate.candidate_id],
+                "content_basis": candidate.content_basis,
+                "record_confidence": "low",
+                "annotation_source": "candidate_fallback",
+            }
+        )
+        records.append(record)
+    return records
 
 
 def _source_discovery_enabled_for_source(config: Config, source_name: str) -> bool:
@@ -1365,30 +1518,60 @@ async def run_news_scrape_candidates_job(
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
     seen_store = create_seen_store(config.state_paths.seen_path)
     result.seen_count_before = seen_store.count
+    store = operational_store
+    owns_store = False
 
-    scrape_batch = await _run_candidate_scrape_job(
-        config=config.model_copy(update={"days": days}),
-        sources=sources,
-        limit=config.max_articles,
-    )
-    result.raw_article_count = len(scrape_batch.raw_articles)
-    if scrape_batch.errors:
-        result.errors.extend(scrape_batch.errors)
-        result.warnings.append(f"candidate_scrape_failures={len(scrape_batch.errors)}")
-    if not scrape_batch.selected_candidates:
-        return result.finish("no queued candidates eligible for scrape")
+    try:
+        scrape_batch = await _run_candidate_scrape_job(
+            config=config.model_copy(update={"days": days}),
+            sources=sources,
+            limit=config.max_articles,
+        )
+        result.raw_article_count = len(scrape_batch.raw_articles)
+        if scrape_batch.errors:
+            result.errors.extend(scrape_batch.errors)
+            result.warnings.append(f"candidate_scrape_failures={len(scrape_batch.errors)}")
+        if not scrape_batch.selected_candidates:
+            return result.finish("no queued candidates eligible for scrape")
 
-    return await _process_ingest_articles(
-        config=config,
-        result=result,
-        source_names=source_names,
-        sources=sources,
-        all_articles=scrape_batch.raw_articles,
-        seen_store=seen_store,
-        classifier=classifier,
-        deduplicator=deduplicator,
-        operational_store=operational_store,
-    )
+        if store is None and (scrape_batch.raw_articles or scrape_batch.fallback_candidates):
+            store = create_operational_store(config)
+            owns_store = True
+
+        fallback_records = await _build_fallback_operational_records(
+            candidates=scrape_batch.fallback_candidates,
+            classifier=classifier,
+        )
+        if fallback_records and store is not None:
+            store.upsert_records(
+                config.dataset_name.value,
+                [record.model_dump(mode="json") for record in fallback_records],
+            )
+            result.warnings.append(f"fallback_operational_records={len(fallback_records)}")
+
+        if not scrape_batch.raw_articles:
+            result.unified_item_count = len(fallback_records)
+            if fallback_records:
+                return result.finish(
+                    f"fallback retention completed with {len(fallback_records)} provisional row(s)"
+                )
+            return result.finish("candidate scrape completed with no materializable rows")
+
+        processed = await _process_ingest_articles(
+            config=config,
+            result=result,
+            source_names=source_names,
+            sources=sources,
+            all_articles=scrape_batch.raw_articles,
+            seen_store=seen_store,
+            classifier=classifier,
+            deduplicator=deduplicator,
+            operational_store=store,
+        )
+        return processed
+    finally:
+        if owns_store and store is not None:
+            store.close()
 
 
 async def run_pipeline_async(config: Config, days: int) -> RunSnapshot:

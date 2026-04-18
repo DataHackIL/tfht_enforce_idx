@@ -265,7 +265,7 @@ class HaaretzScraper(Source):
                 timeout=READY_TIMEOUT_MS,
             )
             await page.wait_for_timeout(POST_READY_DELAY_MS)
-            return await page.content()
+            return str(await page.content())
         except PlaywrightTimeoutError as e:
             raise RuntimeError(
                 f"Haaretz search navigation timed out for '{keyword}' on page {page_number}."

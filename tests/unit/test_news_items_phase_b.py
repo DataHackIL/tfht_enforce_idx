@@ -17,6 +17,7 @@ import pytest
 
 from denbust.config import Config
 from denbust.data_models import Category, SourceReference, SubCategory, UnifiedItem
+from denbust.discovery.models import ContentBasis
 from denbust.models.policies import PrivacyRisk, PublicationStatus, ReviewStatus, TakedownStatus
 from denbust.news_items.backup import (
     GoogleDriveLatestBackupUploader,
@@ -141,12 +142,22 @@ def test_select_releasable_records_filters_internal_and_suppressed_rows() -> Non
     approved = build_record()
     internal = build_record(publication_status=PublicationStatus.INTERNAL_ONLY)
     suppressed = build_record(takedown_status=TakedownStatus.SUPPRESSED)
+    fallback = build_record(
+        publication_status=PublicationStatus.INTERNAL_ONLY,
+        review_status=ReviewStatus.NEEDS_FACT_REVIEW,
+    ).model_copy(
+        update={
+            "content_basis": ContentBasis.SEARCH_RESULT_ONLY,
+            "record_confidence": "low",
+        }
+    )
 
     public_rows = select_releasable_records(
         [
             approved.model_dump(mode="json"),
             internal.model_dump(mode="json"),
             suppressed.model_dump(mode="json"),
+            fallback.model_dump(mode="json"),
         ],
         release_version="2026-03-22",
     )
@@ -190,6 +201,25 @@ def test_serialized_row_stringifies_non_string_scalars() -> None:
     assert payload["source_count"] == "3"
     assert payload["index_relevant"] == "True"
     assert payload["taxonomy_version"] == ""
+
+
+def test_operational_record_defaults_to_full_article_content_basis() -> None:
+    record = build_record()
+
+    assert record.content_basis is ContentBasis.FULL_ARTICLE_PAGE
+    assert record.record_confidence == "medium"
+
+
+def test_news_items_fallback_migration_adds_operational_columns() -> None:
+    sql = Path("supabase/migrations/20260417_news_items_fallback_retention.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "add column if not exists content_basis text" in sql
+    assert "set content_basis = 'full_article_page'" in sql
+    assert "alter column content_basis set not null" in sql
+    assert "add column if not exists record_confidence text" in sql
+    assert "alter column record_confidence set default 'medium'" in sql
 
 
 def test_execute_latest_backup_returns_empty_manifest_when_no_targets(tmp_path: Path) -> None:

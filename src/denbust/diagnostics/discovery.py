@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from denbust.config import Config, OperationalProvider, load_config
 from denbust.discovery.models import (
     CandidateStatus,
+    ContentBasis,
     FetchStatus,
     PersistentCandidate,
     ScrapeAttempt,
@@ -84,6 +85,9 @@ class QueueHealthMetrics(BaseModel):
     scrape_failed_candidates: int = 0
     partially_scraped_candidates: int = 0
     unsupported_source_candidates: int = 0
+    search_result_only_candidates: int = 0
+    partial_page_candidates: int = 0
+    full_article_page_candidates: int = 0
     stale_candidates: int = 0
     retry_backlog_candidates: int = 0
 
@@ -111,6 +115,9 @@ class CandidateConversionMetrics(BaseModel):
     scrape_failed_candidates: int = 0
     unsupported_source_candidates: int = 0
     never_scraped_candidates: int = 0
+    search_result_only_candidates: int = 0
+    partial_page_candidates: int = 0
+    full_article_page_candidates: int = 0
     operational_record_matches: int = 0
     scrape_success_rate: float = 0.0
     operational_match_rate: float = 0.0
@@ -300,12 +307,24 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
         "unsupported={unsupported_source_candidates} stale={stale_candidates} "
         "retry_backlog={retry_backlog_candidates}".format(**queue.model_dump(mode="json"))
     )
+    lines.append(
+        "  basis search_result_only={search_result_only_candidates} "
+        "partial_page={partial_page_candidates} full_article_page={full_article_page_candidates}".format(
+            **queue.model_dump(mode="json")
+        )
+    )
     lines.append("")
     lines.append("Conversion")
     lines.append(
         "  scrape_succeeded={scrape_succeeded_candidates} partial={partially_scraped_candidates} "
         "failed={scrape_failed_candidates} unsupported={unsupported_source_candidates} "
         "never_scraped={never_scraped_candidates}".format(**conversion.model_dump(mode="json"))
+    )
+    lines.append(
+        "  basis search_result_only={search_result_only_candidates} "
+        "partial_page={partial_page_candidates} full_article_page={full_article_page_candidates}".format(
+            **conversion.model_dump(mode="json")
+        )
     )
     lines.append(
         f"  scrape_success_rate={conversion.scrape_success_rate:.2%} "
@@ -448,6 +467,7 @@ def _build_queue_health_metrics(
         ):
             stale += 1
     status_counts = Counter(candidate.candidate_status for candidate in candidates)
+    basis_counts = Counter(candidate.content_basis for candidate in candidates)
     return QueueHealthMetrics(
         total_candidates=len(candidates),
         new_candidates=status_counts[CandidateStatus.NEW],
@@ -457,6 +477,9 @@ def _build_queue_health_metrics(
         scrape_failed_candidates=status_counts[CandidateStatus.SCRAPE_FAILED],
         partially_scraped_candidates=status_counts[CandidateStatus.PARTIALLY_SCRAPED],
         unsupported_source_candidates=status_counts[CandidateStatus.UNSUPPORTED_SOURCE],
+        search_result_only_candidates=basis_counts[ContentBasis.SEARCH_RESULT_ONLY],
+        partial_page_candidates=basis_counts[ContentBasis.PARTIAL_PAGE],
+        full_article_page_candidates=basis_counts[ContentBasis.FULL_ARTICLE_PAGE],
         stale_candidates=stale,
         retry_backlog_candidates=retry_backlog,
     )
@@ -503,6 +526,7 @@ def _build_candidate_conversion_metrics(
         if operational_urls and _candidate_identity_urls(candidate) & operational_urls
     }
     status_counts = Counter(candidate.candidate_status for candidate in candidates)
+    basis_counts = Counter(candidate.content_basis for candidate in candidates)
     per_producer: list[ProducerConversionMetrics] = []
     all_producers = sorted(
         {producer_name for candidate in candidates for producer_name in candidate.discovered_via}
@@ -555,6 +579,9 @@ def _build_candidate_conversion_metrics(
             + status_counts[CandidateStatus.SCRAPE_PENDING]
             + status_counts[CandidateStatus.SCRAPE_IN_PROGRESS]
         ),
+        search_result_only_candidates=basis_counts[ContentBasis.SEARCH_RESULT_ONLY],
+        partial_page_candidates=basis_counts[ContentBasis.PARTIAL_PAGE],
+        full_article_page_candidates=basis_counts[ContentBasis.FULL_ARTICLE_PAGE],
         operational_record_matches=len(matched_candidate_ids),
         scrape_success_rate=_safe_ratio(
             status_counts[CandidateStatus.SCRAPE_SUCCEEDED],

@@ -1,3 +1,7 @@
+default_install_hook_types:
+  - pre-commit
+  - pre-push
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -14,3 +18,57 @@ repos:
     hooks:
       - id: ruff
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: scripts/run_python_with_src.sh
+        language: python
+        additional_dependencies:
+          - anthropic>=0.40.0
+          - beautifulsoup4>=4.12.0
+          - httpx>=0.27.0
+          - mypy>=1.10.0
+          - pydantic>=2.5.0
+          - pyyaml>=6.0.1
+          - typer>=0.12.0
+          - types-beautifulsoup4>=4.12.0
+          - types-pyyaml>=6.0.0
+        args: ["-m", "mypy", "src/"]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: smoke-tests
+        name: smoke tests
+        entry: scripts/run_python_with_src.sh
+        language: python
+        additional_dependencies:
+          - anthropic>=0.40.0
+          - beautifulsoup4>=4.12.0
+          - feedparser>=6.0.10
+          - httpx>=0.27.0
+          - pydantic>=2.5.0
+          - pytest>=8.0.0
+          - pytest-asyncio>=0.24.0
+          - pyyaml>=6.0.1
+          - typer>=0.12.0
+        args: ["-m", "pytest", "-q", "--maxfail=1", "tests/smoke"]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: unit-tests
+        name: unit tests
+        entry: scripts/run_python_with_src.sh
+        language: system
+        args: ["-m", "pytest", "-q", "tests/unit"]
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: integration-tests
+        name: integration tests
+        entry: scripts/run_python_with_src.sh
+        language: system
+        args: ["-m", "pytest", "-q", "tests/integration"]
+        pass_filenames: false
+        stages: [pre-push]

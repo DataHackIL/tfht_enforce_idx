@@ -269,6 +269,9 @@ You can now tell whether the discovery layer is actually helping.
 ### Goal
 Retain value from promising candidates even when full scraping fails.
 
+### Status
+Implemented.
+
 ### Scope
 - Add explicit handling for:
   - `content_basis = search_result_only`
@@ -423,6 +426,7 @@ The recommended order is:
 
 ### After DL-PR-08
 - candidate retention is mature enough for real-world imperfect scraping
+- partial-page and search-result-only fallbacks can be retained without leaking into public release
 
 ### After DL-PR-09
 - historical backfill becomes feasible
