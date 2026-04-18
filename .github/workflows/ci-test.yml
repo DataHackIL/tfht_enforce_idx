@@ -215,7 +215,7 @@ jobs:
       - name: Run validation evaluation
         if: ${{ env.HAS_ANTHROPIC_API_KEY == 'true' }}
         run: |
-          denbust validation evaluate \
+          denbust validation-evaluate \
             --validation-set validation/news_items/classifier_validation.csv \
             --variants agents/validation/classifier_variants.yaml \
             --output validation-eval/classifier_variant_eval.json
