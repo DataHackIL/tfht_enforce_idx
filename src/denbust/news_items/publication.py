@@ -26,7 +26,7 @@ class KagglePublisher:
 
         import os
 
-        from kaggle.api.kaggle_api_extended import KaggleApi  # type: ignore[import-untyped]
+        from kaggle.api.kaggle_api_extended import KaggleApi  # type: ignore[import-not-found]
 
         metadata_path = release_dir / "dataset-metadata.json"
         metadata = {

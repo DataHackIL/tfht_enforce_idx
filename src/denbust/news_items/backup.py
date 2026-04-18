@@ -48,10 +48,10 @@ class GoogleDriveLatestBackupUploader:
             raise ValueError("Google Drive backup requires DENBUST_DRIVE_SERVICE_ACCOUNT_JSON.")
 
         from google.oauth2 import service_account
-        from googleapiclient.discovery import build  # type: ignore[import-untyped]
-        from googleapiclient.http import MediaFileUpload  # type: ignore[import-untyped]
+        from googleapiclient.discovery import build  # type: ignore[import-not-found]
+        from googleapiclient.http import MediaFileUpload  # type: ignore[import-not-found]
 
-        credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
+        credentials = service_account.Credentials.from_service_account_file(
             self._service_account_json,
             scopes=["https://www.googleapis.com/auth/drive"],
         )
@@ -104,7 +104,7 @@ class ObjectStorageLatestBackupUploader:
                 "Object storage backup requires DENBUST_OBJECT_STORE_ACCESS_KEY_ID and DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY."
             )
 
-        import boto3  # type: ignore[import-untyped]
+        import boto3  # type: ignore[import-not-found]
 
         client = boto3.client(
             "s3",

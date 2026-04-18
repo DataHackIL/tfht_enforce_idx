@@ -232,8 +232,8 @@ class NewsItemsReleaseBuilder(ReleaseBuilder):
 
     def _write_parquet(self, rows: Sequence[NewsItemPublicRecord], path: Path) -> None:
         try:
-            import pyarrow as pa  # type: ignore[import-untyped]
-            import pyarrow.parquet as pq  # type: ignore[import-untyped]
+            import pyarrow as pa  # type: ignore[import-not-found]
+            import pyarrow.parquet as pq  # type: ignore[import-not-found]
         except ImportError as exc:
             raise RuntimeError(
                 "pyarrow is required to build the news_items Parquet release."
