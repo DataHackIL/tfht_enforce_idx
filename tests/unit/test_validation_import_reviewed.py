@@ -8,6 +8,7 @@ import pytest
 from openpyxl import Workbook
 
 from denbust.validation.common import read_csv_rows
+from denbust.validation.dataset import finalize_validation_set
 from denbust.validation.import_reviewed import (
     TFHT_MANUAL_TRACKING_V1,
     VALIDATION_REVIEWED_EXAMPLES_V1,
@@ -90,6 +91,32 @@ def test_import_reviewed_table_normalizes_manual_tracking_workbook(tmp_path: Pat
 
     assert second_row["taxonomy_subcategory_id"] == "administrative_closure"
     assert second_row["index_relevant"] == "True"
+
+
+def test_import_reviewed_table_and_finalize_are_idempotent(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "manual_tracking.xlsx"
+    validation_set_path = tmp_path / "classifier_validation.csv"
+    _build_manual_tracking_workbook(workbook_path)
+
+    imported = import_reviewed_table(
+        input_path=workbook_path,
+        format_name=TFHT_MANUAL_TRACKING_V1,
+    )
+
+    first = finalize_validation_set(
+        input_path=imported.output_path,
+        validation_set_path=validation_set_path,
+    )
+    second = finalize_validation_set(
+        input_path=imported.output_path,
+        validation_set_path=validation_set_path,
+    )
+
+    assert first.added_rows == 2
+    assert second.added_rows == 0
+    assert second.skipped_duplicates == 2
+    rows = read_csv_rows(validation_set_path)
+    assert len(rows) == 2
 
 
 def test_import_reviewed_table_rejects_unknown_format(tmp_path: Path) -> None:

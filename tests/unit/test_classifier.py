@@ -166,6 +166,80 @@ class TestClassifierParsing:
         assert result.taxonomy_category_id is None
         assert result.taxonomy_subcategory_id is None
 
+    def test_parse_valid_taxonomy_pair_maps_legacy_fields(self) -> None:
+        """Known taxonomy ids should populate both taxonomy and legacy compatibility fields."""
+        classifier = Classifier(api_key="test-key")
+
+        response = (
+            '{"relevant": true, "enforcement_related": true, '
+            '"taxonomy_category_id": "brothels", '
+            '"taxonomy_subcategory_id": "administrative_closure", '
+            '"confidence": "high"}'
+        )
+        result = classifier._parse_response(response)
+
+        assert result.relevant is True
+        assert result.enforcement_related is True
+        assert result.taxonomy_version == "1"
+        assert result.taxonomy_category_id == "brothels"
+        assert result.taxonomy_subcategory_id == "administrative_closure"
+        assert result.category == Category.BROTHEL
+        assert result.sub_category == SubCategory.CLOSURE
+        assert result.index_relevant is True
+
+    def test_parse_invalid_taxonomy_pair_falls_back_to_not_relevant(self) -> None:
+        """Taxonomy pairs outside the packaged taxonomy should be rejected."""
+        classifier = Classifier(api_key="test-key")
+
+        response = (
+            '{"relevant": true, "enforcement_related": true, '
+            '"taxonomy_category_id": "brothels", '
+            '"taxonomy_subcategory_id": "trafficking_women", '
+            '"confidence": "high"}'
+        )
+        result = classifier._parse_response(response)
+
+        assert result.relevant is False
+        assert result.enforcement_related is False
+        assert result.taxonomy_version is None
+        assert result.taxonomy_category_id is None
+        assert result.taxonomy_subcategory_id is None
+        assert result.category == Category.NOT_RELEVANT
+        assert result.sub_category is None
+
+    def test_parse_taxonomy_pair_derives_index_relevant_even_when_payload_disagrees(self) -> None:
+        """index_relevant should be computed from the packaged taxonomy rather than the model payload."""
+        classifier = Classifier(api_key="test-key")
+
+        response = (
+            '{"relevant": true, "enforcement_related": true, '
+            '"index_relevant": false, '
+            '"taxonomy_category_id": "brothels", '
+            '"taxonomy_subcategory_id": "administrative_closure", '
+            '"confidence": "high"}'
+        )
+        result = classifier._parse_response(response)
+
+        assert result.index_relevant is True
+
+    def test_parse_non_index_taxonomy_pair_keeps_index_relevant_false(self) -> None:
+        """Non-index taxonomy leaves should stay false even if the payload claims otherwise."""
+        classifier = Classifier(api_key="test-key")
+
+        response = (
+            '{"relevant": true, "enforcement_related": true, '
+            '"index_relevant": true, '
+            '"taxonomy_category_id": "pimping_prostitution", '
+            '"taxonomy_subcategory_id": "women_testimonies", '
+            '"confidence": "high"}'
+        )
+        result = classifier._parse_response(response)
+
+        assert result.relevant is True
+        assert result.taxonomy_category_id == "pimping_prostitution"
+        assert result.taxonomy_subcategory_id == "women_testimonies"
+        assert result.index_relevant is False
+
     def test_parse_relevant_without_taxonomy_or_legacy_category_downgrades_to_not_relevant(
         self,
     ) -> None:

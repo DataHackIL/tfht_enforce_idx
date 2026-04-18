@@ -125,7 +125,7 @@ def validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Vali
                 raise ValueError(
                     f"Invalid sub_category '{sub_category.value}' for category '{category.value}'"
                 )
-        elif enforcement_related:
+        elif enforcement_related and not (taxonomy_category_id and taxonomy_subcategory_id):
             raise ValueError(
                 "Reviewed enforcement-related rows must include a non-empty sub_category"
             )
