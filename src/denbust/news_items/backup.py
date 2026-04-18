@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any, cast
 
 from denbust.config import Config
 from denbust.publish.backup import BackupManifest, BackupTarget
@@ -48,10 +49,11 @@ class GoogleDriveLatestBackupUploader:
             raise ValueError("Google Drive backup requires DENBUST_DRIVE_SERVICE_ACCOUNT_JSON.")
 
         from google.oauth2 import service_account
-        from googleapiclient.discovery import build  # type: ignore[import-not-found]
-        from googleapiclient.http import MediaFileUpload  # type: ignore[import-not-found]
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
 
-        credentials = service_account.Credentials.from_service_account_file(
+        credentials_factory = cast(Any, service_account.Credentials)
+        credentials = credentials_factory.from_service_account_file(
             self._service_account_json,
             scopes=["https://www.googleapis.com/auth/drive"],
         )
@@ -104,7 +106,7 @@ class ObjectStorageLatestBackupUploader:
                 "Object storage backup requires DENBUST_OBJECT_STORE_ACCESS_KEY_ID and DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY."
             )
 
-        import boto3  # type: ignore[import-not-found]
+        import boto3
 
         client = boto3.client(
             "s3",

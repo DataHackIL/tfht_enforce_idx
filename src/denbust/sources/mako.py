@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
@@ -412,7 +412,7 @@ class MakoScraper(Source):
                 f"If Chromium is missing, install it with `{PLAYWRIGHT_INSTALL_HINT}`."
             ) from e
 
-        return cast(str, await page.content())
+        return str(await page.content())
 
     async def _fetch_search_results_html(
         self,
@@ -463,7 +463,7 @@ class MakoScraper(Source):
 
             if snapshot.state == "results":
                 await page.wait_for_timeout(POST_READY_DELAY_MS)
-                return cast(str, await page.content())
+                return str(await page.content())
 
             if snapshot.state == "empty":
                 logger.info("Mako browser search returned no results for '%s'", keyword)

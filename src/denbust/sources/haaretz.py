@@ -7,7 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
@@ -265,7 +265,7 @@ class HaaretzScraper(Source):
                 timeout=READY_TIMEOUT_MS,
             )
             await page.wait_for_timeout(POST_READY_DELAY_MS)
-            return cast(str, await page.content())
+            return str(await page.content())
         except PlaywrightTimeoutError as e:
             raise RuntimeError(
                 f"Haaretz search navigation timed out for '{keyword}' on page {page_number}."
