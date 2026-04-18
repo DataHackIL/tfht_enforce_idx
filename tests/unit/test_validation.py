@@ -24,6 +24,7 @@ from denbust.validation.collect import (
     select_promising_candidates,
 )
 from denbust.validation.common import (
+    DEFAULT_VARIANT_MATRIX_PATH,
     DRAFT_COLUMNS,
     VALIDATION_SET_COLUMNS,
     canonicalize_csv_url,
@@ -548,6 +549,71 @@ class TestValidationFinalize:
         rows = read_csv_rows(validation_set_path)
         assert {row["source_name"] for row in rows} == {"ynet", "mako"}
 
+    def test_finalize_validation_set_is_idempotent_for_same_reviewed_import(
+        self, tmp_path: Path
+    ) -> None:
+        """Re-finalizing the same reviewed draft should add no new rows."""
+        draft_path = tmp_path / "draft.csv"
+        validation_set_path = tmp_path / "classifier_validation.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "maariv",
+                    "article_date": "2026-03-01T00:00:00+00:00",
+                    "url": "https://example.com/a?utm_source=one",
+                    "canonical_url": "https://example.com/a",
+                    "title": "title a",
+                    "snippet": "snippet a",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_index_relevant": "True",
+                    "suggested_taxonomy_version": "1",
+                    "suggested_taxonomy_category_id": "brothels",
+                    "suggested_taxonomy_subcategory_id": "administrative_closure",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "closure",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": "True",
+                    "taxonomy_version": "1",
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "administrative_closure",
+                    "category": "brothel",
+                    "sub_category": "closure",
+                    "review_status": "reviewed",
+                    "annotation_source": "tfht_manual_tracking_v1",
+                    "expected_month_bucket": "",
+                    "expected_city": "",
+                    "expected_status": "",
+                    "manual_city": "",
+                    "manual_address": "",
+                    "manual_event_label": "",
+                    "manual_status": "",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-01T00:00:00+00:00",
+                }
+            ],
+        )
+
+        first = finalize_validation_set(
+            input_path=draft_path,
+            validation_set_path=validation_set_path,
+        )
+        second = finalize_validation_set(
+            input_path=draft_path,
+            validation_set_path=validation_set_path,
+        )
+
+        assert first.added_rows == 1
+        assert first.skipped_duplicates == 0
+        assert second.added_rows == 0
+        assert second.skipped_duplicates == 1
+        rows = read_csv_rows(validation_set_path)
+        assert len(rows) == 1
+
     def test_finalize_validation_set_rejects_invalid_labels(self, tmp_path: Path) -> None:
         """Invalid category/sub-category pairs should fail finalization."""
         draft_path = tmp_path / "draft.csv"
@@ -671,7 +737,7 @@ class TestValidationFinalize:
         self,
         tmp_path: Path,
     ) -> None:
-        """Reviewed enforcement-related rows must include a sub-category."""
+        """Reviewed enforcement-related rows without taxonomy labels must include a sub-category."""
         draft_path = tmp_path / "draft.csv"
         write_csv_rows(
             draft_path,
@@ -702,6 +768,59 @@ class TestValidationFinalize:
 
         with pytest.raises(ValueError, match="must include a non-empty sub_category"):
             finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
+
+    def test_finalize_validation_set_allows_taxonomy_labeled_enforcement_rows_without_legacy_subcategory(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Taxonomy-labeled enforcement rows may omit the legacy sub-category when the leaf is valid."""
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [
+                {
+                    "source_name": "mako",
+                    "article_date": "2026-03-03T00:00:00+00:00",
+                    "url": "https://example.com/b",
+                    "canonical_url": "https://example.com/b",
+                    "title": "title b",
+                    "snippet": "snippet b",
+                    "suggested_relevant": "True",
+                    "suggested_enforcement_related": "True",
+                    "suggested_index_relevant": "True",
+                    "suggested_taxonomy_version": "1",
+                    "suggested_taxonomy_category_id": "brothels",
+                    "suggested_taxonomy_subcategory_id": "keeping_brothel",
+                    "suggested_category": "brothel",
+                    "suggested_sub_category": "",
+                    "suggested_confidence": "high",
+                    "relevant": "True",
+                    "enforcement_related": "True",
+                    "index_relevant": "True",
+                    "taxonomy_version": "1",
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "keeping_brothel",
+                    "category": "brothel",
+                    "sub_category": "",
+                    "review_status": "reviewed",
+                    "annotation_source": "tfht_manual_tracking_v1",
+                    "annotation_notes": "",
+                    "collected_at": "2026-03-03T00:00:00+00:00",
+                }
+            ],
+        )
+
+        result = finalize_validation_set(
+            input_path=draft_path,
+            validation_set_path=tmp_path / "out.csv",
+        )
+        rows = read_csv_rows(result.validation_set_path)
+
+        assert rows[0]["enforcement_related"] == "True"
+        assert rows[0]["taxonomy_category_id"] == "brothels"
+        assert rows[0]["taxonomy_subcategory_id"] == "keeping_brothel"
+        assert rows[0]["sub_category"] == ""
 
     @pytest.mark.parametrize(
         (
@@ -1146,6 +1265,21 @@ class TestValidationEvaluate:
         assert "enf_f1" in table
         assert "baseline" in table
         assert "0.667" in table
+
+    def test_load_tracked_variant_matrix_exposes_baseline_and_v1_taxonomy(self) -> None:
+        """The tracked asset should exercise the two-variant Phase C matrix shape."""
+        matrix = _load_variant_matrix(DEFAULT_VARIANT_MATRIX_PATH)
+
+        assert [variant.name for variant in matrix.variants] == ["baseline", "v1_taxonomy"]
+        assert matrix.defaults.model == "claude-sonnet-4-20250514"
+        assert matrix.variants[0].system_prompt is None
+        assert matrix.variants[0].user_prompt_template is None
+        assert matrix.variants[1].system_prompt is not None
+        assert "Return only JSON" in matrix.variants[1].system_prompt
+        assert matrix.variants[1].user_prompt_template is not None
+        assert "taxonomy_category_id" in matrix.variants[1].user_prompt_template
+        assert "{title}" in matrix.variants[1].user_prompt_template
+        assert "{snippet}" in matrix.variants[1].user_prompt_template
 
     def test_load_validation_examples_defaults_missing_enforcement_flag_false(
         self, tmp_path: Path

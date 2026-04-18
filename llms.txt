@@ -107,3 +107,4 @@ src/denbust/
 - Discovery rollout roadmap: `docs/tfht_discovery_layer_implementation_plan.md`
 - Broader implementation backlog: `docs/IMPLEMENTATION_PLAN.md`
 - Current project report: `docs/2026_04_04_tfht_state_of_project_report.md`
+- PR completion rule: plans should normally end in an open PR with a detailed description, appropriate labels, and a GitHub milestone; create missing labels/milestones when needed via the repo-specific GitHub MCP.
