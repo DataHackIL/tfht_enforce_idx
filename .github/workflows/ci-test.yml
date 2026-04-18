@@ -186,12 +186,12 @@ jobs:
 
   validation-evaluate:
     name: Validation evaluate
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.ANTHROPIC_API_KEY != '' }}
     needs: [lint, unit-tests, integration-tests, coverage]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
 
     steps:
       - name: Checkout
@@ -208,12 +208,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Skip when Anthropic secret is unavailable
-        if: ${{ env.HAS_ANTHROPIC_API_KEY != 'true' }}
-        run: echo "Skipping validation evaluation artifact job because ANTHROPIC_API_KEY is unavailable."
-
       - name: Run validation evaluation
-        if: ${{ env.HAS_ANTHROPIC_API_KEY == 'true' }}
         run: |
           denbust validation-evaluate \
             --validation-set validation/news_items/classifier_validation.csv \
@@ -221,7 +216,6 @@ jobs:
             --output validation-eval/classifier_variant_eval.json
 
       - name: Upload validation evaluation artifacts
-        if: ${{ env.HAS_ANTHROPIC_API_KEY == 'true' }}
         uses: actions/upload-artifact@v6
         with:
           name: validation-evaluation-artifacts
