@@ -124,6 +124,88 @@ class TestCli:
         assert release_calls == [(Path("agents/release/news_items.yaml"), DatasetName.NEWS_ITEMS)]
         assert backup_calls == [(Path("agents/backup/news_items.yaml"), DatasetName.NEWS_ITEMS)]
 
+    def test_report_monthly_forwards_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """report monthly should forward its explicit options to the pipeline wrapper."""
+        captured: dict[str, object] = {}
+
+        def fake_run_news_items_monthly_report(
+            *,
+            config_path: Path,
+            month: str,
+            output_path: Path | None = None,
+            json_output_path: Path | None = None,
+            hq_activity: str | None = None,
+            hq_activity_file: Path | None = None,
+        ) -> object:
+            captured["config_path"] = config_path
+            captured["month"] = month
+            captured["output_path"] = output_path
+            captured["json_output_path"] = json_output_path
+            captured["hq_activity"] = hq_activity
+            captured["hq_activity_file"] = hq_activity_file
+            return type("Report", (), {"rendered_markdown": "# report"})()
+
+        monkeypatch.setattr(
+            "denbust.pipeline.run_news_items_monthly_report",
+            fake_run_news_items_monthly_report,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "report",
+                "monthly",
+                "--month",
+                "2026-03",
+                "--config",
+                "agents/custom.yaml",
+                "--output",
+                "report.md",
+                "--json-output",
+                "report.json",
+                "--hq-activity",
+                "HQ text",
+                "--hq-activity-file",
+                "hq.txt",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured == {
+            "config_path": Path("agents/custom.yaml"),
+            "month": "2026-03",
+            "output_path": Path("report.md"),
+            "json_output_path": Path("report.json"),
+            "hq_activity": "HQ text",
+            "hq_activity_file": Path("hq.txt"),
+        }
+
+    def test_report_monthly_uses_local_news_config_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """report monthly should default to the tracked local news config."""
+
+        def fake_run_news_items_monthly_report(**kwargs: object) -> object:
+            assert kwargs["config_path"] == Path("agents/news/local.yaml")
+            return type("Report", (), {"rendered_markdown": "# rendered"})()
+
+        monkeypatch.setattr(
+            "denbust.pipeline.run_news_items_monthly_report",
+            fake_run_news_items_monthly_report,
+        )
+
+        result = runner.invoke(app, ["report", "monthly", "--month", "2026-03"])
+
+        assert result.exit_code == 0
+        assert "# rendered" in result.stdout
+
+    def test_report_monthly_rejects_invalid_month(self) -> None:
+        """report monthly should reject invalid YYYY-MM values."""
+        result = runner.invoke(app, ["report", "monthly", "--month", "2026/03"])
+
+        assert result.exit_code != 0
+        assert "Expected YYYY-MM" in result.stderr
+
     def test_version_prints_package_version(self) -> None:
         """Version should render the package version string."""
         result = runner.invoke(app, ["version"])

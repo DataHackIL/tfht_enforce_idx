@@ -22,6 +22,8 @@ app = typer.Typer(
     help="Monitor enforcement of anti-brothel laws in Israel.",
     no_args_is_help=True,
 )
+report_app = typer.Typer(help="Generate report artifacts.")
+app.add_typer(report_app, name="report")
 
 
 @app.command()
@@ -213,6 +215,55 @@ def backup(
 
     config_path = config or Path("agents/backup/news_items.yaml")
     run_backup(config_path=config_path, dataset_name=dataset)
+
+
+@report_app.command("monthly")
+def report_monthly(
+    month: Annotated[
+        str,
+        typer.Option("--month", help="Calendar month to report in YYYY-MM format"),
+    ],
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Optional Markdown output path"),
+    ] = None,
+    json_output: Annotated[
+        Path | None,
+        typer.Option("--json-output", help="Optional JSON output path"),
+    ] = None,
+    hq_activity: Annotated[
+        str | None,
+        typer.Option("--hq-activity", help="Optional manual TFHT activity text"),
+    ] = None,
+    hq_activity_file: Annotated[
+        Path | None,
+        typer.Option("--hq-activity-file", help="Optional UTF-8 file with HQ activity text"),
+    ] = None,
+) -> None:
+    """Generate the monthly public report bundle for news_items."""
+    from denbust.news_items.monthly_report import parse_month_key
+    from denbust.pipeline import run_news_items_monthly_report
+
+    try:
+        parse_month_key(month)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    config_path = config or Path("agents/news/local.yaml")
+    report = run_news_items_monthly_report(
+        config_path=config_path,
+        month=month,
+        output_path=output,
+        json_output_path=json_output,
+        hq_activity=hq_activity,
+        hq_activity_file=hq_activity_file,
+    )
+    if output is None:
+        typer.echo(report.rendered_markdown)
 
 
 @app.command("validation-collect")

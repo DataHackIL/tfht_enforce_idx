@@ -92,6 +92,24 @@ async def _run_scaffolded_release(
     )
 
 
+async def _run_news_items_monthly_report(
+    config: Config,
+    config_path: Path | None,
+    days_override: int | None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    del days_override
+    from denbust.pipeline import run_news_items_monthly_report_job
+
+    if operational_store is None:
+        return await run_news_items_monthly_report_job(config, config_path=config_path)
+    return await run_news_items_monthly_report_job(
+        config,
+        config_path=config_path,
+        operational_store=operational_store,
+    )
+
+
 async def _run_scaffolded_backup(
     config: Config,
     config_path: Path | None,
@@ -133,6 +151,11 @@ def ensure_default_jobs_registered() -> None:
         DatasetName.NEWS_ITEMS,
         JobName.SCRAPE_CANDIDATES,
         _run_news_items_scrape_candidates,
+    )
+    register_job(
+        DatasetName.NEWS_ITEMS,
+        JobName.MONTHLY_REPORT,
+        _run_news_items_monthly_report,
     )
     register_job(
         DatasetName.NEWS_ITEMS,

@@ -58,6 +58,21 @@ from denbust.news_items.ingest import (
     summarize_privacy_mix,
 )
 from denbust.news_items.models import NewsItemOperationalRecord
+from denbust.news_items.monthly_report import (
+    MONTHLY_REPORT_HQ_ACTIVITY_ENV,
+    MONTHLY_REPORT_HQ_ACTIVITY_FILE_ENV,
+    MONTHLY_REPORT_JSON_ENV,
+    MONTHLY_REPORT_MARKDOWN_ENV,
+    MONTHLY_REPORT_MONTH_ENV,
+    MonthlyReport,
+    generate_monthly_report,
+    hq_activity_from_inputs,
+    persist_monthly_report_artifacts,
+    report_env_summary,
+    resolve_report_month,
+    write_report_copy,
+    write_report_json_copy,
+)
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.news_items.policy import infer_privacy_risk, merge_privacy_risk
 from denbust.news_items.publication import publish_release_bundle
@@ -89,6 +104,7 @@ logger = logging.getLogger(__name__)
 _OPERATIONAL_STORE_JOBS = {
     JobName.INGEST,
     JobName.SCRAPE_CANDIDATES,
+    JobName.MONTHLY_REPORT,
     JobName.RELEASE,
     JobName.BACKUP,
 }
@@ -1639,6 +1655,95 @@ async def run_news_items_release_job(
     return result.finish(f"release built for {manifest.row_count} public row(s)")
 
 
+def _load_corrected_news_item_rows(
+    store: OperationalStore,
+    *,
+    dataset_name: str,
+) -> list[dict[str, object]]:
+    rows = store.fetch_records(dataset_name)
+    return [
+        record.model_dump(mode="json")
+        for record in apply_manual_annotations(
+            parse_operational_records(rows),
+            corrections=parse_news_item_corrections(
+                store.fetch_news_item_corrections(dataset_name)
+            ),
+            missing_items=parse_missing_news_items(store.fetch_missing_news_items(dataset_name)),
+            suppression_rules=parse_suppression_rules(store.fetch_suppression_rules(dataset_name)),
+        )
+    ]
+
+
+async def _run_news_items_monthly_report_with_options(
+    config: Config,
+    *,
+    config_path: Path | None,
+    store: OperationalStore,
+    month_value: str | None,
+    markdown_output_path: Path | None,
+    json_output_path: Path | None,
+    hq_activity: str | None,
+    hq_activity_file: Path | None,
+) -> tuple[RunSnapshot, MonthlyReport]:
+    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
+    dataset_name = config.dataset_name.value
+    corrected_rows = _load_corrected_news_item_rows(store, dataset_name=dataset_name)
+    month = resolve_report_month(month_value)
+    report = generate_monthly_report(
+        parse_operational_records(corrected_rows),
+        month=month,
+        hq_activity=hq_activity_from_inputs(
+            hq_activity=hq_activity,
+            hq_activity_file=hq_activity_file,
+        ),
+    )
+    artifacts = persist_monthly_report_artifacts(config.state_paths.publication_dir, report)
+    if markdown_output_path is not None:
+        write_report_copy(markdown_output_path, report.rendered_markdown)
+    if json_output_path is not None:
+        write_report_json_copy(json_output_path, report)
+    result.unified_item_count = sum(report.stats.values())
+    result.set_debug_payload(
+        report_env_summary(
+            month=month,
+            markdown_path=artifacts.markdown_path,
+            json_path=artifacts.json_path,
+        )
+    )
+    if not report.stats:
+        result.warnings.append("monthly_report_contains_zero_index_relevant_public_rows")
+    return result.finish(
+        f"monthly report built for {report.month_key} ({len(report.selected_cases)} case(s))"
+    ), report
+
+
+async def run_news_items_monthly_report_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    """Build a monthly public report bundle for news_items."""
+    del days_override
+    store = operational_store or create_operational_store(config)
+    hq_activity_file = os.environ.get(MONTHLY_REPORT_HQ_ACTIVITY_FILE_ENV)
+    result, _ = await _run_news_items_monthly_report_with_options(
+        config,
+        config_path=config_path,
+        store=store,
+        month_value=os.environ.get(MONTHLY_REPORT_MONTH_ENV),
+        markdown_output_path=Path(os.environ[MONTHLY_REPORT_MARKDOWN_ENV])
+        if os.environ.get(MONTHLY_REPORT_MARKDOWN_ENV)
+        else None,
+        json_output_path=Path(os.environ[MONTHLY_REPORT_JSON_ENV])
+        if os.environ.get(MONTHLY_REPORT_JSON_ENV)
+        else None,
+        hq_activity=os.environ.get(MONTHLY_REPORT_HQ_ACTIVITY_ENV),
+        hq_activity_file=Path(hq_activity_file) if hq_activity_file else None,
+    )
+    return result
+
+
 async def run_news_items_backup_job(
     config: Config,
     config_path: Path | None = None,
@@ -1843,6 +1948,56 @@ def run_job(
         days_override=days_override,
         operational_store=operational_store,
     )
+
+
+def run_news_items_monthly_report(
+    *,
+    config_path: Path,
+    month: str,
+    output_path: Path | None = None,
+    json_output_path: Path | None = None,
+    hq_activity: str | None = None,
+    hq_activity_file: Path | None = None,
+) -> MonthlyReport:
+    """Run the news_items monthly report job with explicit CLI-style options."""
+    setup_logging()
+    config = _load_config_or_exit(config_path).model_copy(
+        update={
+            "dataset_name": DatasetName.NEWS_ITEMS,
+            "job_name": JobName.MONTHLY_REPORT,
+        }
+    )
+    logger.info("Starting %s/%s for month %s", config.dataset_name, config.job_name, month)
+    store = create_operational_store(config)
+    try:
+        result, report = asyncio.run(
+            _run_news_items_monthly_report_with_options(
+                config,
+                config_path=config_path,
+                store=store,
+                month_value=month,
+                markdown_output_path=output_path,
+                json_output_path=json_output_path,
+                hq_activity=hq_activity,
+                hq_activity_file=hq_activity_file,
+            )
+        )
+        try:
+            store.write_run_metadata(result)
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist operational run metadata for %s/%s: %s",
+                config.dataset_name.value,
+                config.job_name.value,
+                exc,
+            )
+            result.warnings.append(
+                f"operational_run_metadata_write_failed={type(exc).__name__}: {exc}"
+            )
+        write_run_snapshot(config.state_paths.runs_dir, result)
+        return report
+    finally:
+        store.close()
 
 
 def run_release(

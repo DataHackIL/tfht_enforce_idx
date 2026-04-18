@@ -10,6 +10,7 @@ import pytest
 from denbust.config import Config
 from denbust.datasets.jobs import (
     _run_news_items_ingest,
+    _run_news_items_monthly_report,
     _run_news_items_scrape_candidates,
     _run_scaffolded_backup,
     _run_scaffolded_release,
@@ -92,6 +93,32 @@ async def test_run_news_items_scrape_candidates_wrapper_calls_pipeline(
         config,
         config_path=Path("agents/news/local.yaml"),
         days_override=5,
+        operational_store=store,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_news_items_monthly_report_wrapper_calls_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The monthly-report wrapper should delegate to the pipeline handler."""
+    expected = build_snapshot()
+    mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr("denbust.pipeline.run_news_items_monthly_report_job", mock)
+
+    config = Config(job_name="monthly_report")
+    store = object()
+    result = await _run_news_items_monthly_report(
+        config,
+        Path("agents/news/local.yaml"),
+        None,
+        operational_store=store,  # type: ignore[arg-type]
+    )
+
+    assert result is expected
+    mock.assert_awaited_once_with(
+        config,
+        config_path=Path("agents/news/local.yaml"),
         operational_store=store,
     )
 
