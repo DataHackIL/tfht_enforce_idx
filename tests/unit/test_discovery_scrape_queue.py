@@ -405,7 +405,7 @@ async def test_scrape_candidates_retains_partial_page_metadata(tmp_path: Path) -
 async def test_scrape_candidates_records_adapter_exceptions_and_continues(
     tmp_path: Path,
 ) -> None:
-    """Adapter exceptions should fail only the affected candidate and continue the batch."""
+    """Adapter exceptions should still fall back to generic retention and continue the batch."""
     store = build_store(tmp_path)
     failing_candidate = build_candidate("candidate-fail", status=CandidateStatus.NEW)
     succeeding_candidate = build_candidate(
@@ -455,9 +455,12 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
     succeeded = store.get_candidate("candidate-ok")
     assert failed is not None
     assert failed.candidate_status is CandidateStatus.SCRAPE_FAILED
+    assert failed.content_basis is ContentBasis.SEARCH_RESULT_ONLY
     assert failed.next_scrape_attempt_at is not None
-    assert failed.last_scrape_error_code == "source_adapter_error"
-    assert "adapter boom" in (failed.last_scrape_error_message or "")
+    assert failed.last_scrape_error_code == "generic_fetch_failed"
+    assert failed.last_scrape_error_message == "Generic fetch failed"
+    assert failed.needs_review is True
+    assert failed.metadata["fallback_source_name"] == "ynet"
     assert succeeded is not None
     assert succeeded.candidate_status is CandidateStatus.SCRAPE_SUCCEEDED
     assert len(batch.raw_articles) == 1
@@ -467,7 +470,52 @@ async def test_scrape_candidates_records_adapter_exceptions_and_continues(
     )
     assert [attempt.fetch_status for attempt in batch.attempts] == [
         FetchStatus.FAILED,
+        FetchStatus.FAILED,
         FetchStatus.SUCCESS,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scrape_candidates_retains_partial_fallback_after_adapter_exception(
+    tmp_path: Path,
+) -> None:
+    """Adapter exceptions should still allow partial-page fallback retention."""
+    store = build_store(tmp_path)
+    candidate = build_candidate("candidate-partial", status=CandidateStatus.NEW)
+    store.upsert_candidates([candidate])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
+        return GenericFetchResult(
+            fetch_status=FetchStatus.PARTIAL,
+            title="כותרת חלקית",
+            snippet="תיאור חלקי",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        batch = await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[FailingSource("ynet", RuntimeError("adapter boom"))],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    stored = store.get_candidate("candidate-partial")
+    assert stored is not None
+    assert stored.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    assert stored.content_basis is ContentBasis.PARTIAL_PAGE
+    assert stored.scrape_attempt_count == 2
+    assert stored.metadata["fallback_source_name"] == "ynet"
+    assert [attempt.fetch_status for attempt in batch.attempts] == [
+        FetchStatus.FAILED,
+        FetchStatus.PARTIAL,
     ]
 
 

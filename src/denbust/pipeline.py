@@ -213,7 +213,7 @@ def _fallback_source_name(candidate: PersistentCandidate) -> str:
         return source_name.strip()
     for value in [*candidate.source_hints, *candidate.discovered_via]:
         if value.strip():
-            return value
+            return value.strip()
     return candidate.domain or "candidate_fallback"
 
 
@@ -309,9 +309,14 @@ async def _build_fallback_operational_records(
         return []
 
     classified = await classifier.classify_batch([article for _, article in fallback_inputs])
+    if len(classified) != len(fallback_inputs):
+        raise ValueError(
+            "classifier.classify_batch() returned "
+            f"{len(classified)} results for {len(fallback_inputs)} fallback inputs"
+        )
     records: list[NewsItemOperationalRecord] = []
     retrieval_datetime = datetime.now(UTC)
-    for (candidate, article), classified_article in zip(fallback_inputs, classified, strict=False):
+    for (candidate, article), classified_article in zip(fallback_inputs, classified, strict=True):
         classification = classified_article.classification
         if not classification.relevant:
             continue

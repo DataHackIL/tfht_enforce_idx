@@ -219,6 +219,7 @@ def test_news_items_fallback_migration_adds_operational_columns() -> None:
     assert "set content_basis = 'full_article_page'" in sql
     assert "alter column content_basis set not null" in sql
     assert "add column if not exists record_confidence text" in sql
+    assert "alter column record_confidence set default 'medium'" in sql
 
 
 def test_execute_latest_backup_returns_empty_manifest_when_no_targets(tmp_path: Path) -> None:

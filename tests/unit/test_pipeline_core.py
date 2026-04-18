@@ -439,7 +439,7 @@ class TestFetchAndClassifyHelpers:
             }
         )
 
-        assert pipeline_module._fallback_source_name(candidate) == "  hinted-source  "
+        assert pipeline_module._fallback_source_name(candidate) == "hinted-source"
         assert pipeline_module._fallback_publication_datetime(candidate) == datetime(
             2026, 4, 11, 10, 0, tzinfo=UTC
         )
@@ -452,7 +452,7 @@ class TestFetchAndClassifyHelpers:
         assert fallback_article is not None
         assert fallback_article.title == "Candidate title"
         assert fallback_article.snippet == "Candidate snippet"
-        assert fallback_article.source_name == "  hinted-source  "
+        assert fallback_article.source_name == "hinted-source"
 
         no_text_candidate = candidate.model_copy(
             update={
@@ -556,6 +556,34 @@ class TestFetchAndClassifyHelpers:
         assert record.source_name == "brave"
         assert record.title == "Relevant title"
         assert record.summary_one_sentence == "Enriched: Relevant title"
+
+    @pytest.mark.asyncio
+    async def test_build_fallback_operational_records_rejects_classifier_length_mismatch(
+        self,
+    ) -> None:
+        """Fallback operational rows should fail loudly if classification cardinality drifts."""
+        candidate = build_persistent_candidate(
+            "candidate-mismatch",
+            current_url="https://example.com/mismatch",
+        ).model_copy(
+            update={
+                "metadata": {
+                    "fallback_title": "Mismatch title",
+                    "fallback_snippet": "Mismatch summary",
+                }
+            }
+        )
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(return_value=[])
+
+        with pytest.raises(
+            ValueError,
+            match="classifier.classify_batch\\(\\) returned 0 results for 1 fallback inputs",
+        ):
+            await pipeline_module._build_fallback_operational_records(
+                candidates=[candidate],
+                classifier=classifier,
+            )
 
 
 class TestRunPipelineAsync:

@@ -17,3 +17,6 @@ alter table public.news_items
 update public.news_items
 set record_confidence = coalesce(classification_confidence, 'medium')
 where record_confidence is null;
+
+alter table public.news_items
+    alter column record_confidence set default 'medium';

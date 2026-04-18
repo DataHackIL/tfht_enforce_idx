@@ -383,19 +383,7 @@ async def scrape_candidates(
                             error_message=error_message,
                         )
                     )
-                    updated_candidates.append(
-                        _mark_attempt_failure(
-                            in_progress,
-                            attempts=candidate_attempts,
-                            status=CandidateStatus.SCRAPE_FAILED,
-                            error_code="source_adapter_error",
-                            error_message=error_message,
-                            config=config,
-                        )
-                    )
-                    attempts.extend(candidate_attempts)
                     errors.append(f"{in_progress.candidate_id}: {error_message}")
-                    continue
 
             generic_started_at = datetime.now(UTC)
             fetch_result = await _fetch_partial_page(in_progress, client=client)
