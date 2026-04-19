@@ -124,6 +124,29 @@ async def test_run_news_items_monthly_report_wrapper_calls_pipeline(
 
 
 @pytest.mark.asyncio
+async def test_run_news_items_monthly_report_wrapper_without_store_calls_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The monthly-report wrapper should omit operational_store when not provided."""
+    expected = build_snapshot()
+    mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr("denbust.pipeline.run_news_items_monthly_report_job", mock)
+
+    config = Config(job_name="monthly_report")
+    result = await _run_news_items_monthly_report(
+        config,
+        Path("agents/news/local.yaml"),
+        None,
+    )
+
+    assert result is expected
+    mock.assert_awaited_once_with(
+        config,
+        config_path=Path("agents/news/local.yaml"),
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_scaffolded_release_wrapper_calls_pipeline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
