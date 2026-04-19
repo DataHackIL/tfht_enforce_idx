@@ -356,6 +356,8 @@ mappings:
 
 ## C-6: Monthly report generation
 
+Status: Implemented via the dedicated `news_items / monthly_report` job, the `denbust report monthly` CLI wrapper, and the scheduled `news-items-monthly-report.yml` workflow.
+
 **Goal:** Automatically generate a monthly report matching the template Eden provided, as a Markdown/text file (for LLM-assisted drafting) and optionally as HTML/PDF.
 
 ### Report structure (from template)
@@ -424,9 +426,15 @@ denbust report monthly --month 2026-03 [--output report_2026_03.md]
 
 Reads operational records from the configured store, filtered to the given month and `index_relevant=true`, and produces the report.
 
+The shipped implementation also exposes the same behavior as a real dataset job:
+
+```
+denbust run --dataset news_items --job monthly_report --config agents/news/local.yaml
+```
+
 ### GitHub Actions integration
 
-A new monthly GitHub Actions workflow `news-items-monthly-report.yml` runs on the 1st of each month, generates the report, and emails it to Eden as a Markdown attachment. The email body can be plain text; Eden can then edit it and publish.
+A new monthly GitHub Actions workflow `news-items-monthly-report.yml` runs on the 1st of each month, generates the report bundle into the state repo, and leaves final human editing/publication outside the workflow.
 
 ---
 

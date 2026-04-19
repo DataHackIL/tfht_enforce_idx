@@ -17,6 +17,7 @@ Today, the implemented dataset/jobs are:
 
 - `news_items / discover` (source-native + Brave + Exa + Google CSE candidate persistence)
 - `news_items / ingest`
+- `news_items / monthly_report`
 - `news_items / release`
 - `news_items / backup`
 
@@ -35,6 +36,7 @@ Planned future datasets:
 - Emits unified items via CLI or SMTP email for the ingest workflow
 - Persists normalized `news_items` operational rows
 - Builds metadata-only weekly release bundles
+- Builds monthly Markdown/JSON report bundles for public-facing TFHT reporting
 - Publishes release bundles to Kaggle and Hugging Face when configured
 - Uploads the latest release bundle to Google Drive and S3-compatible object storage when configured
 - Persists dataset/job-scoped seen state and per-run JSON snapshots
@@ -51,6 +53,7 @@ Planned future datasets:
 pip install -e ".[dev]"
 python -m playwright install chromium
 denbust scan --config agents/news/local.yaml
+denbust report monthly --month 2026-03 --config agents/news/local.yaml
 denbust diagnose-discovery --config agents/news/local.yaml
 denbust release --config agents/release/news_items.yaml
 denbust backup --config agents/backup/news_items.yaml
@@ -82,6 +85,7 @@ Future-facing commands now exist as real `news_items` jobs:
 denbust run --dataset news_items --job discover --config agents/news/local.yaml
 denbust run --dataset news_items --job scrape_candidates --config agents/news/local.yaml
 denbust run --dataset news_items --job ingest --config agents/news/local.yaml
+denbust run --dataset news_items --job monthly_report --config agents/news/local.yaml
 denbust release --dataset news_items --config agents/release/news_items.yaml
 denbust backup --dataset news_items --config agents/backup/news_items.yaml
 ```
@@ -152,6 +156,9 @@ tfht_enforce_idx_state/
     │   ├── runs/
     │   └── publication/
     ├── release/
+    │   ├── runs/
+    │   └── publication/
+    ├── monthly_report/
     │   ├── runs/
     │   └── publication/
     └── backup/

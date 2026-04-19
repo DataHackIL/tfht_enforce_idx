@@ -1,0 +1,83 @@
+name: news-items-monthly-report
+
+on:
+  schedule:
+    - cron: "15 5 1 * *"
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "Optional report month in YYYY-MM; defaults to previous UTC month"
+        required: false
+        type: string
+
+concurrency:
+  group: state-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.11"
+  STATE_REPO: DataHackIL/tfht_enforce_idx_state
+  DATASET_NAME: news_items
+  JOB_NAME: monthly_report
+  JOB_CONFIG_PATH: agents/news/github.yaml
+  STATE_JOB_DIR: state_repo/news_items/monthly_report
+
+jobs:
+  run-monthly-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: news-items-release
+
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@v6
+
+      - name: Checkout state repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.STATE_REPO }}
+          token: ${{ secrets.STATE_REPO_PAT }}
+          path: state_repo
+
+      - name: Set up denbust job
+        uses: ./.github/actions/setup-denbust-state-job
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
+          state-job-dir: ${{ env.STATE_JOB_DIR }}
+
+      - name: Run monthly report job
+        env:
+          DENBUST_STATE_ROOT: state_repo
+          DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
+          DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
+          DENBUST_MONTHLY_REPORT_MONTH: ${{ github.event.inputs.month || '' }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
+
+      - name: Commit and push monthly report state changes
+        if: ${{ always() }}
+        run: |
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo config user.name "github-actions[bot]"
+          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs"
+          fi
+          if [[ -d "${{ env.STATE_JOB_DIR }}/publication" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication"
+          fi
+
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No staged state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo commit -m "chore(state): update news_items monthly report outputs"
+          git -C state_repo push

@@ -22,6 +22,7 @@ class JobName(StrEnum):
     DISCOVER = "discover"
     SCRAPE_CANDIDATES = "scrape_candidates"
     INGEST = "ingest"
+    MONTHLY_REPORT = "monthly_report"
     RELEASE = "release"
     BACKUP = "backup"
     BACKFILL_DISCOVER = "backfill_discover"

@@ -18,6 +18,15 @@ def test_cli_version_command_smoke() -> None:
     assert "denbust version" in result.output
 
 
+def test_cli_report_help_smoke() -> None:
+    """The report command group should load and expose the monthly subcommand."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["report", "--help"])
+
+    assert result.exit_code == 0
+    assert "monthly" in result.output
+
+
 def test_config_defaults_smoke() -> None:
     """Core config model should instantiate with defaults."""
     config = Config()
