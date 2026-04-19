@@ -70,6 +70,7 @@ from denbust.news_items.monthly_report import (
     persist_monthly_report_artifacts,
     report_env_summary,
     resolve_report_month,
+    select_monthly_report_records,
     write_report_copy,
     write_report_json_copy,
 )
@@ -1674,6 +1675,7 @@ async def _run_news_items_monthly_report_with_options(
     dataset_name = config.dataset_name.value
     corrected_records = _load_corrected_news_item_records(store, dataset_name=dataset_name)
     month = resolve_report_month(month_value)
+    eligible_record_count = len(select_monthly_report_records(corrected_records, month=month))
     report = generate_monthly_report(
         corrected_records,
         month=month,
@@ -1687,7 +1689,7 @@ async def _run_news_items_monthly_report_with_options(
         write_report_copy(markdown_output_path, report.rendered_markdown)
     if json_output_path is not None:
         write_report_json_copy(json_output_path, report)
-    result.unified_item_count = sum(report.stats.values())
+    result.unified_item_count = eligible_record_count
     result.set_debug_payload(
         report_env_summary(
             month=month,
@@ -1710,23 +1712,28 @@ async def run_news_items_monthly_report_job(
 ) -> RunSnapshot:
     """Build a monthly public report bundle for news_items."""
     del days_override
+    owns_store = operational_store is None
     store = operational_store or create_operational_store(config)
-    hq_activity_file = os.environ.get(MONTHLY_REPORT_HQ_ACTIVITY_FILE_ENV)
-    result, _ = await _run_news_items_monthly_report_with_options(
-        config,
-        config_path=config_path,
-        store=store,
-        month_value=os.environ.get(MONTHLY_REPORT_MONTH_ENV),
-        markdown_output_path=Path(os.environ[MONTHLY_REPORT_MARKDOWN_ENV])
-        if os.environ.get(MONTHLY_REPORT_MARKDOWN_ENV)
-        else None,
-        json_output_path=Path(os.environ[MONTHLY_REPORT_JSON_ENV])
-        if os.environ.get(MONTHLY_REPORT_JSON_ENV)
-        else None,
-        hq_activity=os.environ.get(MONTHLY_REPORT_HQ_ACTIVITY_ENV),
-        hq_activity_file=Path(hq_activity_file) if hq_activity_file else None,
-    )
-    return result
+    try:
+        hq_activity_file = os.environ.get(MONTHLY_REPORT_HQ_ACTIVITY_FILE_ENV)
+        result, _ = await _run_news_items_monthly_report_with_options(
+            config,
+            config_path=config_path,
+            store=store,
+            month_value=os.environ.get(MONTHLY_REPORT_MONTH_ENV),
+            markdown_output_path=Path(os.environ[MONTHLY_REPORT_MARKDOWN_ENV])
+            if os.environ.get(MONTHLY_REPORT_MARKDOWN_ENV)
+            else None,
+            json_output_path=Path(os.environ[MONTHLY_REPORT_JSON_ENV])
+            if os.environ.get(MONTHLY_REPORT_JSON_ENV)
+            else None,
+            hq_activity=os.environ.get(MONTHLY_REPORT_HQ_ACTIVITY_ENV),
+            hq_activity_file=Path(hq_activity_file) if hq_activity_file else None,
+        )
+        return result
+    finally:
+        if owns_store:
+            store.close()
 
 
 async def run_news_items_backup_job(

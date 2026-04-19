@@ -85,15 +85,23 @@ async def test_run_news_items_monthly_report_with_options_persists_outputs(
     )
     write_markdown = MagicMock()
     write_json = MagicMock()
+    corrected_records = ["corrected-record", "uncounted-record"]
+    eligible_records = ["corrected-record", "uncounted-record", "missing-taxonomy-record"]
 
     monkeypatch.setattr("denbust.pipeline._build_run_snapshot", lambda *_args, **_kwargs: snapshot)
     monkeypatch.setattr(
         "denbust.pipeline._load_corrected_news_item_records",
-        lambda *_args, **_kwargs: ["corrected-record"],
+        lambda *_args, **_kwargs: corrected_records,
     )
     monkeypatch.setattr(
         "denbust.pipeline.resolve_report_month",
         lambda month_value: date(2026, 3, 1) if month_value == "2026-03" else date(2026, 4, 1),
+    )
+    monkeypatch.setattr(
+        "denbust.pipeline.select_monthly_report_records",
+        lambda records, *, month: (
+            eligible_records if records == corrected_records and month == date(2026, 3, 1) else []
+        ),
     )
     monkeypatch.setattr(
         "denbust.pipeline.hq_activity_from_inputs",
@@ -106,7 +114,7 @@ async def test_run_news_items_monthly_report_with_options_persists_outputs(
         month: date,
         hq_activity: str | None = None,
     ) -> MonthlyReport:
-        assert records == ["corrected-record"]
+        assert records == corrected_records
         assert month == date(2026, 3, 1)
         assert hq_activity == "HQ activity"
         return report
@@ -131,7 +139,7 @@ async def test_run_news_items_monthly_report_with_options_persists_outputs(
     )
 
     assert returned_report is report
-    assert result.unified_item_count == 2
+    assert result.unified_item_count == 3
     assert result.warnings == []
     assert result.debug_payload == {
         "month": "2026-03",
@@ -206,7 +214,15 @@ async def test_run_news_items_monthly_report_job_reads_environment(
 ) -> None:
     """The job wrapper should translate monthly-report environment overrides."""
     config = _config(tmp_path)
-    store = object()
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    store = FakeStore()
     snapshot = _snapshot(config)
     report = _report(stats={"administrative_closure": 1})
     run_mock = AsyncMock(return_value=(snapshot, report))
@@ -225,6 +241,7 @@ async def test_run_news_items_monthly_report_job_reads_environment(
     )
 
     assert result is snapshot
+    assert store.closed is True
     run_mock.assert_awaited_once_with(
         config,
         config_path=Path("agents/news/local.yaml"),
@@ -235,6 +252,39 @@ async def test_run_news_items_monthly_report_job_reads_environment(
         hq_activity="HQ text",
         hq_activity_file=tmp_path / "hq.txt",
     )
+
+
+@pytest.mark.asyncio
+async def test_run_news_items_monthly_report_job_does_not_close_injected_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The job wrapper should not close a store it did not create."""
+    config = _config(tmp_path)
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    store = FakeStore()
+    snapshot = _snapshot(config)
+    report = _report(stats={"administrative_closure": 1})
+    run_mock = AsyncMock(return_value=(snapshot, report))
+
+    monkeypatch.setattr("denbust.pipeline._run_news_items_monthly_report_with_options", run_mock)
+
+    result = await run_news_items_monthly_report_job(
+        config,
+        config_path=Path("agents/news/local.yaml"),
+        operational_store=store,
+    )
+
+    assert result is snapshot
+    assert store.closed is False
+    run_mock.assert_awaited_once()
 
 
 def test_run_news_items_monthly_report_persists_snapshot(
