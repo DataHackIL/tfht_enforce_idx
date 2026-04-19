@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -147,16 +149,16 @@ def _stats_for_records(
     *,
     taxonomy: TaxonomyDefinition,
 ) -> tuple[dict[str, int], dict[str, str]]:
+    counts = Counter(
+        record.taxonomy_subcategory_id
+        for record in records
+        if record.taxonomy_subcategory_id is not None
+    )
     stats: dict[str, int] = {}
     labels: dict[str, str] = {}
     for category in taxonomy.categories:
         for leaf in category.subcategories:
-            count = sum(
-                1
-                for record in records
-                if record.taxonomy_category_id == category.id
-                and record.taxonomy_subcategory_id == leaf.id
-            )
+            count = counts.get(leaf.id, 0)
             if count > 0:
                 stats[leaf.id] = count
                 labels[leaf.id] = leaf.label_he
@@ -252,7 +254,7 @@ def persist_monthly_report_artifacts(
     json_path = output_dir / "monthly_report.json"
     readme_path = output_dir / "README.md"
     markdown_path.write_text(report.rendered_markdown, encoding="utf-8")
-    json_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    json_path.write_text(_report_json_text(report), encoding="utf-8")
     readme_path.write_text(
         (
             f"# news_items monthly report {report.month_key}\n\n"
@@ -277,9 +279,14 @@ def write_report_copy(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _report_json_text(report: MonthlyReport) -> str:
+    """Serialize the report JSON with human-readable Hebrew text."""
+    return json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n"
+
+
 def write_report_json_copy(path: Path, report: MonthlyReport) -> None:
     """Write an explicit JSON output path outside the state bundle."""
-    write_report_copy(path, report.model_dump_json(indent=2))
+    write_report_copy(path, _report_json_text(report))
 
 
 def hq_activity_from_inputs(

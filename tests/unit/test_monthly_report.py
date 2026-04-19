@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from denbust.data_models import Category, SubCategory
 from denbust.models.policies import (
@@ -17,6 +18,8 @@ from denbust.news_items.monthly_report import (
     MONTHLY_REPORT_PLACEHOLDER,
     generate_monthly_report,
     parse_month_key,
+    persist_monthly_report_artifacts,
+    write_report_json_copy,
 )
 
 
@@ -129,3 +132,34 @@ def test_parse_month_key_rejects_invalid_format() -> None:
         assert "Expected YYYY-MM" in str(exc)
     else:
         raise AssertionError("Expected ValueError for invalid month format")
+
+
+def test_persist_monthly_report_artifacts_writes_utf8_json(tmp_path: Path) -> None:
+    report = generate_monthly_report(
+        [_record("row-1", datetime(2026, 3, 10, 8, tzinfo=UTC))],
+        month=parse_month_key("2026-03"),
+        hq_activity="המטה שלח מכתב תמיכה.",
+    )
+
+    artifacts = persist_monthly_report_artifacts(tmp_path, report)
+    payload = artifacts.json_path.read_text(encoding="utf-8")
+
+    assert "\\u05" not in payload
+    assert "המטה שלח מכתב תמיכה." in payload
+    assert payload.endswith("\n")
+
+
+def test_write_report_json_copy_writes_utf8_json(tmp_path: Path) -> None:
+    report = generate_monthly_report(
+        [_record("row-1", datetime(2026, 3, 10, 8, tzinfo=UTC))],
+        month=parse_month_key("2026-03"),
+        hq_activity="המטה קיים פגישה.",
+    )
+    output_path = tmp_path / "report.json"
+
+    write_report_json_copy(output_path, report)
+
+    payload = output_path.read_text(encoding="utf-8")
+    assert "\\u05" not in payload
+    assert "המטה קיים פגישה." in payload
+    assert payload.endswith("\n")

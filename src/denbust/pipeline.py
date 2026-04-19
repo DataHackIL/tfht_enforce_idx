@@ -1613,18 +1613,8 @@ async def run_news_items_release_job(
     store = operational_store or create_operational_store(config)
     builder = NewsItemsReleaseBuilder(config=config)
     dataset_name = config.dataset_name.value
-    rows = store.fetch_records(dataset_name)
-    corrected_rows = [
-        record.model_dump(mode="json")
-        for record in apply_manual_annotations(
-            parse_operational_records(rows),
-            corrections=parse_news_item_corrections(
-                store.fetch_news_item_corrections(dataset_name)
-            ),
-            missing_items=parse_missing_news_items(store.fetch_missing_news_items(dataset_name)),
-            suppression_rules=parse_suppression_rules(store.fetch_suppression_rules(dataset_name)),
-        )
-    ]
+    corrected_records = _load_corrected_news_item_records(store, dataset_name=dataset_name)
+    corrected_rows = [record.model_dump(mode="json") for record in corrected_records]
     manifest = builder.build_release_bundle(
         publication_dir=config.state_paths.publication_dir,
         rows=corrected_rows,
@@ -1655,23 +1645,18 @@ async def run_news_items_release_job(
     return result.finish(f"release built for {manifest.row_count} public row(s)")
 
 
-def _load_corrected_news_item_rows(
+def _load_corrected_news_item_records(
     store: OperationalStore,
     *,
     dataset_name: str,
-) -> list[dict[str, object]]:
+) -> list[NewsItemOperationalRecord]:
     rows = store.fetch_records(dataset_name)
-    return [
-        record.model_dump(mode="json")
-        for record in apply_manual_annotations(
-            parse_operational_records(rows),
-            corrections=parse_news_item_corrections(
-                store.fetch_news_item_corrections(dataset_name)
-            ),
-            missing_items=parse_missing_news_items(store.fetch_missing_news_items(dataset_name)),
-            suppression_rules=parse_suppression_rules(store.fetch_suppression_rules(dataset_name)),
-        )
-    ]
+    return apply_manual_annotations(
+        parse_operational_records(rows),
+        corrections=parse_news_item_corrections(store.fetch_news_item_corrections(dataset_name)),
+        missing_items=parse_missing_news_items(store.fetch_missing_news_items(dataset_name)),
+        suppression_rules=parse_suppression_rules(store.fetch_suppression_rules(dataset_name)),
+    )
 
 
 async def _run_news_items_monthly_report_with_options(
@@ -1687,10 +1672,10 @@ async def _run_news_items_monthly_report_with_options(
 ) -> tuple[RunSnapshot, MonthlyReport]:
     result = _build_run_snapshot(config, config_path=config_path, days=config.days)
     dataset_name = config.dataset_name.value
-    corrected_rows = _load_corrected_news_item_rows(store, dataset_name=dataset_name)
+    corrected_records = _load_corrected_news_item_records(store, dataset_name=dataset_name)
     month = resolve_report_month(month_value)
     report = generate_monthly_report(
-        parse_operational_records(corrected_rows),
+        corrected_records,
         month=month,
         hq_activity=hq_activity_from_inputs(
             hq_activity=hq_activity,
