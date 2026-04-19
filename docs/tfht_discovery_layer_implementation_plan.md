@@ -300,6 +300,9 @@ The system can retain useful low-confidence candidates without pretending they a
 ### Goal
 Enable slow, systematic historical gap-closing from the candidate layer.
 
+### Status
+Implemented.
+
 ### Scope
 - Add backfill models/config:
   - `backfill_batches`
@@ -313,6 +316,18 @@ Enable slow, systematic historical gap-closing from the candidate layer.
   - max candidates per run
   - max scrape attempts per run
 - Add docs and tests for backfill scheduling and queue behavior
+
+### Implemented notes
+- `news_items / backfill_discover` now requires
+  `DENBUST_BACKFILL_DATE_FROM` / `DENBUST_BACKFILL_DATE_TO`, creates one durable batch per
+  invocation, and plans contiguous historical windows using `backfill.batch_window_days`
+- backfill batches are mirrored into the state repo and persisted into Supabase via
+  `backfill_batches`
+- historical search-engine discovery is live for Brave, Exa, and Google CSE
+- source-native historical discovery is capability-based: sources that do not implement explicit
+  window fetching are skipped with warnings rather than treated as fatal
+- `news_items / backfill_scrape` drains one historical batch at a time with oldest-window-first
+  ordering and reuses the existing scrape-to-ingest path
 
 ### Out of scope
 - no self-healing yet

@@ -11,6 +11,7 @@ from pydantic import HttpUrl
 from denbust.config import Config
 from denbust.data_models import RawArticle
 from denbust.discovery.models import (
+    BackfillBatch,
     CandidateProvenance,
     CandidateStatus,
     DiscoveryRun,
@@ -104,6 +105,15 @@ def build_attempt(candidate_id: str = "candidate-1") -> ScrapeAttempt:
         attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
         fetch_status=FetchStatus.SUCCESS,
         diagnostics={"status": "ok"},
+    )
+
+
+def build_backfill_batch(batch_id: str = "batch-1") -> BackfillBatch:
+    """Build a backfill-batch fixture."""
+    return BackfillBatch(
+        batch_id=batch_id,
+        requested_date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        requested_date_to=datetime(2026, 1, 7, tzinfo=UTC),
     )
 
 
@@ -269,6 +279,7 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
         DiscoveryRun(run_id="run-1", started_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC))
     )
     store.upsert_candidates([queued, backfill])
+    store.upsert_backfill_batches([build_backfill_batch()])
     store.append_provenance([build_provenance("queued"), build_provenance("backfill")])
     store.append_attempts([build_attempt("queued"), build_attempt("backfill")])
 
@@ -277,6 +288,8 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
     assert store.get_candidate("queued") is not None
     assert store.get_candidate("missing") is None
     assert len(store.list_candidates()) == 2
+    assert store.get_backfill_batch("batch-1") is not None
+    assert len(store.list_backfill_batches(limit=1)) == 1
     assert (
         store.list_candidates(statuses=[CandidateStatus.QUEUED], limit=1)[0].candidate_id
         == "queued"
@@ -300,6 +313,7 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
     assert len(store.list_attempts("backfill")) == 1
     assert paths.retry_queue_path.exists()
     assert paths.backfill_queue_path.exists()
+    assert paths.latest_backfill_batches_path.exists()
     assert store.close() is None
 
 
@@ -362,6 +376,8 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
+            httpx.Response(200, json=[build_backfill_batch().model_dump(mode="json")]),
+            httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[]),
             httpx.Response(200, json=[]),
             httpx.Response(200, json=[build_provenance().model_dump(mode="json")]),
@@ -376,6 +392,7 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
         table_names={
             "discovery_runs": "discovery_runs",
             "persistent_candidates": "persistent_candidates",
+            "backfill_batches": "backfill_batches",
             "candidate_provenance": "candidate_provenance",
             "scrape_attempts": "scrape_attempts",
         },
@@ -384,8 +401,10 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
 
     store.write_run(DiscoveryRun(run_id="run-1", errors=["boom"]))
     store.upsert_candidates([build_candidate()])
+    store.upsert_backfill_batches([build_backfill_batch()])
     assert store.get_candidate("candidate-1") is not None
     assert len(store.list_candidates(statuses=[CandidateStatus.NEW], limit=2)) == 1
+    assert store.get_backfill_batch("batch-1") is not None
     assert (
         store.find_candidate_by_urls(
             canonical_url="https://www.ynet.co.il/news/article/abc",
@@ -432,6 +451,7 @@ def test_supabase_discovery_persistence_handles_empty_payload_shapes() -> None:
         table_names={
             "discovery_runs": "discovery_runs",
             "persistent_candidates": "persistent_candidates",
+            "backfill_batches": "backfill_batches",
             "candidate_provenance": "candidate_provenance",
             "scrape_attempts": "scrape_attempts",
         },
@@ -457,6 +477,7 @@ def test_supabase_discovery_persistence_finds_candidate_by_current_url() -> None
         table_names={
             "discovery_runs": "discovery_runs",
             "persistent_candidates": "persistent_candidates",
+            "backfill_batches": "backfill_batches",
             "candidate_provenance": "candidate_provenance",
             "scrape_attempts": "scrape_attempts",
         },
@@ -486,14 +507,17 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
     candidate = build_candidate()
     provenance = build_provenance()
     attempt = build_attempt()
+    batch = build_backfill_batch()
     composite = CompositeDiscoveryPersistence(primary, [mirror])
 
     composite.write_run(DiscoveryRun(run_id="run-1"))
     composite.upsert_candidates([candidate])
+    composite.upsert_backfill_batches([batch])
     composite.append_provenance([provenance])
     composite.append_attempts([attempt])
 
     assert composite.get_candidate(candidate.candidate_id) is not None
+    assert composite.get_backfill_batch(batch.batch_id) is not None
     assert composite.list_candidates(limit=1)[0].candidate_id == candidate.candidate_id
     assert (
         composite.find_candidate_by_urls(

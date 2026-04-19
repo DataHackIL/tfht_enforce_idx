@@ -23,7 +23,7 @@ from denbust.discovery.models import (
 )
 from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
-from denbust.sources.base import Source
+from denbust.sources.base import HistoricalSource, Source
 
 
 def build_candidate_id(identity_url: str) -> str:
@@ -78,6 +78,34 @@ class SourceDiscoveryAdapter(SourceCandidateProducer):
             for article in articles
         ]
 
+    @property
+    def supports_historical_window(self) -> bool:
+        """Return whether the wrapped source supports explicit historical windows."""
+        return isinstance(self._source, HistoricalSource)
+
+    async def discover_candidates_for_window(
+        self,
+        context: SourceDiscoveryContext,
+    ) -> list[DiscoveredCandidate]:
+        """Discover candidates for one explicit historical window when supported."""
+        if not self.supports_historical_window:
+            raise ValueError(f"{self.name} does not support historical windows")
+        if context.date_from is None or context.date_to is None:
+            raise ValueError("SourceDiscoveryContext.date_from/date_to are required")
+        historical_source = cast(HistoricalSource, self._source)
+        articles = await historical_source.fetch_window(
+            date_from=context.date_from,
+            date_to=context.date_to,
+            keywords=context.keywords,
+        )
+        return [
+            raw_article_to_discovered_candidate(
+                article,
+                discovered_at=context.metadata.get("discovered_at"),
+            )
+            for article in articles
+        ]
+
 
 def merge_discovered_candidate(
     discovered: DiscoveredCandidate,
@@ -90,6 +118,12 @@ def merge_discovered_candidate(
         existing_metadata["latest_publication_datetime_hint"] = (
             discovered.publication_datetime_hint.isoformat()
         )
+    backfill_batch_id = None
+    if "backfill_batch_id" in discovered.metadata:
+        backfill_batch_id = str(discovered.metadata["backfill_batch_id"])
+    for key in ("backfill_window_index", "backfill_window_start", "backfill_window_end"):
+        if key in discovered.metadata:
+            existing_metadata[key] = discovered.metadata[key]
     if discovered.metadata:
         existing_metadata["latest_discovery_metadata"] = discovered.metadata
 
@@ -144,7 +178,7 @@ def merge_discovered_candidate(
         content_basis=existing.content_basis if existing else ContentBasis.CANDIDATE_ONLY,
         retry_priority=existing.retry_priority if existing else 0,
         needs_review=existing.needs_review if existing else False,
-        backfill_batch_id=existing.backfill_batch_id if existing else None,
+        backfill_batch_id=backfill_batch_id or (existing.backfill_batch_id if existing else None),
         self_heal_eligible=existing.self_heal_eligible if existing else False,
         source_discovery_only=(
             (existing.source_discovery_only if existing else True)
@@ -161,6 +195,7 @@ class PersistedSourceDiscovery:
     run: DiscoveryRun
     candidates: list[PersistentCandidate]
     provenance: list[CandidateProvenance]
+    warnings: list[str] | None = None
 
 
 def persist_discovered_candidates(

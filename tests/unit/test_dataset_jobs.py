@@ -9,6 +9,8 @@ import pytest
 
 from denbust.config import Config
 from denbust.datasets.jobs import (
+    _run_news_items_backfill_discover,
+    _run_news_items_backfill_scrape,
     _run_news_items_ingest,
     _run_news_items_monthly_report,
     _run_news_items_scrape_candidates,
@@ -143,6 +145,56 @@ async def test_run_news_items_monthly_report_wrapper_without_store_calls_pipelin
     mock.assert_awaited_once_with(
         config,
         config_path=Path("agents/news/local.yaml"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_news_items_backfill_discover_wrapper_calls_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The backfill-discover wrapper should delegate to the pipeline handler."""
+    expected = build_snapshot()
+    mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr("denbust.pipeline.run_news_backfill_discover_job", mock)
+
+    config = Config(job_name="backfill_discover")
+    result = await _run_news_items_backfill_discover(
+        config,
+        Path("agents/news/local.yaml"),
+        None,
+    )
+
+    assert result is expected
+    mock.assert_awaited_once_with(
+        config,
+        config_path=Path("agents/news/local.yaml"),
+        days_override=None,
+        operational_store=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_news_items_backfill_scrape_wrapper_calls_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The backfill-scrape wrapper should delegate to the pipeline handler."""
+    expected = build_snapshot()
+    mock = AsyncMock(return_value=expected)
+    monkeypatch.setattr("denbust.pipeline.run_news_backfill_scrape_job", mock)
+
+    config = Config(job_name="backfill_scrape")
+    result = await _run_news_items_backfill_scrape(
+        config,
+        Path("agents/news/local.yaml"),
+        9,
+    )
+
+    assert result is expected
+    mock.assert_awaited_once_with(
+        config,
+        config_path=Path("agents/news/local.yaml"),
+        days_override=9,
+        operational_store=None,
     )
 
 

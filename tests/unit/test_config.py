@@ -293,6 +293,7 @@ class TestConfig:
 
         assert config.discovery_runs_table == "discovery_runs"
         assert config.supabase_table == "persistent_candidates"
+        assert config.backfill_batches_table == "backfill_batches"
         assert config.provenance_table == "candidate_provenance"
         assert config.scrape_attempts_table == "scrape_attempts"
         assert config.default_retry_backoff_hours == 24

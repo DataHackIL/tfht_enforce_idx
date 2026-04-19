@@ -10,6 +10,8 @@ import httpx
 
 from denbust.config import Config, OperationalProvider
 from denbust.discovery.models import (
+    BackfillBatch,
+    BackfillBatchStatus,
     CandidateProvenance,
     CandidateStatus,
     DiscoveryRun,
@@ -17,6 +19,7 @@ from denbust.discovery.models import (
     ScrapeAttempt,
 )
 from denbust.discovery.persistence import (
+    BackfillBatchStore,
     CandidateStore,
     DiscoveryRunStore,
     ProvenanceStore,
@@ -26,12 +29,15 @@ from denbust.discovery.state_paths import (
     DiscoveryStatePaths,
     write_candidate_jsonl,
     write_discovery_run_snapshot,
+    write_json_snapshot,
+    write_model_jsonl,
 )
 
 
 class DiscoveryPersistence(
     DiscoveryRunStore,
     CandidateStore,
+    BackfillBatchStore,
     ProvenanceStore,
     ScrapeAttemptStore,
 ):
@@ -61,6 +67,22 @@ class NullDiscoveryPersistence(DiscoveryPersistence):
         statuses: Sequence[CandidateStatus] | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
+        del statuses, limit
+        return []
+
+    def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
+        del batches
+
+    def get_backfill_batch(self, batch_id: str) -> BackfillBatch | None:
+        del batch_id
+        return None
+
+    def list_backfill_batches(
+        self,
+        *,
+        statuses: Sequence[BackfillBatchStatus] | None = None,
+        limit: int | None = None,
+    ) -> list[BackfillBatch]:
         del statuses, limit
         return []
 
@@ -156,6 +178,42 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
             candidate for candidate in all_candidates if candidate.backfill_batch_id is not None
         ]
         write_candidate_jsonl(self.paths.backfill_queue_path, backfill_candidates)
+
+    def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
+        if not batches:
+            return
+        existing = {batch.batch_id: batch for batch in self.list_backfill_batches()}
+        for batch in batches:
+            existing[batch.batch_id] = batch
+            write_json_snapshot(
+                self.paths.backfill_batches_dir / f"{batch.batch_id}.json",
+                batch.model_dump(mode="json"),
+            )
+        ordered = sorted(
+            existing.values(),
+            key=lambda batch: (batch.requested_date_from, batch.created_at, batch.batch_id),
+        )
+        write_model_jsonl(self.paths.latest_backfill_batches_path, ordered)
+
+    def get_backfill_batch(self, batch_id: str) -> BackfillBatch | None:
+        for batch in self.list_backfill_batches():
+            if batch.batch_id == batch_id:
+                return batch
+        return None
+
+    def list_backfill_batches(
+        self,
+        *,
+        statuses: Sequence[BackfillBatchStatus] | None = None,
+        limit: int | None = None,
+    ) -> list[BackfillBatch]:
+        batches = self._read_jsonl(self.paths.latest_backfill_batches_path, BackfillBatch)
+        if statuses is not None:
+            allowed = set(statuses)
+            batches = [batch for batch in batches if batch.status in allowed]
+        if limit is not None:
+            return batches[:limit]
+        return batches
 
     def get_candidate(self, candidate_id: str) -> PersistentCandidate | None:
         for candidate in self.list_candidates():
@@ -296,6 +354,47 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
             json=payload,
             extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
         )
+
+    def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
+        if not batches:
+            return
+        payload = [batch.model_dump(mode="json") for batch in batches]
+        self._request(
+            "POST",
+            self._table_names["backfill_batches"],
+            params={"on_conflict": "batch_id"},
+            json=payload,
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+
+    def get_backfill_batch(self, batch_id: str) -> BackfillBatch | None:
+        response = self._request(
+            "GET",
+            self._table_names["backfill_batches"],
+            params={"select": "*", "batch_id": f"eq.{batch_id}", "limit": "1"},
+        )
+        payload = response.json()
+        if isinstance(payload, list) and payload:
+            return BackfillBatch.model_validate(payload[0])
+        return None
+
+    def list_backfill_batches(
+        self,
+        *,
+        statuses: Sequence[BackfillBatchStatus] | None = None,
+        limit: int | None = None,
+    ) -> list[BackfillBatch]:
+        params: dict[str, str] = {"select": "*", "order": "requested_date_from.asc"}
+        if statuses:
+            joined = ",".join(status.value for status in statuses)
+            params["status"] = f"in.({joined})"
+        if limit is not None:
+            params["limit"] = str(limit)
+        response = self._request("GET", self._table_names["backfill_batches"], params=params)
+        payload = response.json()
+        if isinstance(payload, list):
+            return [BackfillBatch.model_validate(item) for item in payload]
+        return []
 
     def get_candidate(self, candidate_id: str) -> PersistentCandidate | None:
         response = self._request(
@@ -466,8 +565,16 @@ class CompositeDiscoveryPersistence(DiscoveryPersistence):
         for mirror in self.mirrors:
             mirror.upsert_candidates(candidates)
 
+    def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
+        self.primary.upsert_backfill_batches(batches)
+        for mirror in self.mirrors:
+            mirror.upsert_backfill_batches(batches)
+
     def get_candidate(self, candidate_id: str) -> PersistentCandidate | None:
         return self.primary.get_candidate(candidate_id)
+
+    def get_backfill_batch(self, batch_id: str) -> BackfillBatch | None:
+        return self.primary.get_backfill_batch(batch_id)
 
     def list_candidates(
         self,
@@ -476,6 +583,14 @@ class CompositeDiscoveryPersistence(DiscoveryPersistence):
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
         return self.primary.list_candidates(statuses=statuses, limit=limit)
+
+    def list_backfill_batches(
+        self,
+        *,
+        statuses: Sequence[BackfillBatchStatus] | None = None,
+        limit: int | None = None,
+    ) -> list[BackfillBatch]:
+        return self.primary.list_backfill_batches(statuses=statuses, limit=limit)
 
     def find_candidate_by_urls(
         self,
@@ -530,6 +645,7 @@ def create_discovery_persistence(config: Config) -> DiscoveryPersistence:
             table_names={
                 "discovery_runs": config.candidates.discovery_runs_table,
                 "persistent_candidates": config.candidates.supabase_table,
+                "backfill_batches": config.candidates.backfill_batches_table,
                 "candidate_provenance": config.candidates.provenance_table,
                 "scrape_attempts": config.candidates.scrape_attempts_table,
             },

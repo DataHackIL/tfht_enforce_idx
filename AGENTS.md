@@ -14,8 +14,10 @@
 - Default branch prefix for agent work: `codex/`.
 - Keep branches single-purpose.
 - Open PRs against `main`.
+- Work on a feature, fix, or tracked plan item is not complete until a non-draft GitHub PR is open.
 - Plans should be carried through to an open PR unless the user explicitly says not to open one.
 - Opened PRs should include a detailed description that is ready for human review, not just a placeholder body.
+- The required PR closeout state is: branch pushed, non-draft PR open against `main`, detailed description present, appropriate labels applied, and a GitHub milestone assigned.
 - When opening a PR, apply appropriate GitHub labels for the workstream or tracked plan item and assign the PR to the relevant GitHub milestone.
 - Create missing labels or milestones when needed, preferring the repo-specific GitHub MCP over CLI fallbacks for those actions.
 - When a PR is opened against a tracked plan item, update `.agent-plan.md`, `README.md`, and any relevant human-facing plan document in that same PR so they reflect the expected post-merge state.

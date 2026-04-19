@@ -100,6 +100,18 @@ class DiscoveryRunStatus(StrEnum):
     FAILED = "failed"
 
 
+class BackfillBatchStatus(StrEnum):
+    """Status values for historical backfill batches."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    DISCOVERED = "discovered"
+    SCRAPING = "scraping"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    COMPLETED = "completed"
+
+
 class DiscoveryQuery(BaseModel):
     """Normalized search query definition for a discovery engine."""
 
@@ -263,4 +275,43 @@ class DiscoveryRun(BaseModel):
     def _validate_finished_at(self) -> DiscoveryRun:
         if self.finished_at is not None and self.finished_at < self.started_at:
             raise ValueError("finished_at must be later than or equal to started_at")
+        return self
+
+
+class BackfillBatch(BaseModel):
+    """Durable metadata for a historical backfill invocation."""
+
+    batch_id: str = Field(default_factory=_uuid_str)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    dataset_name: DatasetName = DatasetName.NEWS_ITEMS
+    job_name: JobName = JobName.BACKFILL_DISCOVER
+    status: BackfillBatchStatus = BackfillBatchStatus.PENDING
+    requested_date_from: datetime
+    requested_date_to: datetime
+    window_count: int = Field(default=0, ge=0)
+    query_count: int = Field(default=0, ge=0)
+    candidate_count: int = Field(default=0, ge=0)
+    merged_candidate_count: int = Field(default=0, ge=0)
+    queued_for_scrape_count: int = Field(default=0, ge=0)
+    scrape_attempt_count: int = Field(default=0, ge=0)
+    scraped_candidate_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_date_window(self) -> BackfillBatch:
+        if self.requested_date_from > self.requested_date_to:
+            raise ValueError(
+                "requested_date_from must be earlier than or equal to requested_date_to"
+            )
+        if self.started_at is not None and self.started_at < self.created_at:
+            raise ValueError("started_at cannot be earlier than created_at")
+        if self.finished_at is not None:
+            anchor = self.started_at or self.created_at
+            if self.finished_at < anchor:
+                raise ValueError("finished_at must be later than or equal to batch start")
         return self

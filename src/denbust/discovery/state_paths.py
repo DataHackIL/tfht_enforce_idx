@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,9 @@ class DiscoveryStatePaths(BaseModel):
     runs_dir: Path
     candidates_dir: Path
     metrics_dir: Path
+    backfill_batches_dir: Path
     latest_candidates_path: Path
+    latest_backfill_batches_path: Path
     retry_queue_path: Path
     backfill_queue_path: Path
     candidate_provenance_path: Path
@@ -44,6 +47,7 @@ def resolve_discovery_state_paths(
     runs_dir = namespace_dir / "runs"
     candidates_dir = namespace_dir / "candidates"
     metrics_dir = namespace_dir / "metrics"
+    backfill_batches_dir = namespace_dir / "backfill_batches"
     return DiscoveryStatePaths(
         state_root=state_root,
         dataset_name=dataset_name,
@@ -52,7 +56,9 @@ def resolve_discovery_state_paths(
         runs_dir=runs_dir,
         candidates_dir=candidates_dir,
         metrics_dir=metrics_dir,
+        backfill_batches_dir=backfill_batches_dir,
         latest_candidates_path=candidates_dir / "latest_candidates.jsonl",
+        latest_backfill_batches_path=backfill_batches_dir / "latest_backfill_batches.jsonl",
         retry_queue_path=candidates_dir / "retry_queue.jsonl",
         backfill_queue_path=candidates_dir / "backfill_queue.jsonl",
         candidate_provenance_path=candidates_dir / "candidate_provenance.jsonl",
@@ -86,6 +92,25 @@ def write_candidate_jsonl(path: Path, candidates: list[PersistentCandidate]) -> 
         for candidate in candidates:
             handle.write(candidate.model_dump_json())
             handle.write("\n")
+    return path
+
+
+def write_model_jsonl(path: Path, rows: Sequence[BaseModel]) -> Path:
+    """Write generic Pydantic rows to a JSONL file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(row.model_dump_json())
+            handle.write("\n")
+    return path
+
+
+def write_json_snapshot(path: Path, payload: dict[str, Any]) -> Path:
+    """Write one JSON snapshot file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
     return path
 
 

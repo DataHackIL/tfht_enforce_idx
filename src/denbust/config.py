@@ -329,6 +329,7 @@ class CandidatesConfig(BaseModel):
 
     discovery_runs_table: str = "discovery_runs"
     supabase_table: str = "persistent_candidates"
+    backfill_batches_table: str = "backfill_batches"
     provenance_table: str = "candidate_provenance"
     scrape_attempts_table: str = "scrape_attempts"
     keep_search_only_fallbacks: bool = True
