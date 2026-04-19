@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from denbust.data_models import Category, SubCategory
@@ -17,8 +17,13 @@ from denbust.news_items.models import NewsItemOperationalRecord
 from denbust.news_items.monthly_report import (
     MONTHLY_REPORT_PLACEHOLDER,
     generate_monthly_report,
+    hq_activity_from_inputs,
+    month_bounds_utc,
     parse_month_key,
     persist_monthly_report_artifacts,
+    previous_month,
+    render_monthly_report_markdown,
+    resolve_report_month,
     write_report_json_copy,
 )
 
@@ -134,6 +139,21 @@ def test_parse_month_key_rejects_invalid_format() -> None:
         raise AssertionError("Expected ValueError for invalid month format")
 
 
+def test_previous_month_and_resolve_report_month_helpers() -> None:
+    assert previous_month(date(2026, 3, 17)) == date(2026, 2, 1)
+    assert previous_month(date(2026, 1, 5)) == date(2025, 12, 1)
+    assert resolve_report_month(" 2026-03 ") == date(2026, 3, 1)
+    assert resolve_report_month(None) == previous_month()
+    assert resolve_report_month("   ") == previous_month()
+
+
+def test_month_bounds_utc_handles_december_rollover() -> None:
+    start, end = month_bounds_utc(date(2026, 12, 15))
+
+    assert start == datetime(2026, 12, 1, tzinfo=UTC)
+    assert end == datetime(2027, 1, 1, tzinfo=UTC)
+
+
 def test_persist_monthly_report_artifacts_writes_utf8_json(tmp_path: Path) -> None:
     report = generate_monthly_report(
         [_record("row-1", datetime(2026, 3, 10, 8, tzinfo=UTC))],
@@ -163,3 +183,38 @@ def test_write_report_json_copy_writes_utf8_json(tmp_path: Path) -> None:
     assert "\\u05" not in payload
     assert "המטה קיים פגישה." in payload
     assert payload.endswith("\n")
+
+
+def test_generate_monthly_report_normalizes_naive_datetimes() -> None:
+    report = generate_monthly_report(
+        [_record("row-1", datetime(2026, 3, 10, 8))],
+        month=parse_month_key("2026-03"),
+    )
+
+    assert report.selected_cases[0].publication_datetime == datetime(2026, 3, 10, 8, tzinfo=UTC)
+
+
+def test_render_monthly_report_markdown_handles_empty_stats_and_cases() -> None:
+    empty_report = generate_monthly_report([], month=parse_month_key("2026-03"))
+
+    rendered = render_monthly_report_markdown(empty_report)
+
+    assert "- לא נמצאו אירועים ציבוריים רלוונטיים לחודש זה." in rendered
+    assert "- לא נבחרו מקרים להצגה." in rendered
+    assert MONTHLY_REPORT_PLACEHOLDER in rendered
+
+
+def test_hq_activity_from_inputs_prefers_file_and_normalizes_blank_values(tmp_path: Path) -> None:
+    file_path = tmp_path / "hq.txt"
+    file_path.write_text("  פעילות מהקובץ  \n", encoding="utf-8")
+
+    assert (
+        hq_activity_from_inputs(hq_activity="  inline text  ", hq_activity_file=file_path)
+        == "פעילות מהקובץ"
+    )
+    assert hq_activity_from_inputs(hq_activity="   ", hq_activity_file=None) is None
+    assert hq_activity_from_inputs(hq_activity=None, hq_activity_file=None) is None
+
+    blank_file = tmp_path / "blank.txt"
+    blank_file.write_text("   \n", encoding="utf-8")
+    assert hq_activity_from_inputs(hq_activity="ignored", hq_activity_file=blank_file) is None
