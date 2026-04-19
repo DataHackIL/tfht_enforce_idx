@@ -53,7 +53,7 @@ jobs:
           DENBUST_STATE_ROOT: state_repo
           DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
           DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
-          DENBUST_MONTHLY_REPORT_MONTH: ${{ inputs.month }}
+          DENBUST_MONTHLY_REPORT_MONTH: ${{ github.event.inputs.month || '' }}
         run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
 
       - name: Commit and push monthly report state changes
