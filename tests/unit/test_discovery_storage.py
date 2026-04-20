@@ -424,6 +424,7 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
         store.list_candidates(statuses=[CandidateStatus.QUEUED], limit=1)[0].candidate_id
         == "queued"
     )
+    assert store.list_candidates(backfill_batch_id="batch-1", limit=1)[0].candidate_id == "backfill"
     assert (
         store.find_candidate_by_urls(
             canonical_url="https://www.walla.co.il/item",
@@ -510,6 +511,9 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
             httpx.Response(200, json=[]),
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
+            httpx.Response(
+                200, json=[build_candidate(backfill_batch_id="batch-1").model_dump(mode="json")]
+            ),
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[build_backfill_batch().model_dump(mode="json")]),
             httpx.Response(200, json=[build_backfill_batch().model_dump(mode="json")]),
@@ -540,6 +544,7 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
     store.upsert_backfill_batches([build_backfill_batch()])
     assert store.get_candidate("candidate-1") is not None
     assert len(store.list_candidates(statuses=[CandidateStatus.NEW], limit=2)) == 1
+    assert len(store.list_candidates(backfill_batch_id="batch-1", limit=2)) == 1
     assert store.get_backfill_batch("batch-1") is not None
     assert len(store.list_backfill_batches(statuses=[BackfillBatchStatus.PENDING], limit=1)) == 1
     assert (
@@ -565,6 +570,7 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
     assert client.closed is True
     assert client.calls[0]["url"] == "https://supabase.example.com/rest/v1/discovery_runs"
     assert client.calls[0]["json"]["errors"] == ["boom"]  # type: ignore[index]
+    assert client.calls[5]["params"]["backfill_batch_id"] == "eq.batch-1"  # type: ignore[index]
     headers = client.calls[0]["headers"]
     assert isinstance(headers, dict)
     assert headers["Accept-Profile"] == "custom"
@@ -646,10 +652,10 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
         )
     )
     mirror = RecordingPersistence()
-    candidate = build_candidate()
+    batch = build_backfill_batch()
+    candidate = build_candidate(backfill_batch_id=batch.batch_id)
     provenance = build_provenance()
     attempt = build_attempt()
-    batch = build_backfill_batch()
     composite = CompositeDiscoveryPersistence(primary, [mirror])
 
     composite.write_run(DiscoveryRun(run_id="run-1"))
@@ -661,6 +667,9 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
     assert composite.get_candidate(candidate.candidate_id) is not None
     assert composite.get_backfill_batch(batch.batch_id) is not None
     assert composite.list_candidates(limit=1)[0].candidate_id == candidate.candidate_id
+    assert composite.list_candidates(backfill_batch_id=batch.batch_id, limit=1)[0].candidate_id == (
+        candidate.candidate_id
+    )
     assert composite.list_backfill_batches(limit=1)[0].batch_id == batch.batch_id
     assert (
         composite.find_candidate_by_urls(

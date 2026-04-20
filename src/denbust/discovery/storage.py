@@ -65,9 +65,10 @@ class NullDiscoveryPersistence(DiscoveryPersistence):
         self,
         *,
         statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
-        del statuses, limit
+        del statuses, backfill_batch_id, limit
         return []
 
     def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
@@ -225,6 +226,7 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         self,
         *,
         statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
         candidates = self._read_jsonl(self.paths.latest_candidates_path, PersistentCandidate)
@@ -232,6 +234,12 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
             allowed = set(statuses)
             candidates = [
                 candidate for candidate in candidates if candidate.candidate_status in allowed
+            ]
+        if backfill_batch_id is not None:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.backfill_batch_id == backfill_batch_id
             ]
         if limit is not None:
             return candidates[:limit]
@@ -411,12 +419,15 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
         self,
         *,
         statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
         params: dict[str, str] = {"select": "*", "order": "last_seen_at.desc"}
         if statuses:
             joined = ",".join(status.value for status in statuses)
             params["candidate_status"] = f"in.({joined})"
+        if backfill_batch_id is not None:
+            params["backfill_batch_id"] = f"eq.{backfill_batch_id}"
         if limit is not None:
             params["limit"] = str(limit)
         response = self._request("GET", self._table_names["persistent_candidates"], params=params)
@@ -580,9 +591,14 @@ class CompositeDiscoveryPersistence(DiscoveryPersistence):
         self,
         *,
         statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
-        return self.primary.list_candidates(statuses=statuses, limit=limit)
+        return self.primary.list_candidates(
+            statuses=statuses,
+            backfill_batch_id=backfill_batch_id,
+            limit=limit,
+        )
 
     def list_backfill_batches(
         self,

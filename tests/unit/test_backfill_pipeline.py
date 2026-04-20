@@ -242,6 +242,29 @@ def test_update_backfill_batch_state_refreshes_counts(tmp_path: Path) -> None:
     assert store.get_backfill_batch("batch-1") is not None
 
 
+def test_batch_candidate_counts_uses_batch_filter(tmp_path: Path) -> None:
+    """Batch counting should only consider candidates from the requested backfill batch."""
+    store = build_store(tmp_path)
+    store.upsert_candidates(
+        [
+            build_candidate("batch-1"),
+            build_candidate("batch-1").model_copy(
+                update={
+                    "candidate_id": "future",
+                    "candidate_status": CandidateStatus.SCRAPE_FAILED,
+                    "next_scrape_attempt_at": datetime(2026, 1, 20, tzinfo=UTC),
+                }
+            ),
+            build_candidate("batch-2").model_copy(update={"candidate_id": "other"}),
+        ]
+    )
+
+    merged_count, queued_count = pipeline_module._batch_candidate_counts(store, batch_id="batch-1")
+
+    assert merged_count == 2
+    assert queued_count == 2
+
+
 @pytest.mark.asyncio
 async def test_run_source_native_backfill_discovery_handles_unsupported_and_error(
     monkeypatch: pytest.MonkeyPatch,
@@ -890,6 +913,52 @@ async def test_run_news_backfill_scrape_job_returns_when_selected_batch_drains_t
     )
 
     assert result.result_summary == "no queued backfill candidates eligible for scrape"
+
+
+@pytest.mark.asyncio
+async def test_run_news_backfill_scrape_job_keeps_batch_open_for_future_retries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Future retry candidates should keep the backfill batch from being marked completed."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    store = build_store(tmp_path)
+    store.upsert_backfill_batches([build_batch(status=BackfillBatchStatus.DISCOVERED)])
+    store.upsert_candidates([build_candidate("batch-1")])
+    monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [FakeSource("ynet")])
+    monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: store)
+    monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+    monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+    monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
+
+    async def fake_scrape_job(**_kwargs: object) -> CandidateScrapeBatch:
+        store.upsert_candidates(
+            [
+                build_candidate("batch-1").model_copy(
+                    update={
+                        "candidate_id": "candidate-1",
+                        "candidate_status": CandidateStatus.SCRAPE_FAILED,
+                        "next_scrape_attempt_at": datetime(2026, 1, 20, tzinfo=UTC),
+                    }
+                )
+            ]
+        )
+        return build_scrape_batch(raw_articles=[], fallback_candidates=[], errors=["retry later"])
+
+    monkeypatch.setattr("denbust.pipeline._run_backfill_candidate_scrape_job", fake_scrape_job)
+    monkeypatch.setattr(
+        "denbust.pipeline._build_fallback_operational_records",
+        AsyncMock(return_value=[]),
+    )
+
+    result = await run_news_backfill_scrape_job(
+        Config(job_name=JobName.BACKFILL_SCRAPE, store={"state_root": tmp_path})
+    )
+
+    assert result.result_summary == (
+        "fallback retention completed with 0 provisional row(s) for backfill batch batch-1"
+    )
+    assert store.get_backfill_batch("batch-1").status is BackfillBatchStatus.PARTIAL
 
 
 @pytest.mark.asyncio

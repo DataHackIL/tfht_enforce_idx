@@ -479,16 +479,11 @@ def _batch_candidate_counts(
     batch_id: str,
 ) -> tuple[int, int]:
     """Return merged-candidate and queued-for-scrape counts for one backfill batch."""
-    batch_candidates = [
-        candidate
-        for candidate in persistence.list_candidates()
-        if candidate.backfill_batch_id == batch_id
-    ]
-    queued_for_scrape = [
-        candidate
-        for candidate in batch_candidates
-        if candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES
-    ]
+    batch_candidates = persistence.list_candidates(backfill_batch_id=batch_id)
+    queued_for_scrape = persistence.list_candidates(
+        statuses=SCRAPEABLE_CANDIDATE_STATUSES,
+        backfill_batch_id=batch_id,
+    )
     return len(batch_candidates), len(queued_for_scrape)
 
 
@@ -2111,6 +2106,7 @@ async def run_news_backfill_scrape_job(
     result.seen_count_before = seen_store.count
     store = operational_store
     owns_store = False
+    scrape_batch: CandidateScrapeBatch | None = None
 
     try:
         scrape_batch = await _run_backfill_candidate_scrape_job(
@@ -2168,29 +2164,33 @@ async def run_news_backfill_scrape_job(
             if batch_id is not None:
                 existing_batch = updated_persistence.get_backfill_batch(batch_id)
                 if existing_batch is not None:
-                    remaining_candidates = select_backfill_candidates_for_scrape(
-                        updated_persistence,
+                    remaining_candidates = updated_persistence.list_candidates(
+                        statuses=SCRAPEABLE_CANDIDATE_STATUSES,
+                        backfill_batch_id=batch_id,
                         limit=1,
-                        batch_id=batch_id,
+                    )
+                    scrape_attempts = len(scrape_batch.attempts) if scrape_batch is not None else 0
+                    scraped_candidates = (
+                        len(scrape_batch.selected_candidates) if scrape_batch is not None else 0
                     )
                     final_status = (
-                        BackfillBatchStatus.COMPLETED
-                        if not remaining_candidates
-                        else (
+                        BackfillBatchStatus.PARTIAL
+                        if result.errors
+                        else BackfillBatchStatus.COMPLETED
+                    )
+                    if remaining_candidates:
+                        final_status = (
                             BackfillBatchStatus.PARTIAL
                             if result.errors
                             else BackfillBatchStatus.DISCOVERED
                         )
-                    )
                     _update_backfill_batch_state(
                         updated_persistence,
                         batch=existing_batch,
                         status=final_status,
-                        scrape_attempt_count=existing_batch.scrape_attempt_count
-                        + len(scrape_batch.attempts if "scrape_batch" in locals() else []),
-                        scraped_candidate_count=existing_batch.scraped_candidate_count
-                        + len(
-                            scrape_batch.selected_candidates if "scrape_batch" in locals() else []
+                        scrape_attempt_count=existing_batch.scrape_attempt_count + scrape_attempts,
+                        scraped_candidate_count=(
+                            existing_batch.scraped_candidate_count + scraped_candidates
                         ),
                         warnings=deduplicate_strings([*existing_batch.warnings, *result.warnings]),
                         errors=deduplicate_strings([*existing_batch.errors, *result.errors]),

@@ -40,9 +40,10 @@ class CandidateStore(ABC):
         self,
         *,
         statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
-        """List durable candidates, optionally filtered by status."""
+        """List durable candidates, optionally filtered by status and batch."""
 
     @abstractmethod
     def find_candidate_by_urls(
