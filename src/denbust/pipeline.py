@@ -480,11 +480,12 @@ def _batch_candidate_counts(
 ) -> tuple[int, int]:
     """Return merged-candidate and queued-for-scrape counts for one backfill batch."""
     batch_candidates = persistence.list_candidates(backfill_batch_id=batch_id)
-    queued_for_scrape = persistence.list_candidates(
-        statuses=SCRAPEABLE_CANDIDATE_STATUSES,
-        backfill_batch_id=batch_id,
+    queued_for_scrape_count = sum(
+        1
+        for candidate in batch_candidates
+        if candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES
     )
-    return len(batch_candidates), len(queued_for_scrape)
+    return len(batch_candidates), queued_for_scrape_count
 
 
 def _update_backfill_batch_state(
@@ -1933,24 +1934,32 @@ async def run_news_backfill_discover_job(
         result.fatal = True
         result.errors.append("No backfill discovery producers configured")
         return result.finish("fatal: no backfill discovery producers configured")
-    batch = BackfillBatch(
-        batch_id=os.getenv(BACKFILL_BATCH_ID_ENV) or str(uuid4()),
-        created_at=result.run_timestamp,
-        updated_at=result.run_timestamp,
-        started_at=result.run_timestamp,
-        dataset_name=config.dataset_name,
-        job_name=config.job_name,
-        status=BackfillBatchStatus.RUNNING,
-        requested_date_from=requested_date_from,
-        requested_date_to=requested_date_to,
-        window_count=len(windows),
-        metadata={
-            "requested_date_from_env": BACKFILL_DATE_FROM_ENV,
-            "requested_date_to_env": BACKFILL_DATE_TO_ENV,
-        },
-    )
+    batch_id = os.getenv(BACKFILL_BATCH_ID_ENV) or str(uuid4())
     persistence = create_discovery_persistence(config)
     try:
+        if (
+            os.getenv(BACKFILL_BATCH_ID_ENV)
+            and persistence.get_backfill_batch(batch_id) is not None
+        ):
+            result.fatal = True
+            result.errors.append(f"Backfill batch {batch_id} already exists")
+            return result.finish(f"fatal: backfill batch {batch_id} already exists")
+        batch = BackfillBatch(
+            batch_id=batch_id,
+            created_at=result.run_timestamp,
+            updated_at=result.run_timestamp,
+            started_at=result.run_timestamp,
+            dataset_name=config.dataset_name,
+            job_name=config.job_name,
+            status=BackfillBatchStatus.RUNNING,
+            requested_date_from=requested_date_from,
+            requested_date_to=requested_date_to,
+            window_count=len(windows),
+            metadata={
+                "requested_date_from_env": BACKFILL_DATE_FROM_ENV,
+                "requested_date_to_env": BACKFILL_DATE_TO_ENV,
+            },
+        )
         persistence.upsert_backfill_batches([batch])
         run_base = result.run_timestamp.astimezone(UTC).isoformat()
         query_count = 0

@@ -659,6 +659,39 @@ async def test_run_news_backfill_discover_job_requires_producers(
 
 
 @pytest.mark.asyncio
+async def test_run_news_backfill_discover_job_rejects_existing_forced_batch_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Backfill discover should fail fast when a forced batch id already exists."""
+    monkeypatch.setattr(
+        "denbust.pipeline.resolve_backfill_request_window",
+        lambda: (datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)),
+    )
+    monkeypatch.setattr(
+        "denbust.pipeline.plan_backfill_windows", lambda **_kwargs: [build_window()]
+    )
+    monkeypatch.setattr(
+        "denbust.pipeline.create_sources", lambda _config: [HistoricalFakeSource("ynet")]
+    )
+    monkeypatch.setenv("DENBUST_BACKFILL_BATCH_ID", "batch-1")
+    store = build_store(tmp_path)
+    store.upsert_backfill_batches([build_batch(status=BackfillBatchStatus.DISCOVERED)])
+    monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: store)
+
+    result = await run_news_backfill_discover_job(
+        build_config(
+            tmp_path,
+            source_discovery={"enabled": True, "persist_candidates": True},
+        )
+    )
+
+    assert result.fatal is True
+    assert result.result_summary == "fatal: backfill batch batch-1 already exists"
+    assert result.errors == ["Backfill batch batch-1 already exists"]
+
+
+@pytest.mark.asyncio
 async def test_run_news_backfill_discover_job_marks_partial_and_failed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

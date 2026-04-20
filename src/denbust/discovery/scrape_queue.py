@@ -118,11 +118,14 @@ def select_backfill_candidates_for_scrape(
 ) -> list[PersistentCandidate]:
     """Return eligible durable backfill candidates for one historical drain pass."""
     current_time = now or datetime.now(UTC)
+    listed_candidates = persistence.list_candidates(
+        statuses=SCRAPEABLE_CANDIDATE_STATUSES,
+        backfill_batch_id=batch_id,
+    )
     candidates = [
         candidate
-        for candidate in persistence.list_candidates(statuses=SCRAPEABLE_CANDIDATE_STATUSES)
+        for candidate in listed_candidates
         if candidate.backfill_batch_id is not None
-        and (batch_id is None or candidate.backfill_batch_id == batch_id)
         and (
             candidate.next_scrape_attempt_at is None
             or candidate.next_scrape_attempt_at <= current_time

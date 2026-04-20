@@ -12,6 +12,7 @@ from denbust.discovery.backfill import (
     BACKFILL_DATE_FROM_ENV,
     BACKFILL_DATE_TO_ENV,
     build_backfill_queries,
+    parse_backfill_datetime,
     plan_backfill_windows,
     resolve_backfill_request_window,
 )
@@ -19,6 +20,7 @@ from denbust.discovery.models import (
     BackfillBatch,
     BackfillBatchStatus,
     CandidateStatus,
+    DiscoveryQueryKind,
     PersistentCandidate,
 )
 from denbust.discovery.scrape_queue import select_backfill_candidates_for_scrape
@@ -120,6 +122,86 @@ def test_resolve_backfill_request_window_reads_env(monkeypatch: pytest.MonkeyPat
 
     assert date_from == datetime(2026, 1, 1, tzinfo=UTC)
     assert date_to == datetime(2026, 1, 15, tzinfo=UTC)
+
+
+def test_parse_backfill_datetime_rejects_empty_and_normalizes_values() -> None:
+    """Backfill datetime parsing should reject blanks and normalize Z/naive timestamps to UTC."""
+    with pytest.raises(ValueError, match="TEST_ENV must not be empty"):
+        parse_backfill_datetime("   ", env_name="TEST_ENV")
+
+    assert parse_backfill_datetime("2026-01-01T00:00:00Z", env_name="TEST_ENV") == datetime(
+        2026, 1, 1, tzinfo=UTC
+    )
+    assert parse_backfill_datetime("2026-01-01T12:00:00", env_name="TEST_ENV") == datetime(
+        2026, 1, 1, 12, 0, tzinfo=UTC
+    )
+
+
+def test_resolve_backfill_request_window_rejects_missing_or_inverted_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backfill request window resolution should reject missing and inverted ranges."""
+    monkeypatch.delenv(BACKFILL_DATE_FROM_ENV, raising=False)
+    monkeypatch.delenv(BACKFILL_DATE_TO_ENV, raising=False)
+    with pytest.raises(ValueError, match="Missing required backfill window environment variable"):
+        resolve_backfill_request_window()
+
+    monkeypatch.setenv(BACKFILL_DATE_FROM_ENV, "2026-01-02T00:00:00+00:00")
+    monkeypatch.setenv(BACKFILL_DATE_TO_ENV, "2026-01-01T00:00:00+00:00")
+    with pytest.raises(ValueError, match="must be earlier than or equal to"):
+        resolve_backfill_request_window()
+
+
+def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() -> None:
+    """Backfill queries should ignore blank/duplicate keywords and dedupe source-targeted queries."""
+    config = Config(
+        keywords=["", "בית בושת", "בית בושת", "  סחר  "],
+        sources=[
+            {"name": "ynet", "type": "rss", "enabled": True, "url": "https://example.com/feed.xml"},
+            {"name": "ynet", "type": "rss", "enabled": True, "url": "https://example.com/feed.xml"},
+            {
+                "name": "walla",
+                "type": "rss",
+                "enabled": True,
+                "url": "https://news.walla.co.il/feed",
+            },
+        ],
+        discovery={"default_query_kinds": ["broad", "source_targeted"]},
+    )
+    window = BackfillBatch(
+        requested_date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        requested_date_to=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    queries = build_backfill_queries(
+        config,
+        window=plan_backfill_windows(
+            date_from=window.requested_date_from,
+            date_to=window.requested_date_to,
+            batch_window_days=7,
+        )[0],
+    )
+
+    broad_queries = [query for query in queries if query.query_kind is DiscoveryQueryKind.BROAD]
+    source_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
+    ]
+
+    assert [query.query_text for query in broad_queries] == ["בית בושת", "סחר"]
+    assert len(source_queries) == 4
+    assert {query.source_hint for query in source_queries} == {"ynet", "walla"}
+    assert all(query.preferred_domains for query in source_queries)
+
+
+def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> None:
+    """Backfill query generation should short-circuit when no usable keywords remain."""
+    config = Config(keywords=["", "   "], discovery={"default_query_kinds": ["source_targeted"]})
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    assert build_backfill_queries(config, window=window) == []
 
 
 def test_select_backfill_candidates_prefers_oldest_window_then_oldest_publication(

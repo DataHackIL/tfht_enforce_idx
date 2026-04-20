@@ -213,6 +213,24 @@ def test_select_backfill_candidates_for_scrape_respects_explicit_batch_id(tmp_pa
     assert [candidate.candidate_id for candidate in selected] == ["first"]
 
 
+def test_select_backfill_candidates_for_scrape_uses_batch_filter_when_provided(
+    tmp_path: Path,
+) -> None:
+    """Explicit batch selection should push the batch filter into persistence reads."""
+    store = build_store(tmp_path)
+    batch_candidate = build_candidate("first", status=CandidateStatus.NEW).model_copy(
+        update={"backfill_batch_id": "batch-1"}
+    )
+    other_candidate = build_candidate("second", status=CandidateStatus.NEW).model_copy(
+        update={"backfill_batch_id": "batch-2"}
+    )
+    store.upsert_candidates([batch_candidate, other_candidate])
+
+    selected = select_backfill_candidates_for_scrape(store, limit=10, batch_id="batch-1")
+
+    assert [candidate.candidate_id for candidate in selected] == ["first"]
+
+
 @pytest.mark.asyncio
 async def test_scrape_candidates_returns_empty_batch_for_no_candidates(tmp_path: Path) -> None:
     """An empty scrape pass should return an empty batch without persistence writes."""
