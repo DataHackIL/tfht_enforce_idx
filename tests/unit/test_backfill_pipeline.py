@@ -241,6 +241,15 @@ def test_update_backfill_batch_state_refreshes_counts(tmp_path: Path) -> None:
     assert updated.finished_at is not None
     assert store.get_backfill_batch("batch-1") is not None
 
+    reopened = pipeline_module._update_backfill_batch_state(
+        store,
+        batch=updated,
+        status=BackfillBatchStatus.SCRAPING,
+        finished=False,
+    )
+
+    assert reopened.finished_at is None
+
 
 def test_batch_candidate_counts_uses_batch_filter(tmp_path: Path) -> None:
     """Batch counting should only consider candidates from the requested backfill batch."""
@@ -791,6 +800,8 @@ async def test_run_news_backfill_discover_job_marks_partial_and_failed(
     batch = store.list_backfill_batches(limit=1)[0]
     assert partial.fatal is False
     assert batch.status is BackfillBatchStatus.PARTIAL
+    assert batch.finished_at is None
+    assert partial.unified_item_count == batch.merged_candidate_count
     assert "backfill discovery persisted 2 candidate(s)" in (partial.result_summary or "")
     assert "ynet: warning" in partial.warnings
 
@@ -826,7 +837,9 @@ async def test_run_news_backfill_discover_job_marks_partial_and_failed(
     assert failed.fatal is True
     assert failed.result_summary is not None
     assert failed.result_summary.startswith("fatal: backfill discovery failed for batch ")
-    assert fail_store.list_backfill_batches(limit=1)[0].status is BackfillBatchStatus.FAILED
+    failed_batch = fail_store.list_backfill_batches(limit=1)[0]
+    assert failed_batch.status is BackfillBatchStatus.FAILED
+    assert failed_batch.finished_at is not None
 
 
 @pytest.mark.asyncio

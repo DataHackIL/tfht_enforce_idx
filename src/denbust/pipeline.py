@@ -499,13 +499,19 @@ def _update_backfill_batch_state(
     scraped_candidate_count: int | None = None,
     warnings: list[str] | None = None,
     errors: list[str] | None = None,
-    finished: bool = False,
+    finished: bool | None = None,
 ) -> BackfillBatch:
     """Persist one batch state transition with refreshed aggregate counts."""
     merged_candidate_count, queued_for_scrape_count = _batch_candidate_counts(
         persistence,
         batch_id=batch.batch_id,
     )
+    if finished is True:
+        finished_at = datetime.now(UTC)
+    elif finished is False:
+        finished_at = None
+    else:
+        finished_at = batch.finished_at
     updated = batch.model_copy(
         update={
             "updated_at": datetime.now(UTC),
@@ -528,7 +534,7 @@ def _update_backfill_batch_state(
             ),
             "warnings": warnings if warnings is not None else batch.warnings,
             "errors": errors if errors is not None else batch.errors,
-            "finished_at": datetime.now(UTC) if finished else batch.finished_at,
+            "finished_at": finished_at,
         }
     )
     persistence.upsert_backfill_batches([updated])
@@ -2017,12 +2023,12 @@ async def run_news_backfill_discover_job(
             query_count += persisted.run.query_count
             discovered_count += persisted.run.candidate_count
             result.raw_article_count += persisted.run.candidate_count
-            result.unified_item_count += persisted.run.merged_candidate_count
             result.errors.extend(persisted.run.errors)
             batch_errors.extend(persisted.run.errors)
 
+        merged_candidate_count, _ = _batch_candidate_counts(persistence, batch_id=batch.batch_id)
         status = BackfillBatchStatus.DISCOVERED
-        if batch_errors and not result.unified_item_count:
+        if batch_errors and not merged_candidate_count:
             status = BackfillBatchStatus.FAILED
             result.fatal = True
         elif batch_errors:
@@ -2036,11 +2042,12 @@ async def run_news_backfill_discover_job(
             candidate_count=discovered_count,
             warnings=deduplicate_strings(batch_warnings),
             errors=deduplicate_strings(batch_errors),
-            finished=True,
+            finished=status is BackfillBatchStatus.FAILED,
         )
     finally:
         persistence.close()
 
+    result.unified_item_count = batch.merged_candidate_count
     result.warnings.extend(batch.warnings)
     result.set_debug_payload(
         {
@@ -2100,6 +2107,7 @@ async def run_news_backfill_scrape_job(
             status=BackfillBatchStatus.SCRAPING,
             warnings=batch.warnings,
             errors=batch.errors,
+            finished=False,
         )
     finally:
         persistence.close()

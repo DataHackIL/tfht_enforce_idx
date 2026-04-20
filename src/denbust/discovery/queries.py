@@ -40,7 +40,7 @@ def _source_domain(source: SourceConfig) -> str | None:
     return None
 
 
-def _enabled_source_domains(config: Config) -> list[tuple[str, str]]:
+def enabled_source_domains(config: Config) -> list[tuple[str, str]]:
     source_domains: list[tuple[str, str]] = []
     for source in config.sources:
         if not source.enabled:
@@ -68,7 +68,7 @@ def build_discovery_queries(
     date_to = current_time
     queries: list[DiscoveryQuery] = []
     seen_keys: set[tuple[object, ...]] = set()
-    source_domains = _enabled_source_domains(config)
+    source_domains = enabled_source_domains(config)
 
     for keyword in keywords:
         if DiscoveryQueryKind.BROAD in config.discovery.default_query_kinds:

@@ -101,7 +101,7 @@ def build_backfill_queries(
     window: BackfillWindow,
 ) -> list[DiscoveryQuery]:
     """Build normalized historical discovery queries for one backfill window."""
-    from denbust.discovery.queries import _enabled_source_domains
+    from denbust.discovery.queries import enabled_source_domains
 
     keywords = _normalize_keywords(config.keywords)
     if not keywords:
@@ -109,7 +109,7 @@ def build_backfill_queries(
 
     queries: list[DiscoveryQuery] = []
     seen_keys: set[tuple[object, ...]] = set()
-    source_domains = _enabled_source_domains(config)
+    source_domains = enabled_source_domains(config)
     for keyword in keywords:
         if DiscoveryQueryKind.BROAD in config.discovery.default_query_kinds:
             broad_key = (DiscoveryQueryKind.BROAD, keyword, window.index)
