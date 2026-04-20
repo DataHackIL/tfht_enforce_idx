@@ -894,7 +894,8 @@ async def _run_backfill_engine_discovery(
     missing_error: str | None = None
     if engine_name == "brave":
         if not config.brave_search_api_key:
-            missing_error = "brave: missing DENBUST_BRAVE_SEARCH_API_KEY"
+            env_name = config.discovery.engines.brave.api_key_env or "DENBUST_BRAVE_SEARCH_API_KEY"
+            missing_error = f"brave: missing {env_name}"
         else:
             engine = BraveSearchEngine(
                 api_key=config.brave_search_api_key,
@@ -907,7 +908,8 @@ async def _run_backfill_engine_discovery(
             )
     elif engine_name == "exa":
         if not config.exa_api_key:
-            missing_error = "exa: missing DENBUST_EXA_API_KEY"
+            env_name = config.discovery.engines.exa.api_key_env or "DENBUST_EXA_API_KEY"
+            missing_error = f"exa: missing {env_name}"
         else:
             engine = ExaSearchEngine(
                 api_key=config.exa_api_key,
@@ -924,9 +926,13 @@ async def _run_backfill_engine_discovery(
             )
     elif engine_name == "google_cse":
         if not config.google_cse_api_key:
-            missing_error = "google_cse: missing DENBUST_GOOGLE_CSE_API_KEY"
+            env_name = (
+                config.discovery.engines.google_cse.api_key_env or "DENBUST_GOOGLE_CSE_API_KEY"
+            )
+            missing_error = f"google_cse: missing {env_name}"
         elif not config.google_cse_id:
-            missing_error = "google_cse: missing DENBUST_GOOGLE_CSE_ID"
+            env_name = config.discovery.engines.google_cse.cse_id_env or "DENBUST_GOOGLE_CSE_ID"
+            missing_error = f"google_cse: missing {env_name}"
         else:
             engine = GoogleCseSearchEngine(
                 api_key=config.google_cse_api_key,

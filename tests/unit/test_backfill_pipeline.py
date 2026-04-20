@@ -250,6 +250,15 @@ def test_update_backfill_batch_state_refreshes_counts(tmp_path: Path) -> None:
 
     assert reopened.finished_at is None
 
+    preserved = pipeline_module._update_backfill_batch_state(
+        store,
+        batch=updated,
+        status=BackfillBatchStatus.PARTIAL,
+        finished=None,
+    )
+
+    assert preserved.finished_at == updated.finished_at
+
 
 def test_batch_candidate_counts_uses_batch_filter(tmp_path: Path) -> None:
     """Batch counting should only consider candidates from the requested backfill batch."""
@@ -357,14 +366,18 @@ async def test_run_backfill_engine_discovery_handles_empty_queries_and_errors(
     missing = await pipeline_module._run_backfill_engine_discovery(
         config=build_config(
             tmp_path,
-            discovery={"enabled": True, "persist_candidates": True, "engines": {"exa": {}}},
+            discovery={
+                "enabled": True,
+                "persist_candidates": True,
+                "engines": {"exa": {"api_key_env": "CUSTOM_EXA_KEY"}},
+            },
         ),
         run_id="run-1",
         batch_id="batch-1",
         window=build_window(),
         engine_name="exa",
     )
-    assert missing.run.errors == ["exa: missing DENBUST_EXA_API_KEY"]
+    assert missing.run.errors == ["exa: missing CUSTOM_EXA_KEY"]
 
     discover = AsyncMock(side_effect=RuntimeError("kaput"))
     fake_engine = MagicMock(discover=discover, aclose=AsyncMock())
@@ -452,14 +465,18 @@ async def test_run_backfill_engine_discovery_covers_exa_and_google_variants(
     missing_google_key = await pipeline_module._run_backfill_engine_discovery(
         config=build_config(
             tmp_path,
-            discovery={"enabled": True, "persist_candidates": True, "engines": {"google_cse": {}}},
+            discovery={
+                "enabled": True,
+                "persist_candidates": True,
+                "engines": {"google_cse": {"api_key_env": "CUSTOM_GOOGLE_KEY"}},
+            },
         ),
         run_id="run-1",
         batch_id="batch-1",
         window=build_window(),
         engine_name="google_cse",
     )
-    assert missing_google_key.run.errors == ["google_cse: missing DENBUST_GOOGLE_CSE_API_KEY"]
+    assert missing_google_key.run.errors == ["google_cse: missing CUSTOM_GOOGLE_KEY"]
 
     monkeypatch.setenv("DENBUST_GOOGLE_CSE_API_KEY", "google-key")
     missing_google_id = await pipeline_module._run_backfill_engine_discovery(
@@ -471,7 +488,7 @@ async def test_run_backfill_engine_discovery_covers_exa_and_google_variants(
                 "engines": {
                     "google_cse": {
                         "api_key_env": "DENBUST_GOOGLE_CSE_API_KEY",
-                        "cse_id_env": "DENBUST_GOOGLE_CSE_ID",
+                        "cse_id_env": "CUSTOM_GOOGLE_CSE_ID",
                     }
                 },
             },
@@ -481,7 +498,7 @@ async def test_run_backfill_engine_discovery_covers_exa_and_google_variants(
         window=build_window(),
         engine_name="google_cse",
     )
-    assert missing_google_id.run.errors == ["google_cse: missing DENBUST_GOOGLE_CSE_ID"]
+    assert missing_google_id.run.errors == ["google_cse: missing CUSTOM_GOOGLE_CSE_ID"]
 
     google_engine = MagicMock(discover=AsyncMock(return_value=[]), aclose=AsyncMock())
     monkeypatch.setattr("denbust.pipeline.GoogleCseSearchEngine", lambda **_kwargs: google_engine)
