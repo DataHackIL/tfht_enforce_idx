@@ -22,7 +22,9 @@ from denbust.discovery.models import (
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     GenericFetchResult,
+    _metadata_datetime,
     scrape_candidates,
+    select_backfill_candidates_for_scrape,
     select_candidates_for_scrape,
 )
 from denbust.discovery.state_paths import resolve_discovery_state_paths
@@ -172,6 +174,43 @@ def test_select_candidates_for_scrape_prioritizes_none_and_earlier_retry_times(
         "earlier_due",
         "later_due",
     ]
+
+
+def test_metadata_datetime_handles_invalid_and_naive_values() -> None:
+    """Backfill metadata parsing should reject invalid strings and normalize naive ones to UTC."""
+    invalid_candidate = build_candidate("invalid", status=CandidateStatus.NEW).model_copy(
+        update={"metadata": {"backfill_window_start": "not-a-date"}}
+    )
+    naive_candidate = build_candidate("naive", status=CandidateStatus.NEW).model_copy(
+        update={"metadata": {"backfill_window_start": "2026-01-01T12:00:00"}}
+    )
+
+    assert _metadata_datetime(invalid_candidate, "backfill_window_start") is None
+    assert _metadata_datetime(naive_candidate, "backfill_window_start") == datetime(
+        2026, 1, 1, 12, 0, tzinfo=UTC
+    )
+
+
+def test_select_backfill_candidates_for_scrape_respects_explicit_batch_id(tmp_path: Path) -> None:
+    """Explicit backfill batch selection should only return candidates from that batch."""
+    store = build_store(tmp_path)
+    first = build_candidate("first", status=CandidateStatus.NEW).model_copy(
+        update={
+            "backfill_batch_id": "batch-1",
+            "metadata": {"backfill_window_start": "2026-01-01T00:00:00+00:00"},
+        }
+    )
+    second = build_candidate("second", status=CandidateStatus.NEW).model_copy(
+        update={
+            "backfill_batch_id": "batch-2",
+            "metadata": {"backfill_window_start": "2025-12-01T00:00:00+00:00"},
+        }
+    )
+    store.upsert_candidates([first, second])
+
+    selected = select_backfill_candidates_for_scrape(store, limit=10, batch_id="batch-1")
+
+    assert [candidate.candidate_id for candidate in selected] == ["first"]
 
 
 @pytest.mark.asyncio

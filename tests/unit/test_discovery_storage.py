@@ -12,8 +12,10 @@ from denbust.config import Config
 from denbust.data_models import RawArticle
 from denbust.discovery.models import (
     BackfillBatch,
+    BackfillBatchStatus,
     CandidateProvenance,
     CandidateStatus,
+    DiscoveredCandidate,
     DiscoveryRun,
     FetchStatus,
     PersistentCandidate,
@@ -130,6 +132,24 @@ class FakeSource:
         return self._articles
 
 
+class HistoricalFakeSource(FakeSource):
+    """Source stub that also supports explicit historical windows."""
+
+    def __init__(self, name: str, articles: list[RawArticle]) -> None:
+        super().__init__(name, articles)
+        self.window_calls: list[tuple[datetime, datetime, list[str]]] = []
+
+    async def fetch_window(
+        self,
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        keywords: list[str],
+    ) -> list[RawArticle]:
+        self.window_calls.append((date_from, date_to, keywords))
+        return self._articles
+
+
 class RecordingPersistence(NullDiscoveryPersistence):
     """Persistence stub that records write calls."""
 
@@ -212,6 +232,113 @@ def test_source_discovery_adapter_requires_days() -> None:
     asyncio.run(run_test())
 
 
+def test_source_discovery_adapter_historical_window_support_and_validation() -> None:
+    """Historical adapters should expose capability, validate windows, and fetch tagged articles."""
+
+    async def run_test() -> None:
+        from denbust.discovery.base import SourceDiscoveryContext
+
+        article = build_raw_article()
+        supported = HistoricalFakeSource("ynet", [article])
+        supported_adapter = SourceDiscoveryAdapter(supported)
+        unsupported_adapter = SourceDiscoveryAdapter(FakeSource("walla", []))
+
+        assert supported_adapter.supports_historical_window is True
+        assert unsupported_adapter.supports_historical_window is False
+
+        try:
+            await unsupported_adapter.discover_candidates_for_window(
+                SourceDiscoveryContext(
+                    run_id="run-1",
+                    source_names=["walla"],
+                    keywords=["בית בושת"],
+                    date_from=datetime(2026, 1, 1, tzinfo=UTC),
+                    date_to=datetime(2026, 1, 2, tzinfo=UTC),
+                )
+            )
+        except ValueError as exc:
+            assert "does not support historical windows" in str(exc)
+        else:
+            raise AssertionError("expected ValueError for unsupported source")
+
+        try:
+            await supported_adapter.discover_candidates_for_window(
+                SourceDiscoveryContext(
+                    run_id="run-1",
+                    source_names=["ynet"],
+                    keywords=["בית בושת"],
+                    date_from=None,
+                    date_to=datetime(2026, 1, 2, tzinfo=UTC),
+                )
+            )
+        except ValueError as exc:
+            assert "date_from/date_to are required" in str(exc)
+        else:
+            raise AssertionError("expected ValueError for missing date_from")
+
+        discovered_at = datetime(2026, 1, 3, 12, 0, tzinfo=UTC)
+        discovered = await supported_adapter.discover_candidates_for_window(
+            SourceDiscoveryContext(
+                run_id="run-1",
+                source_names=["ynet"],
+                keywords=["בית בושת"],
+                date_from=datetime(2026, 1, 1, tzinfo=UTC),
+                date_to=datetime(2026, 1, 2, tzinfo=UTC),
+                metadata={"discovered_at": discovered_at},
+            )
+        )
+
+        assert supported.window_calls == [
+            (
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 2, tzinfo=UTC),
+                ["בית בושת"],
+            )
+        ]
+        assert discovered[0].discovered_at == discovered_at
+
+    import asyncio
+
+    asyncio.run(run_test())
+
+
+def test_merge_discovered_candidate_preserves_backfill_metadata() -> None:
+    """Backfill candidate merges should propagate batch and window metadata."""
+    from denbust.discovery.models import ProducerKind
+    from denbust.discovery.source_native import merge_discovered_candidate
+
+    discovered = DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        candidate_url=HttpUrl("https://example.com/article"),
+        canonical_url=HttpUrl("https://example.com/article"),
+        title="title",
+        snippet="snippet",
+        discovered_at=datetime(2026, 1, 2, tzinfo=UTC),
+        publication_datetime_hint=datetime(2026, 1, 1, 9, 0, tzinfo=UTC),
+        source_hint="ynet",
+        metadata={
+            "backfill_batch_id": "batch-1",
+            "backfill_window_index": 3,
+            "backfill_window_start": "2026-01-01T00:00:00+00:00",
+            "backfill_window_end": "2026-01-02T00:00:00+00:00",
+        },
+    )
+    existing = build_candidate("candidate-1", backfill_batch_id="older-batch").model_copy(
+        update={"metadata": {"existing": True}}
+    )
+
+    merged = merge_discovered_candidate(discovered, existing)
+
+    assert merged.backfill_batch_id == "batch-1"
+    assert merged.metadata["backfill_window_index"] == 3
+    assert merged.metadata["backfill_window_start"] == "2026-01-01T00:00:00+00:00"
+    assert merged.metadata["backfill_window_end"] == "2026-01-02T00:00:00+00:00"
+    assert merged.metadata["latest_publication_datetime_hint"] == "2026-01-01T09:00:00+00:00"
+    assert merged.metadata["latest_discovery_metadata"]["backfill_batch_id"] == "batch-1"
+    assert merged.source_discovery_only is False
+
+
 def test_persist_discovered_candidates_reuses_identity_map_and_sets_failed_status() -> None:
     """In-memory dedupe within one persistence pass should avoid repeated lookups."""
     first = raw_article_to_discovered_candidate(build_raw_article(title="title-1"))
@@ -249,11 +376,14 @@ def test_null_discovery_persistence_is_noop() -> None:
 
     store.write_run(DiscoveryRun(run_id="run-1"))
     store.upsert_candidates([build_candidate()])
+    store.upsert_backfill_batches([build_backfill_batch()])
     store.append_provenance([build_provenance()])
     store.append_attempts([build_attempt()])
 
     assert store.get_candidate("missing") is None
     assert store.list_candidates() == []
+    assert store.get_backfill_batch("missing") is None
+    assert store.list_backfill_batches() == []
     assert (
         store.find_candidate_by_urls(canonical_url=None, current_url="https://example.com") is None
     )
@@ -325,12 +455,17 @@ def test_state_repo_discovery_persistence_handles_missing_and_blank_jsonl(tmp_pa
     assert store.list_candidates() == []
 
     paths.latest_candidates_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.latest_backfill_batches_path.parent.mkdir(parents=True, exist_ok=True)
     paths.latest_candidates_path.write_text("\n\n", encoding="utf-8")
+    paths.latest_backfill_batches_path.write_text("\n\n", encoding="utf-8")
     store.append_provenance([])
     store.append_attempts([])
     store.upsert_candidates([])
+    store.upsert_backfill_batches([])
 
     assert store.list_candidates() == []
+    assert store.get_backfill_batch("missing") is None
+    assert store.list_backfill_batches(statuses=[BackfillBatchStatus.RUNNING]) == []
 
 
 class FakeHttpClient:
@@ -377,6 +512,7 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[build_backfill_batch().model_dump(mode="json")]),
+            httpx.Response(200, json=[build_backfill_batch().model_dump(mode="json")]),
             httpx.Response(200, json=[build_candidate().model_dump(mode="json")]),
             httpx.Response(200, json=[]),
             httpx.Response(200, json=[]),
@@ -405,6 +541,7 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
     assert store.get_candidate("candidate-1") is not None
     assert len(store.list_candidates(statuses=[CandidateStatus.NEW], limit=2)) == 1
     assert store.get_backfill_batch("batch-1") is not None
+    assert len(store.list_backfill_batches(statuses=[BackfillBatchStatus.PENDING], limit=1)) == 1
     assert (
         store.find_candidate_by_urls(
             canonical_url="https://www.ynet.co.il/news/article/abc",
@@ -442,6 +579,8 @@ def test_supabase_discovery_persistence_handles_empty_payload_shapes() -> None:
             httpx.Response(200, json={"unexpected": True}),
             httpx.Response(200, json={"unexpected": True}),
             httpx.Response(200, json={"unexpected": True}),
+            httpx.Response(200, json={"unexpected": True}),
+            httpx.Response(200, json={"unexpected": True}),
         ]
     )
     store = SupabaseDiscoveryPersistence(
@@ -460,9 +599,12 @@ def test_supabase_discovery_persistence_handles_empty_payload_shapes() -> None:
 
     assert store.get_candidate("missing") is None
     assert store.list_candidates() == []
+    assert store.get_backfill_batch("missing") is None
+    assert store.list_backfill_batches(statuses=[BackfillBatchStatus.RUNNING], limit=5) == []
     assert store.list_provenance("missing") == []
     assert store.list_attempts("missing") == []
     store.upsert_candidates([])
+    store.upsert_backfill_batches([])
     store.append_provenance([])
     store.append_attempts([])
 
@@ -519,6 +661,7 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
     assert composite.get_candidate(candidate.candidate_id) is not None
     assert composite.get_backfill_batch(batch.batch_id) is not None
     assert composite.list_candidates(limit=1)[0].candidate_id == candidate.candidate_id
+    assert composite.list_backfill_batches(limit=1)[0].batch_id == batch.batch_id
     assert (
         composite.find_candidate_by_urls(
             canonical_url="https://www.ynet.co.il/news/article/abc",
