@@ -13,6 +13,10 @@ Use this guidance when working on GitHub Actions, coverage, Codecov, or `pr-agen
 
 - The main PR workflow invokes `pr-agent-context` from `ci-test.yml`
 - Refresh runs live in `.github/workflows/pr-agent-context-refresh.yml`
+- Refresh wiring should keep normal review/check-driven updates and add the guarded scheduled
+  `workflow_dispatch` fallback for same-repo PRs
+- Scheduled refresh dispatches should pass explicit pull request number, base SHA, and head SHA
+  overrides into the reusable workflow
 - Refresh is intentionally separate from main CI
 - `pr-agent-context` consumes the `coverage-xml` artifact directly for patch coverage
 - When changing patch coverage behavior, preserve the shared `coverage` job as the source of truth
