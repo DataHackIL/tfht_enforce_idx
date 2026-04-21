@@ -467,6 +467,8 @@ The ingest keywords in `agents/news/github.yaml` and `local.yaml` were assembled
 
 A one-time re-scan over the last 90 days with updated keywords can be run manually after the taxonomy migration to catch events that were previously missed.
 
+Cross-plan sequencing note: the earlier choice between `C-8` and `DL-PR-09` has already been resolved in favor of `DL-PR-09`, which shipped in PR `#87` on 2026-04-21. The remaining open sequencing question is whether `C-8` should happen before or after `DL-PR-10`.
+
 ---
 
 ## Ordering and dependencies
@@ -482,7 +484,8 @@ C-7 (tests)     [touches C-1, C-2, C-4, C-6 — do last]
 C-8 (keywords)  [independent, safe to defer]
 ```
 
-Recommended execution order for a solo contributor: C-1 → C-2 → C-3 → C-4 → C-5 → C-7 → C-6 → C-8.
+Recommended execution order for a solo contributor inside Phase C remains: C-1 → C-2 → C-3 → C-4 → C-5 → C-7 → C-6 → C-8.
+Actual cross-plan repository sequencing has already inserted `DL-PR-09` ahead of `C-8`; revisit `C-8` relative to `DL-PR-10`, not relative to `DL-PR-09`.
 
 ---
 
