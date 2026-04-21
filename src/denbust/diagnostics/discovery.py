@@ -24,7 +24,7 @@ from denbust.news_items.normalize import canonicalize_news_url
 from denbust.ops.factory import create_operational_store
 
 _SEARCH_ENGINE_NAMES: tuple[str, ...] = ("brave", "exa", "google_cse")
-_SOURCE_SUGGESTION_EXCLUDED_DOMAINS: frozenset[str] = frozenset({"www.facebook.com"})
+_SOURCE_SUGGESTION_EXCLUDED_DOMAINS: frozenset[str] = frozenset({"facebook.com"})
 _RETRY_BACKLOG_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.QUEUED,
     CandidateStatus.SCRAPE_PENDING,
@@ -677,15 +677,20 @@ def _build_source_suggestion_report(
     attempts: list[ScrapeAttempt],
     provenance: list[CandidateProvenance],
 ) -> SourceSuggestionReport:
-    known_domains = {domain for _, domain in enabled_source_domains(config)}
+    known_domains = {
+        normalized
+        for _, domain in enabled_source_domains(config)
+        if (normalized := _normalize_domain(domain)) is not None
+    }
     attempts_by_candidate_id: dict[str, list[ScrapeAttempt]] = {}
     for attempt in attempts:
         attempts_by_candidate_id.setdefault(attempt.candidate_id, []).append(attempt)
     provenance_runs_by_domain: dict[str, set[str]] = {}
     for event in provenance:
-        if event.domain is None:
+        normalized_domain = _normalize_domain(event.domain)
+        if normalized_domain is None:
             continue
-        provenance_runs_by_domain.setdefault(event.domain, set()).add(event.run_id)
+        provenance_runs_by_domain.setdefault(normalized_domain, set()).add(event.run_id)
 
     suggestions: list[SourceSuggestion] = []
     for domain, domain_candidates in _group_candidates_by_domain(candidates).items():
@@ -749,7 +754,20 @@ def _group_candidates_by_domain(
 ) -> dict[str, list[PersistentCandidate]]:
     grouped: dict[str, list[PersistentCandidate]] = {}
     for candidate in candidates:
-        if candidate.domain is None:
+        normalized_domain = _normalize_domain(candidate.domain)
+        if normalized_domain is None:
             continue
-        grouped.setdefault(candidate.domain, []).append(candidate)
+        grouped.setdefault(normalized_domain, []).append(candidate)
     return grouped
+
+
+def _normalize_domain(domain: str | None) -> str | None:
+    """Normalize domain strings to the canonical host form used by candidates."""
+    if domain is None:
+        return None
+    normalized = domain.strip().casefold()
+    if not normalized:
+        return None
+    if normalized.startswith("www."):
+        normalized = normalized[4:]
+    return normalized or None

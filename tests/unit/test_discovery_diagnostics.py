@@ -358,13 +358,29 @@ def test_build_discovery_diagnostic_report_builds_source_suggestions(tmp_path: P
     ).model_copy(update={"content_basis": ContentBasis.SEARCH_RESULT_ONLY})
     social = _candidate(
         "candidate-facebook",
-        url="https://www.facebook.com/story.php?story_fbid=3&id=4",
+        url="https://facebook.com/story.php?story_fbid=3&id=4",
         discovered_via=["brave"],
         status=CandidateStatus.UNSUPPORTED_SOURCE,
         first_seen_at=now - timedelta(days=2),
         last_seen_at=now - timedelta(hours=5),
     )
-    persistence.upsert_candidates([suggested_a, suggested_b, social])
+    known_source = _candidate(
+        "candidate-known-source",
+        url="https://ynet.co.il/news/article/3",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now - timedelta(days=2),
+        last_seen_at=now - timedelta(hours=3),
+    )
+    no_domain = _candidate(
+        "candidate-no-domain",
+        url="https://example.org/news/4",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now - timedelta(hours=2),
+    ).model_copy(update={"domain": None})
+    persistence.upsert_candidates([suggested_a, suggested_b, social, known_source, no_domain])
     persistence.append_provenance(
         [
             CandidateProvenance(
@@ -392,10 +408,31 @@ def test_build_discovery_diagnostic_report_builds_source_suggestions(tmp_path: P
                 candidate_id="candidate-facebook",
                 producer_name="brave",
                 producer_kind=ProducerKind.SOCIAL_SEARCH,
-                raw_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=3&id=4"),
-                normalized_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=3&id=4"),
+                raw_url=HttpUrl("https://facebook.com/story.php?story_fbid=3&id=4"),
+                normalized_url=HttpUrl("https://facebook.com/story.php?story_fbid=3&id=4"),
                 discovered_at=now - timedelta(days=2),
                 metadata={"query_kind": "social_targeted"},
+            ),
+            CandidateProvenance(
+                run_id="run-4",
+                candidate_id="candidate-known-source",
+                producer_name="brave",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl("https://ynet.co.il/news/article/3"),
+                normalized_url=HttpUrl("https://ynet.co.il/news/article/3"),
+                discovered_at=now - timedelta(days=2),
+                metadata={"query_kind": "broad"},
+            ),
+            CandidateProvenance(
+                run_id="run-5",
+                candidate_id="candidate-no-domain",
+                producer_name="brave",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl("https://example.org/news/4"),
+                normalized_url=HttpUrl("https://example.org/news/4"),
+                domain=None,
+                discovered_at=now - timedelta(days=1),
+                metadata={"query_kind": "broad"},
             ),
         ]
     )
@@ -416,10 +453,98 @@ def test_build_discovery_diagnostic_report_builds_source_suggestions(tmp_path: P
 
     assert report.source_suggestions.suggestions[0].domain == "example.com"
     assert report.source_suggestions.suggestions[0].run_count == 2
-    assert "www.facebook.com" not in {
-        suggestion.domain for suggestion in report.source_suggestions.suggestions
-    }
+    suggestion_domains = {suggestion.domain for suggestion in report.source_suggestions.suggestions}
+    assert "facebook.com" not in suggestion_domains
+    assert "ynet.co.il" not in suggestion_domains
+    assert "www.facebook.com" not in suggestion_domains
+    assert "www.ynet.co.il" not in suggestion_domains
     assert "Source suggestions" in render_discovery_diagnostic_report(report)
+
+
+def test_build_discovery_diagnostic_report_ignores_candidates_without_domain(
+    tmp_path: Path,
+) -> None:
+    """Domain-less candidates should be ignored by source-suggestion grouping."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    candidate = _candidate(
+        "candidate-no-domain",
+        url="https://example.org/news/4",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now - timedelta(hours=1),
+    ).model_copy(
+        update={"domain": None},
+        deep=True,
+    )
+
+    report = build_discovery_diagnostic_report(config=config, candidates_override=[candidate])
+
+    assert report.source_suggestions.suggestions == []
+
+
+def test_build_discovery_diagnostic_report_normalizes_source_domains(tmp_path: Path) -> None:
+    """Enabled source domains and excluded domains should be compared in normalized form."""
+    now = datetime.now(UTC)
+    config = Config(
+        store={"state_root": tmp_path},
+        sources=[
+            {
+                "name": "ynet",
+                "type": "rss",
+                "url": "https://www.ynet.co.il/feed.xml",
+                "enabled": True,
+            }
+        ],
+    )
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    persistence.upsert_candidates(
+        [
+            _candidate(
+                "candidate-ynet",
+                url="https://ynet.co.il/news/article/3",
+                discovered_via=["brave"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=2),
+                last_seen_at=now - timedelta(hours=2),
+            ),
+            _candidate(
+                "candidate-facebook",
+                url="https://facebook.com/story.php?story_fbid=3&id=4",
+                discovered_via=["brave"],
+                status=CandidateStatus.UNSUPPORTED_SOURCE,
+                first_seen_at=now - timedelta(days=2),
+                last_seen_at=now - timedelta(hours=1),
+            ),
+        ]
+    )
+    persistence.append_provenance(
+        [
+            CandidateProvenance(
+                run_id="run-1",
+                candidate_id="candidate-ynet",
+                producer_name="brave",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl("https://ynet.co.il/news/article/3"),
+                normalized_url=HttpUrl("https://ynet.co.il/news/article/3"),
+                discovered_at=now - timedelta(days=2),
+            ),
+            CandidateProvenance(
+                run_id="run-2",
+                candidate_id="candidate-facebook",
+                producer_name="brave",
+                producer_kind=ProducerKind.SOCIAL_SEARCH,
+                raw_url=HttpUrl("https://facebook.com/story.php?story_fbid=3&id=4"),
+                normalized_url=HttpUrl("https://facebook.com/story.php?story_fbid=3&id=4"),
+                discovered_at=now - timedelta(days=2),
+            ),
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+
+    assert report.source_suggestions.suggestions == []
 
 
 def test_read_jsonl_ignores_blank_lines(tmp_path: Path) -> None:

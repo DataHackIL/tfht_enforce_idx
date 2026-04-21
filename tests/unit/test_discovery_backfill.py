@@ -211,6 +211,27 @@ def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> 
     assert build_backfill_queries(config, window=window) == []
 
 
+def test_build_backfill_queries_deduplicates_social_targeted_entries() -> None:
+    """Duplicate normalized keywords should not emit duplicate social-targeted backfill queries."""
+    config = Config(
+        keywords=["זנות", "  זנות  "],
+        discovery={"default_query_kinds": ["social_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    social_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOCIAL_TARGETED
+    ]
+    assert len(social_queries) == 1
+    assert social_queries[0].preferred_domains == ["www.facebook.com"]
+
+
 def test_select_backfill_candidates_prefers_oldest_window_then_oldest_publication(
     tmp_path,
 ) -> None:

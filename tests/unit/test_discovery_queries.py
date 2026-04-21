@@ -145,6 +145,23 @@ def test_build_discovery_queries_can_disable_social_targeted_generation() -> Non
     assert all(query.query_kind is not DiscoveryQueryKind.SOCIAL_TARGETED for query in queries)
 
 
+def test_build_discovery_queries_deduplicates_social_targeted_entries() -> None:
+    """Duplicate normalized keywords should not emit duplicate social-targeted queries."""
+    config = Config(
+        keywords=["זנות", "  זנות  "],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["social_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    social_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOCIAL_TARGETED
+    ]
+    assert len(social_queries) == 1
+    assert social_queries[0].preferred_domains == ["www.facebook.com"]
+
+
 def test_enabled_source_domains_returns_only_enabled_resolved_domains() -> None:
     """Public source-domain resolution should expose reusable enabled discovery domains."""
     config = Config(
