@@ -6,6 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
+from urllib.parse import urlparse
 
 from pydantic import HttpUrl
 
@@ -22,17 +23,45 @@ from denbust.discovery.models import (
     PersistentCandidate,
     ProducerKind,
 )
+from denbust.discovery.queries import SOCIAL_DISCOVERY_DOMAINS
 from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.sources.base import HistoricalSource, Source
 
 
+def _normalize_domain(domain: str | None) -> str | None:
+    if domain is None:
+        return None
+    normalized = domain.strip().casefold()
+    if not normalized:
+        return None
+    if normalized.startswith("www."):
+        normalized = normalized[4:]
+    return normalized or None
+
+
+_NORMALIZED_SOCIAL_DISCOVERY_DOMAINS = frozenset(
+    normalized
+    for domain in SOCIAL_DISCOVERY_DOMAINS
+    if (normalized := _normalize_domain(domain)) is not None
+)
+
+
+def _candidate_domain(discovered: DiscoveredCandidate) -> str | None:
+    normalized_domain = _normalize_domain(discovered.domain)
+    if normalized_domain is not None:
+        return normalized_domain
+    return _normalize_domain(
+        urlparse(str(discovered.canonical_url or discovered.candidate_url)).netloc
+    )
+
+
 def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> DiscoveredCandidate:
     """Normalize search-engine social results into the social-search producer family."""
     query_kind = discovered.metadata.get("query_kind")
-    if (
+    if discovered.producer_kind is ProducerKind.SEARCH_ENGINE and (
         query_kind == DiscoveryQueryKind.SOCIAL_TARGETED.value
-        and discovered.producer_kind is ProducerKind.SEARCH_ENGINE
+        or _candidate_domain(discovered) in _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS
     ):
         return discovered.model_copy(update={"producer_kind": ProducerKind.SOCIAL_SEARCH})
     return discovered

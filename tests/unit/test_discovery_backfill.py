@@ -11,6 +11,7 @@ from denbust.config import Config
 from denbust.discovery.backfill import (
     BACKFILL_DATE_FROM_ENV,
     BACKFILL_DATE_TO_ENV,
+    backfill_metadata,
     build_backfill_queries,
     parse_backfill_datetime,
     plan_backfill_windows,
@@ -230,6 +231,24 @@ def test_build_backfill_queries_deduplicates_social_targeted_entries() -> None:
     ]
     assert len(social_queries) == 1
     assert social_queries[0].preferred_domains == ["www.facebook.com"]
+
+
+def test_backfill_metadata_serializes_batch_and_window() -> None:
+    """Backfill metadata should preserve stable batch/window identifiers."""
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 3, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    metadata = backfill_metadata(batch_id="batch-1", window=window)
+
+    assert metadata == {
+        "backfill_batch_id": "batch-1",
+        "backfill_window_index": 0,
+        "backfill_window_start": "2026-01-01T00:00:00+00:00",
+        "backfill_window_end": "2026-01-03T00:00:00+00:00",
+    }
 
 
 def test_select_backfill_candidates_prefers_oldest_window_then_oldest_publication(

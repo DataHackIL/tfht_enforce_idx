@@ -14,6 +14,7 @@ from denbust.diagnostics.discovery import (
     DiscoveryDiagnosticReport,
     _build_failure_summaries,
     _load_operational_record_urls,
+    _normalize_domain,
     _read_jsonl,
     build_discovery_diagnostic_report,
     persist_discovery_diagnostic_artifacts,
@@ -545,6 +546,51 @@ def test_build_discovery_diagnostic_report_normalizes_source_domains(tmp_path: P
     report = build_discovery_diagnostic_report(config=config)
 
     assert report.source_suggestions.suggestions == []
+
+
+def test_build_discovery_diagnostic_report_ignores_blank_provenance_domains(tmp_path: Path) -> None:
+    """Blank provenance domains should not contribute to source-suggestion run counts."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    persistence.upsert_candidates(
+        [
+            _candidate(
+                "candidate-example-1",
+                url="https://example.com/news/1",
+                discovered_via=["brave"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=2),
+                last_seen_at=now - timedelta(hours=2),
+            )
+        ]
+    )
+    persistence.append_provenance(
+        [
+            CandidateProvenance(
+                run_id="run-blank-domain",
+                candidate_id="candidate-example-1",
+                producer_name="brave",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl("https://example.com/news/1"),
+                normalized_url=HttpUrl("https://example.com/news/1"),
+                domain="   ",
+                discovered_at=now - timedelta(days=2),
+            )
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+
+    assert report.source_suggestions.suggestions[0].domain == "example.com"
+    assert report.source_suggestions.suggestions[0].run_count == 0
+
+
+def test_normalize_domain_returns_none_for_blank_values() -> None:
+    """Blank domain strings should normalize away."""
+    assert _normalize_domain(None) is None
+    assert _normalize_domain("") is None
+    assert _normalize_domain("   ") is None
 
 
 def test_read_jsonl_ignores_blank_lines(tmp_path: Path) -> None:

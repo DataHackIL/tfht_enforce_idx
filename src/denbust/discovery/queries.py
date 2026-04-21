@@ -107,9 +107,6 @@ def build_discovery_queries(
 
         if DiscoveryQueryKind.SOCIAL_TARGETED in config.discovery.default_query_kinds:
             for domain in SOCIAL_DISCOVERY_DOMAINS:
-                social_key = (DiscoveryQueryKind.SOCIAL_TARGETED, keyword, domain)
-                if social_key in seen_keys:
-                    continue
                 queries.append(
                     DiscoveryQuery(
                         query_text=keyword,
@@ -122,6 +119,5 @@ def build_discovery_queries(
                         tags=["social", domain],
                     )
                 )
-                seen_keys.add(social_key)
 
     return queries

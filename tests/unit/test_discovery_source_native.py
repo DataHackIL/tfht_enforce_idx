@@ -11,6 +11,8 @@ from pydantic import HttpUrl
 from denbust.data_models import RawArticle
 from denbust.discovery.models import DiscoveredCandidate, DiscoveryRun, ProducerKind
 from denbust.discovery.source_native import (
+    _candidate_domain,
+    _normalize_domain,
     persist_discovered_candidates,
     raw_article_to_discovered_candidate,
 )
@@ -152,6 +154,85 @@ def test_persist_discovered_candidates_marks_social_search_candidates_unsupporte
     assert candidate.needs_review is True
     assert candidate.discovered_via == ["brave"]
     assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
+
+
+def test_persist_discovered_candidates_marks_social_domains_unsupported_without_social_query_kind(
+    tmp_path: Path,
+) -> None:
+    """Configured social domains should remain reference-only even from broad discovery."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discovery = DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://facebook.com/story.php?story_fbid=5&id=6"),
+        canonical_url=HttpUrl("https://facebook.com/story.php?story_fbid=5&id=6"),
+        title="פוסט פייסבוק רחב",
+        snippet="חשד לבית בושת",
+        discovered_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+        source_hint="facebook.com",
+        metadata={"query_kind": "broad"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-social-domain"),
+        discovered_candidates=[discovery],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    provenance = persisted.provenance[0]
+    assert candidate.candidate_status.value == "unsupported_source"
+    assert candidate.needs_review is True
+    assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
+
+
+def test_source_native_domain_helpers_normalize_and_fallback() -> None:
+    """Source-native social classification should use canonical host normalization."""
+    discovered = DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        candidate_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=7&id=8"),
+        canonical_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=7&id=8"),
+        discovered_at=datetime(2026, 4, 11, 10, 0, tzinfo=UTC),
+    ).model_copy(update={"domain": None}, deep=True)
+
+    assert _normalize_domain(None) is None
+    assert _normalize_domain("   ") is None
+    assert _normalize_domain("WWW.FACEBOOK.COM") == "facebook.com"
+    assert _candidate_domain(discovered) == "facebook.com"
+
+
+def test_persist_discovered_candidates_keeps_non_social_broad_results_scrapeable(
+    tmp_path: Path,
+) -> None:
+    """Non-social broad search results should remain in the normal scrape flow."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discovery = DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://example.com/news/normal-result"),
+        canonical_url=HttpUrl("https://example.com/news/normal-result"),
+        title="תוצאה רגילה",
+        snippet="חשד לבית בושת",
+        discovered_at=datetime(2026, 4, 11, 11, 0, tzinfo=UTC),
+        metadata={"query_kind": "broad"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-non-social"),
+        discovered_candidates=[discovery],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    provenance = persisted.provenance[0]
+    assert candidate.candidate_status.value == "new"
+    assert candidate.needs_review is False
+    assert provenance.producer_kind is ProducerKind.SEARCH_ENGINE
 
 
 def test_persist_discovered_candidates_writes_failed_run_before_reraising() -> None:
