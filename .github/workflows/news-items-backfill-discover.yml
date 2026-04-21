@@ -1,10 +1,20 @@
-name: daily-state-run
+name: news-items-backfill-discover
 
 on:
-  # Daily scheduled candidate-driven ingest for news_items, with manual dispatch for ad hoc reruns.
-  schedule:
-    - cron: "0 4 * * *"
   workflow_dispatch:
+    inputs:
+      date_from:
+        description: "Required ISO timestamp for the batch start window"
+        required: true
+        type: string
+      date_to:
+        description: "Required ISO timestamp for the batch end window"
+        required: true
+        type: string
+      batch_id:
+        description: "Optional durable batch id override"
+        required: false
+        type: string
 
 concurrency:
   group: state-run
@@ -17,14 +27,14 @@ env:
   DEFAULT_PYTHON_VERSION: "3.11"
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
   DATASET_NAME: news_items
-  JOB_NAME: ingest
+  JOB_NAME: backfill_discover
   JOB_CONFIG_PATH: agents/news/github.yaml
-  STATE_JOB_DIR: state_repo/news_items/ingest
+  STATE_JOB_DIR: state_repo/news_items/discover
 
 jobs:
-  run-daily-scan:
+  run-backfill-discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     environment: news-items-ingest
 
     steps:
@@ -45,29 +55,22 @@ jobs:
           install-playwright: "true"
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run daily ingest job
-        # Required secrets:
-        # - ANTHROPIC_API_KEY
-        # - DENBUST_SUPABASE_URL
-        # - DENBUST_SUPABASE_SERVICE_ROLE_KEY
-        # Optional if email output is enabled in config:
-        # - DENBUST_EMAIL_SMTP_* / DENBUST_EMAIL_FROM / DENBUST_EMAIL_TO / DENBUST_EMAIL_SUBJECT
+      - name: Run backfill discover job
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
           DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
-          DENBUST_EMAIL_SMTP_HOST: ${{ secrets.DENBUST_EMAIL_SMTP_HOST }}
-          DENBUST_EMAIL_SMTP_PORT: ${{ secrets.DENBUST_EMAIL_SMTP_PORT }}
-          DENBUST_EMAIL_SMTP_USERNAME: ${{ secrets.DENBUST_EMAIL_SMTP_USERNAME }}
-          DENBUST_EMAIL_SMTP_PASSWORD: ${{ secrets.DENBUST_EMAIL_SMTP_PASSWORD }}
-          DENBUST_EMAIL_FROM: ${{ secrets.DENBUST_EMAIL_FROM }}
-          DENBUST_EMAIL_TO: ${{ secrets.DENBUST_EMAIL_TO }}
-          DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
-          DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
+          DENBUST_BRAVE_SEARCH_API_KEY: ${{ secrets.DENBUST_BRAVE_SEARCH_API_KEY }}
+          DENBUST_EXA_API_KEY: ${{ secrets.DENBUST_EXA_API_KEY }}
+          DENBUST_GOOGLE_CSE_API_KEY: ${{ secrets.DENBUST_GOOGLE_CSE_API_KEY }}
+          DENBUST_GOOGLE_CSE_ID: ${{ secrets.DENBUST_GOOGLE_CSE_ID }}
           DENBUST_STATE_ROOT: state_repo
+          DENBUST_BACKFILL_DATE_FROM: ${{ inputs.date_from }}
+          DENBUST_BACKFILL_DATE_TO: ${{ inputs.date_to }}
+          DENBUST_BACKFILL_BATCH_ID: ${{ inputs.batch_id }}
         run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
 
-      - name: Commit and push state changes
+      - name: Commit and push backfill discovery state changes
         if: ${{ always() }}
         run: |
           if [[ -z "$(git -C state_repo status --short)" ]]; then
@@ -78,17 +81,17 @@ jobs:
           git -C state_repo config user.name "github-actions[bot]"
           git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [[ -f "${{ env.STATE_JOB_DIR }}/seen.json" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/seen.json"
-          fi
           if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs"
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/runs"
           fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/logs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/logs"
+          if [[ -d "${{ env.STATE_JOB_DIR }}/candidates" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/candidates"
           fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/publication" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication"
+          if [[ -d "${{ env.STATE_JOB_DIR }}/metrics" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/metrics"
+          fi
+          if [[ -d "${{ env.STATE_JOB_DIR }}/backfill_batches" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/backfill_batches"
           fi
 
           if [[ -z "$(git -C state_repo status --short)" ]]; then
@@ -96,5 +99,5 @@ jobs:
             exit 0
           fi
 
-          git -C state_repo commit -m "chore(state): update seen store and run snapshot"
+          git -C state_repo commit -m "chore(state): update news_items backfill discovery state"
           git -C state_repo push

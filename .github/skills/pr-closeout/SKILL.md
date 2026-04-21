@@ -31,9 +31,12 @@ Use this guidance when finishing a feature branch, tracked plan item, or any tas
 8. Assign the PR to the relevant GitHub milestone.
 9. If the needed label or milestone does not exist, create it before finishing.
 10. Update any checked-in planning or agent-context files that should describe the post-merge state.
+11. Run `python scripts/validate_agent_plan.py` before opening the PR if `.agent-plan.md` changed.
 
 ## Repo-Specific Expectations
 
 - For tracked plan work, keep `.agent-plan.md`, `README.md`, and relevant human-facing planning docs aligned with the PR's expected post-merge state.
+- Rewrite `.agent-plan.md` as post-merge mainline truth rather than branch-local progress notes.
+- Keep `.agent-plan.md` in the validated format: required headings, exact mainline status fields, and exactly one `[next]` item.
 - Do not treat a local branch, a pushed branch, or a draft PR as the terminal state.
 - If GitHub publication is blocked, report the blocker explicitly; do not claim the task is complete.
