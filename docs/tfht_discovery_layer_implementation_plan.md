@@ -445,6 +445,7 @@ The recommended order is:
 
 ### After DL-PR-09
 - historical backfill becomes feasible
+- the earlier `C-8` vs `DL-PR-09` sequencing choice is resolved; the remaining cross-plan question is whether `C-8` should happen before or after `DL-PR-10`
 
 ### After DL-PR-11
 - the feature can be used operationally in CI/jobs
