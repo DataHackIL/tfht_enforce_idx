@@ -22,6 +22,8 @@ env:
   JOB_NAME: backfill_scrape
   JOB_CONFIG_PATH: agents/news/github.yaml
   STATE_JOB_DIR: state_repo/news_items/discover
+  DISCOVERY_STATE_DIR: state_repo/news_items/discover
+  INGEST_STATE_DIR: state_repo/news_items/ingest
 
 jobs:
   run-backfill-scrape:
@@ -75,29 +77,29 @@ jobs:
           git -C state_repo config user.name "github-actions[bot]"
           git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [[ -d "state_repo/news_items/discover/runs" ]]; then
-            git -C state_repo add -- "news_items/discover/runs"
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/runs"
           fi
-          if [[ -d "state_repo/news_items/discover/candidates" ]]; then
-            git -C state_repo add -- "news_items/discover/candidates"
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/candidates" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/candidates"
           fi
-          if [[ -d "state_repo/news_items/discover/metrics" ]]; then
-            git -C state_repo add -- "news_items/discover/metrics"
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/metrics" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/metrics"
           fi
-          if [[ -d "state_repo/news_items/discover/backfill_batches" ]]; then
-            git -C state_repo add -- "news_items/discover/backfill_batches"
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/backfill_batches" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/backfill_batches"
           fi
-          if [[ -d "state_repo/news_items/ingest/runs" ]]; then
-            git -C state_repo add -- "news_items/ingest/runs"
+          if [[ -d "${{ env.INGEST_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/runs"
           fi
-          if [[ -f "state_repo/news_items/ingest/seen.json" ]]; then
-            git -C state_repo add -- "news_items/ingest/seen.json"
+          if [[ -f "${{ env.INGEST_STATE_DIR }}/seen.json" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/seen.json"
           fi
-          if [[ -d "state_repo/news_items/ingest/logs" ]]; then
-            git -C state_repo add -- "news_items/ingest/logs"
+          if [[ -d "${{ env.INGEST_STATE_DIR }}/logs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/logs"
           fi
-          if [[ -d "state_repo/news_items/ingest/publication" ]]; then
-            git -C state_repo add -- "news_items/ingest/publication"
+          if [[ -d "${{ env.INGEST_STATE_DIR }}/publication" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/publication"
           fi
 
           if [[ -z "$(git -C state_repo status --short)" ]]; then
