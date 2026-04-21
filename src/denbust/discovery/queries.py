@@ -16,7 +16,7 @@ _SCRAPER_SOURCE_DOMAINS: dict[str, str] = {
     "haaretz": "www.haaretz.co.il",
     "ice": "www.ice.co.il",
 }
-_SOCIAL_DISCOVERY_DOMAINS: tuple[str, ...] = ("www.facebook.com",)
+SOCIAL_DISCOVERY_DOMAINS: tuple[str, ...] = ("www.facebook.com",)
 
 
 def _normalize_keywords(keywords: Iterable[str]) -> list[str]:
@@ -106,7 +106,7 @@ def build_discovery_queries(
                 seen_keys.add(source_key)
 
         if DiscoveryQueryKind.SOCIAL_TARGETED in config.discovery.default_query_kinds:
-            for domain in _SOCIAL_DISCOVERY_DOMAINS:
+            for domain in SOCIAL_DISCOVERY_DOMAINS:
                 social_key = (DiscoveryQueryKind.SOCIAL_TARGETED, keyword, domain)
                 if social_key in seen_keys:
                     continue

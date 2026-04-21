@@ -416,7 +416,7 @@ def test_build_discovery_diagnostic_report_builds_source_suggestions(tmp_path: P
 
     assert report.source_suggestions.suggestions[0].domain == "example.com"
     assert report.source_suggestions.suggestions[0].run_count == 2
-    assert "facebook.com" not in {
+    assert "www.facebook.com" not in {
         suggestion.domain for suggestion in report.source_suggestions.suggestions
     }
     assert "Source suggestions" in render_discovery_diagnostic_report(report)

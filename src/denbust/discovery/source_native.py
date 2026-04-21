@@ -16,6 +16,7 @@ from denbust.discovery.models import (
     CandidateStatus,
     ContentBasis,
     DiscoveredCandidate,
+    DiscoveryQueryKind,
     DiscoveryRun,
     DiscoveryRunStatus,
     PersistentCandidate,
@@ -25,13 +26,14 @@ from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.sources.base import HistoricalSource, Source
 
-_SOCIAL_DISCOVERY_DOMAINS = {"www.facebook.com"}
-
 
 def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> DiscoveredCandidate:
     """Normalize search-engine social results into the social-search producer family."""
     query_kind = discovered.metadata.get("query_kind")
-    if query_kind == "social_targeted" and discovered.producer_kind is ProducerKind.SEARCH_ENGINE:
+    if (
+        query_kind == DiscoveryQueryKind.SOCIAL_TARGETED.value
+        and discovered.producer_kind is ProducerKind.SEARCH_ENGINE
+    ):
         return discovered.model_copy(update={"producer_kind": ProducerKind.SOCIAL_SEARCH})
     return discovered
 

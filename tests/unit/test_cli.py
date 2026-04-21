@@ -671,6 +671,7 @@ class TestCli:
                 stale_after_days=stale_after_days,
                 latest_candidates_path="candidates.jsonl",
                 scrape_attempts_path="attempts.jsonl",
+                candidate_provenance_path="candidate_provenance.jsonl",
                 operational_records_available=False,
             )
 
@@ -709,6 +710,7 @@ class TestCli:
             stale_after_days=7,
             latest_candidates_path="candidates.jsonl",
             scrape_attempts_path="attempts.jsonl",
+            candidate_provenance_path="candidate_provenance.jsonl",
             operational_records_available=False,
         )
 
@@ -734,6 +736,7 @@ class TestCli:
             stale_after_days=7,
             latest_candidates_path="candidates.jsonl",
             scrape_attempts_path="attempts.jsonl",
+            candidate_provenance_path="candidate_provenance.jsonl",
             operational_records_available=False,
         )
         output_path = tmp_path / "diagnostics.json"
