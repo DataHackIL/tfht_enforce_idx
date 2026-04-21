@@ -41,6 +41,9 @@ def test_resolve_discovery_state_paths_uses_discover_namespace() -> None:
     assert paths.discovery_diagnostics_latest_path == Path(
         "state_repo/news_items/discover/metrics/discovery_diagnostics_latest.json"
     )
+    assert paths.source_suggestions_latest_path == Path(
+        "state_repo/news_items/discover/metrics/source_suggestions_latest.json"
+    )
 
 
 def test_discovery_snapshot_filename_is_git_safe() -> None:

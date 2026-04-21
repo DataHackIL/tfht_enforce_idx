@@ -9,8 +9,8 @@ from denbust.discovery.models import DiscoveryQueryKind
 from denbust.discovery.queries import build_discovery_queries, enabled_source_domains
 
 
-def test_build_discovery_queries_creates_broad_and_source_targeted_queries() -> None:
-    """Query construction should include both broad and source-targeted variants by default."""
+def test_build_discovery_queries_creates_all_default_query_types() -> None:
+    """Query construction should include broad, source-targeted, and social-targeted variants."""
     config = Config(
         keywords=["בית בושת", "זנות"],
         sources=[
@@ -34,13 +34,20 @@ def test_build_discovery_queries_creates_broad_and_source_targeted_queries() -> 
     targeted_queries = [
         query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
     ]
+    social_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOCIAL_TARGETED
+    ]
 
     assert len(broad_queries) == 2
     assert len(targeted_queries) == 4
+    assert len(social_queries) == 2
     assert {query.query_text for query in broad_queries} == {"בית בושת", "זנות"}
     assert {(query.source_hint, tuple(query.preferred_domains)) for query in targeted_queries} == {
         ("ynet", ("www.ynet.co.il",)),
         ("mako", ("www.mako.co.il",)),
+    }
+    assert {(query.source_hint, tuple(query.preferred_domains)) for query in social_queries} == {
+        ("www.facebook.com", ("www.facebook.com",)),
     }
     assert all(query.language == "he" for query in queries)
     assert all(query.date_from is not None and query.date_to is not None for query in queries)
@@ -123,6 +130,19 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
 
     assert len(targeted_queries) == 1
     assert targeted_queries[0].preferred_domains == ["www.ynet.co.il"]
+
+
+def test_build_discovery_queries_can_disable_social_targeted_generation() -> None:
+    """Explicit query-kind configuration should still allow social discovery to be disabled."""
+    config = Config(
+        keywords=["זנות"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["broad", "source_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    assert all(query.query_kind is not DiscoveryQueryKind.SOCIAL_TARGETED for query in queries)
 
 
 def test_enabled_source_domains_returns_only_enabled_resolved_domains() -> None:

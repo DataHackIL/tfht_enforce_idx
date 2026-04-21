@@ -21,10 +21,12 @@ from denbust.diagnostics.discovery import (
     run_discovery_diagnostics,
 )
 from denbust.discovery.models import (
+    CandidateProvenance,
     CandidateStatus,
     ContentBasis,
     FetchStatus,
     PersistentCandidate,
+    ProducerKind,
     ScrapeAttempt,
     ScrapeAttemptKind,
 )
@@ -195,6 +197,10 @@ def test_persist_discovery_diagnostic_artifacts_writes_latest_files(tmp_path: Pa
 
     assert overlap_payload["source_native"] == 0
     assert combined_payload["dataset_name"] == "news_items"
+    suggestions_payload = json.loads(
+        config.discovery_state_paths.source_suggestions_latest_path.read_text(encoding="utf-8")
+    )
+    assert suggestions_payload["suggestions"] == []
 
 
 def test_run_discovery_diagnostics_loads_config_and_forwards_flags(
@@ -212,6 +218,7 @@ def test_run_discovery_diagnostics_loads_config_and_forwards_flags(
             stale_after_days=11,
             latest_candidates_path="candidates.jsonl",
             scrape_attempts_path="attempts.jsonl",
+            candidate_provenance_path="candidate_provenance.jsonl",
             operational_records_available=False,
         )
 
@@ -316,6 +323,103 @@ def test_render_discovery_diagnostic_report_includes_notes(tmp_path: Path) -> No
 
     assert "Notes" in rendered
     assert "Operational record matching was skipped" in rendered
+
+
+def test_build_discovery_diagnostic_report_builds_source_suggestions(tmp_path: Path) -> None:
+    """Repeated unseen non-social domains should surface in source suggestions."""
+    now = datetime.now(UTC)
+    config = Config(
+        store={"state_root": tmp_path},
+        sources=[
+            {
+                "name": "ynet",
+                "type": "rss",
+                "url": "https://www.ynet.co.il/feed.xml",
+                "enabled": True,
+            }
+        ],
+    )
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    suggested_a = _candidate(
+        "candidate-example-1",
+        url="https://example.com/news/1",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now - timedelta(days=4),
+        last_seen_at=now - timedelta(days=1),
+    )
+    suggested_b = _candidate(
+        "candidate-example-2",
+        url="https://example.com/news/2",
+        discovered_via=["exa"],
+        status=CandidateStatus.SCRAPE_SUCCEEDED,
+        first_seen_at=now - timedelta(days=3),
+        last_seen_at=now - timedelta(hours=6),
+    ).model_copy(update={"content_basis": ContentBasis.SEARCH_RESULT_ONLY})
+    social = _candidate(
+        "candidate-facebook",
+        url="https://www.facebook.com/story.php?story_fbid=3&id=4",
+        discovered_via=["brave"],
+        status=CandidateStatus.UNSUPPORTED_SOURCE,
+        first_seen_at=now - timedelta(days=2),
+        last_seen_at=now - timedelta(hours=5),
+    )
+    persistence.upsert_candidates([suggested_a, suggested_b, social])
+    persistence.append_provenance(
+        [
+            CandidateProvenance(
+                run_id="run-1",
+                candidate_id="candidate-example-1",
+                producer_name="brave",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl("https://example.com/news/1"),
+                normalized_url=HttpUrl("https://example.com/news/1"),
+                discovered_at=now - timedelta(days=4),
+                metadata={"query_kind": "broad"},
+            ),
+            CandidateProvenance(
+                run_id="run-2",
+                candidate_id="candidate-example-2",
+                producer_name="exa",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl("https://example.com/news/2"),
+                normalized_url=HttpUrl("https://example.com/news/2"),
+                discovered_at=now - timedelta(days=3),
+                metadata={"query_kind": "broad"},
+            ),
+            CandidateProvenance(
+                run_id="run-3",
+                candidate_id="candidate-facebook",
+                producer_name="brave",
+                producer_kind=ProducerKind.SOCIAL_SEARCH,
+                raw_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=3&id=4"),
+                normalized_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=3&id=4"),
+                discovered_at=now - timedelta(days=2),
+                metadata={"query_kind": "social_targeted"},
+            ),
+        ]
+    )
+    persistence.append_attempts(
+        [
+            ScrapeAttempt(
+                candidate_id="candidate-example-2",
+                started_at=now - timedelta(hours=8),
+                finished_at=now - timedelta(hours=8),
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.SUCCESS,
+                source_adapter_name="example_adapter",
+            )
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+
+    assert report.source_suggestions.suggestions[0].domain == "example.com"
+    assert report.source_suggestions.suggestions[0].run_count == 2
+    assert "facebook.com" not in {
+        suggestion.domain for suggestion in report.source_suggestions.suggestions
+    }
+    assert "Source suggestions" in render_discovery_diagnostic_report(report)
 
 
 def test_read_jsonl_ignores_blank_lines(tmp_path: Path) -> None:

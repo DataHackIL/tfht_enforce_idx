@@ -15,7 +15,7 @@ data jobs. Phase A introduced the shared platform spine. Phase B turns the first
 
 Today, the implemented dataset/jobs are:
 
-- `news_items / discover` (source-native + Brave + Exa + Google CSE candidate persistence)
+- `news_items / discover` (source-native + Brave + Exa + Google CSE candidate persistence, plus Facebook-targeted social discovery queries)
 - `news_items / backfill_discover`
 - `news_items / backfill_scrape`
 - `news_items / ingest`
@@ -45,11 +45,13 @@ Planned future datasets:
 - Scaffolds a persistent discovery/candidacy layer with dedicated Supabase tables and state-repo
   paths under `news_items/discover/`
 - Runs Brave, Exa, and Google CSE as external discovery engines feeding the durable candidate layer
+- Emits Facebook-targeted `social_targeted` search queries and retains those results as non-scrapeable reference candidates
 - Plans historical backfill windows and persists durable `backfill_batches` metadata for slow-drain
   discovery/scrape work
 - Drains one historical backfill batch at a time with oldest-window-first scrape prioritization
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
+- Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains
 - Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
 
 ## Quick Start
@@ -194,7 +196,9 @@ tfht_enforce_idx_state/
         │   ├── latest_backfill_batches.jsonl
         │   └── <batch-id>.json
         └── metrics/
-            └── engine_overlap_latest.json
+            ├── engine_overlap_latest.json
+            ├── discovery_diagnostics_latest.json
+            └── source_suggestions_latest.json
 ```
 
 Bootstrap notes:

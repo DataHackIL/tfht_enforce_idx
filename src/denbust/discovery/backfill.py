@@ -150,6 +150,29 @@ def build_backfill_queries(
                     )
                 )
                 seen_keys.add(source_key)
+        if DiscoveryQueryKind.SOCIAL_TARGETED in config.discovery.default_query_kinds:
+            for domain in ("www.facebook.com",):
+                social_key = (
+                    DiscoveryQueryKind.SOCIAL_TARGETED,
+                    keyword,
+                    domain,
+                    window.index,
+                )
+                if social_key in seen_keys:
+                    continue
+                queries.append(
+                    DiscoveryQuery(
+                        query_text=keyword,
+                        language="he",
+                        date_from=window.date_from,
+                        date_to=window.date_to,
+                        preferred_domains=[domain],
+                        source_hint=domain,
+                        query_kind=DiscoveryQueryKind.SOCIAL_TARGETED,
+                        tags=["backfill", "social", domain, f"window:{window.index}"],
+                    )
+                )
+                seen_keys.add(social_key)
     return queries
 
 

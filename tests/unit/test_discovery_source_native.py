@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import HttpUrl
 
 from denbust.data_models import RawArticle
-from denbust.discovery.models import DiscoveryRun
+from denbust.discovery.models import DiscoveredCandidate, DiscoveryRun, ProducerKind
 from denbust.discovery.source_native import (
     persist_discovered_candidates,
     raw_article_to_discovered_candidate,
@@ -119,6 +119,39 @@ def test_persist_discovered_candidates_marks_runs_finished_on_success(tmp_path: 
 
     assert persisted.run.status.value == "succeeded"
     assert persisted.run.finished_at is not None
+
+
+def test_persist_discovered_candidates_marks_social_search_candidates_unsupported(
+    tmp_path: Path,
+) -> None:
+    """Social-search candidates should be retained durably but excluded from scrape eligibility."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discovery = DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=1&id=2"),
+        canonical_url=HttpUrl("https://www.facebook.com/story.php?story_fbid=1&id=2"),
+        title="פוסט פייסבוק",
+        snippet="חשד לבית בושת",
+        discovered_at=datetime(2026, 4, 11, 8, 0, tzinfo=UTC),
+        source_hint="www.facebook.com",
+        metadata={"query_kind": "social_targeted"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-social"),
+        discovered_candidates=[discovery],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    provenance = persisted.provenance[0]
+    assert candidate.candidate_status.value == "unsupported_source"
+    assert candidate.needs_review is True
+    assert candidate.discovered_via == ["brave"]
+    assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
 
 
 def test_persist_discovered_candidates_writes_failed_run_before_reraising() -> None:

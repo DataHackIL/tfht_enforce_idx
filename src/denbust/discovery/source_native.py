@@ -25,6 +25,20 @@ from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.sources.base import HistoricalSource, Source
 
+_SOCIAL_DISCOVERY_DOMAINS = {"www.facebook.com"}
+
+
+def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> DiscoveredCandidate:
+    """Normalize search-engine social results into the social-search producer family."""
+    query_kind = discovered.metadata.get("query_kind")
+    if query_kind == "social_targeted" and discovered.producer_kind is ProducerKind.SEARCH_ENGINE:
+        return discovered.model_copy(update={"producer_kind": ProducerKind.SOCIAL_SEARCH})
+    return discovered
+
+
+def _is_social_candidate(discovered: DiscoveredCandidate) -> bool:
+    return discovered.producer_kind is ProducerKind.SOCIAL_SEARCH
+
 
 def build_candidate_id(identity_url: str) -> str:
     """Build a deterministic candidate identifier from a stable URL identity."""
@@ -126,6 +140,10 @@ def merge_discovered_candidate(
             existing_metadata[key] = discovered.metadata[key]
     if discovered.metadata:
         existing_metadata["latest_discovery_metadata"] = discovered.metadata
+    is_social = _is_social_candidate(discovered)
+    candidate_status = existing.candidate_status if existing else CandidateStatus.NEW
+    if is_social and existing is None:
+        candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
 
     return PersistentCandidate(
         candidate_id=existing.candidate_id
@@ -169,7 +187,7 @@ def merge_discovered_candidate(
                 if value is not None
             ]
         ),
-        candidate_status=existing.candidate_status if existing else CandidateStatus.NEW,
+        candidate_status=candidate_status,
         scrape_attempt_count=existing.scrape_attempt_count if existing else 0,
         last_scrape_attempt_at=existing.last_scrape_attempt_at if existing else None,
         next_scrape_attempt_at=existing.next_scrape_attempt_at if existing else None,
@@ -177,7 +195,7 @@ def merge_discovered_candidate(
         last_scrape_error_message=existing.last_scrape_error_message if existing else None,
         content_basis=existing.content_basis if existing else ContentBasis.CANDIDATE_ONLY,
         retry_priority=existing.retry_priority if existing else 0,
-        needs_review=existing.needs_review if existing else False,
+        needs_review=(existing.needs_review if existing else False) or is_social,
         backfill_batch_id=backfill_batch_id or (existing.backfill_batch_id if existing else None),
         self_heal_eligible=existing.self_heal_eligible if existing else False,
         source_discovery_only=(
@@ -210,6 +228,7 @@ def persist_discovered_candidates(
     provenance_events: list[CandidateProvenance] = []
 
     for discovered in discovered_candidates:
+        discovered = _normalize_discovered_candidate(discovered)
         canonical_url = (
             str(discovered.canonical_url) if discovered.canonical_url is not None else None
         )

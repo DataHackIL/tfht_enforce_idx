@@ -153,7 +153,7 @@ def test_resolve_backfill_request_window_rejects_missing_or_inverted_env(
 
 
 def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() -> None:
-    """Backfill queries should ignore blank/duplicate keywords and dedupe source-targeted queries."""
+    """Backfill queries should ignore blank/duplicate keywords and emit all enabled query kinds."""
     config = Config(
         keywords=["", "בית בושת", "בית בושת", "  סחר  "],
         sources=[
@@ -166,7 +166,7 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
                 "url": "https://news.walla.co.il/feed",
             },
         ],
-        discovery={"default_query_kinds": ["broad", "source_targeted"]},
+        discovery={"default_query_kinds": ["broad", "source_targeted", "social_targeted"]},
     )
     window = BackfillBatch(
         requested_date_from=datetime(2026, 1, 1, tzinfo=UTC),
@@ -185,11 +185,18 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     source_queries = [
         query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
     ]
+    social_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOCIAL_TARGETED
+    ]
 
     assert [query.query_text for query in broad_queries] == ["בית בושת", "סחר"]
     assert len(source_queries) == 4
+    assert len(social_queries) == 2
     assert {query.source_hint for query in source_queries} == {"ynet", "walla"}
     assert all(query.preferred_domains for query in source_queries)
+    assert {tuple(query.preferred_domains) for query in social_queries} == {
+        ("www.facebook.com",),
+    }
 
 
 def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> None:

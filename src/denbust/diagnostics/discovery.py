@@ -11,17 +11,20 @@ from pydantic import BaseModel, Field
 
 from denbust.config import Config, OperationalProvider, load_config
 from denbust.discovery.models import (
+    CandidateProvenance,
     CandidateStatus,
     ContentBasis,
     FetchStatus,
     PersistentCandidate,
     ScrapeAttempt,
 )
+from denbust.discovery.queries import enabled_source_domains
 from denbust.discovery.state_paths import write_metrics_snapshot
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.ops.factory import create_operational_store
 
 _SEARCH_ENGINE_NAMES: tuple[str, ...] = ("brave", "exa", "google_cse")
+_SOURCE_SUGGESTION_EXCLUDED_DOMAINS: frozenset[str] = frozenset({"www.facebook.com"})
 _RETRY_BACKLOG_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.QUEUED,
     CandidateStatus.SCRAPE_PENDING,
@@ -131,6 +134,27 @@ class FailureSummary(BaseModel):
     count: int
 
 
+class SourceSuggestion(BaseModel):
+    """Advisory suggestion for a candidate-heavy unseen domain."""
+
+    domain: str
+    candidate_count: int = 0
+    run_count: int = 0
+    candidate_only_count: int = 0
+    search_result_only_count: int = 0
+    scrape_attempt_count: int = 0
+    scrape_success_count: int = 0
+    scrape_failure_count: int = 0
+    unsupported_count: int = 0
+    score: float = 0.0
+
+
+class SourceSuggestionReport(BaseModel):
+    """Structured source-suggestion payload for diagnostics artifacts."""
+
+    suggestions: list[SourceSuggestion] = Field(default_factory=list)
+
+
 class DiscoveryDiagnosticReport(BaseModel):
     """Full discovery observability report."""
 
@@ -140,6 +164,7 @@ class DiscoveryDiagnosticReport(BaseModel):
     stale_after_days: int
     latest_candidates_path: str
     scrape_attempts_path: str
+    candidate_provenance_path: str
     operational_records_available: bool
     notes: list[str] = Field(default_factory=list)
     engine_overlap: EngineOverlapMetrics = Field(default_factory=EngineOverlapMetrics)
@@ -153,6 +178,7 @@ class DiscoveryDiagnosticReport(BaseModel):
     top_failure_sources: list[FailureSummary] = Field(default_factory=list)
     top_failure_domains: list[FailureSummary] = Field(default_factory=list)
     top_failure_codes: list[FailureSummary] = Field(default_factory=list)
+    source_suggestions: SourceSuggestionReport = Field(default_factory=SourceSuggestionReport)
 
 
 def run_discovery_diagnostics(
@@ -196,6 +222,7 @@ def build_discovery_diagnostic_report(
     overlap_candidates = (
         overlap_candidates_override if overlap_candidates_override is not None else candidates
     )
+    provenance = _read_jsonl(paths.candidate_provenance_path, CandidateProvenance)
     now = datetime.now(UTC)
     operational_urls: set[str] = set()
     operational_notes: list[str] = []
@@ -211,6 +238,7 @@ def build_discovery_diagnostic_report(
         stale_after_days=stale_after_days,
         latest_candidates_path=str(paths.latest_candidates_path),
         scrape_attempts_path=str(paths.scrape_attempts_path),
+        candidate_provenance_path=str(paths.candidate_provenance_path),
         operational_records_available=bool(operational_urls),
         notes=operational_notes,
         engine_overlap=_build_engine_overlap_metrics(overlap_candidates),
@@ -225,6 +253,12 @@ def build_discovery_diagnostic_report(
         top_failure_sources=_build_failure_summaries(candidates, attempts, key="source"),
         top_failure_domains=_build_failure_summaries(candidates, attempts, key="domain"),
         top_failure_codes=_build_failure_summaries(candidates, attempts, key="error_code"),
+        source_suggestions=_build_source_suggestion_report(
+            config=config,
+            candidates=candidates,
+            attempts=attempts,
+            provenance=provenance,
+        ),
     )
     if not candidates:
         report.notes.append("No persisted discovery candidates were found.")
@@ -255,6 +289,10 @@ def persist_discovery_diagnostic_artifacts(
     write_metrics_snapshot(
         paths.discovery_diagnostics_latest_path,
         report.model_dump(mode="json"),
+    )
+    write_metrics_snapshot(
+        paths.source_suggestions_latest_path,
+        report.source_suggestions.model_dump(mode="json"),
     )
 
 
@@ -346,6 +384,15 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
             "Top failure codes: "
             + ", ".join(f"{item.name}={item.count}" for item in report.top_failure_codes)
         )
+    if report.source_suggestions.suggestions:
+        lines.append("")
+        lines.append("Source suggestions")
+        for suggestion in report.source_suggestions.suggestions:
+            lines.append(
+                "  {domain} score={score:.2f} candidates={candidate_count} runs={run_count} "
+                "candidate_only={candidate_only_count} successes={scrape_success_count} "
+                "failures={scrape_failure_count}".format(**suggestion.model_dump(mode="json"))
+            )
     if report.notes:
         lines.append("")
         lines.append("Notes")
@@ -353,7 +400,10 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
     return "\n".join(lines)
 
 
-def _read_jsonl(path: Path, model: type[PersistentCandidate] | type[ScrapeAttempt]) -> list[Any]:
+def _read_jsonl(
+    path: Path,
+    model: type[PersistentCandidate] | type[ScrapeAttempt] | type[CandidateProvenance],
+) -> list[Any]:
     if not path.exists():
         return []
     rows: list[Any] = []
@@ -618,3 +668,88 @@ def _build_failure_summaries(
             raise ValueError(f"Unsupported failure summary key: {key}")
         counts[value] += 1
     return [FailureSummary(name=name, count=count) for name, count in counts.most_common(5)]
+
+
+def _build_source_suggestion_report(
+    *,
+    config: Config,
+    candidates: list[PersistentCandidate],
+    attempts: list[ScrapeAttempt],
+    provenance: list[CandidateProvenance],
+) -> SourceSuggestionReport:
+    known_domains = {domain for _, domain in enabled_source_domains(config)}
+    attempts_by_candidate_id: dict[str, list[ScrapeAttempt]] = {}
+    for attempt in attempts:
+        attempts_by_candidate_id.setdefault(attempt.candidate_id, []).append(attempt)
+    provenance_runs_by_domain: dict[str, set[str]] = {}
+    for event in provenance:
+        if event.domain is None:
+            continue
+        provenance_runs_by_domain.setdefault(event.domain, set()).add(event.run_id)
+
+    suggestions: list[SourceSuggestion] = []
+    for domain, domain_candidates in _group_candidates_by_domain(candidates).items():
+        if domain in known_domains or domain in _SOURCE_SUGGESTION_EXCLUDED_DOMAINS:
+            continue
+        domain_attempts = [
+            attempt
+            for candidate in domain_candidates
+            for attempt in attempts_by_candidate_id.get(candidate.candidate_id, [])
+        ]
+        success_count = sum(
+            1 for attempt in domain_attempts if attempt.fetch_status is FetchStatus.SUCCESS
+        )
+        failure_count = sum(
+            1 for attempt in domain_attempts if attempt.fetch_status is not FetchStatus.SUCCESS
+        )
+        candidate_only_count = sum(
+            1
+            for candidate in domain_candidates
+            if candidate.content_basis is ContentBasis.CANDIDATE_ONLY
+        )
+        search_result_only_count = sum(
+            1
+            for candidate in domain_candidates
+            if candidate.content_basis is ContentBasis.SEARCH_RESULT_ONLY
+        )
+        unsupported_count = sum(
+            1
+            for candidate in domain_candidates
+            if candidate.candidate_status is CandidateStatus.UNSUPPORTED_SOURCE
+        )
+        run_count = len(provenance_runs_by_domain.get(domain, set()))
+        score = (
+            len(domain_candidates)
+            + run_count
+            + success_count * 1.5
+            + candidate_only_count * 0.25
+            - failure_count * 0.25
+            - unsupported_count * 0.5
+        )
+        suggestions.append(
+            SourceSuggestion(
+                domain=domain,
+                candidate_count=len(domain_candidates),
+                run_count=run_count,
+                candidate_only_count=candidate_only_count,
+                search_result_only_count=search_result_only_count,
+                scrape_attempt_count=len(domain_attempts),
+                scrape_success_count=success_count,
+                scrape_failure_count=failure_count,
+                unsupported_count=unsupported_count,
+                score=score,
+            )
+        )
+    suggestions.sort(key=lambda item: (-item.score, -item.candidate_count, item.domain))
+    return SourceSuggestionReport(suggestions=suggestions[:5])
+
+
+def _group_candidates_by_domain(
+    candidates: list[PersistentCandidate],
+) -> dict[str, list[PersistentCandidate]]:
+    grouped: dict[str, list[PersistentCandidate]] = {}
+    for candidate in candidates:
+        if candidate.domain is None:
+            continue
+        grouped.setdefault(candidate.domain, []).append(candidate)
+    return grouped

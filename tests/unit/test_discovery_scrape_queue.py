@@ -141,6 +141,25 @@ def test_select_candidates_for_scrape_filters_retryable_due_candidates(tmp_path:
     )
 
 
+def test_select_candidates_for_scrape_excludes_unsupported_social_candidates(
+    tmp_path: Path,
+) -> None:
+    """Unsupported social/reference candidates should never enter the scrape queue."""
+    store = build_store(tmp_path)
+    store.upsert_candidates(
+        [
+            build_candidate("social", status=CandidateStatus.UNSUPPORTED_SOURCE),
+            build_candidate("normal", status=CandidateStatus.NEW),
+        ]
+    )
+
+    selected = select_candidates_for_scrape(
+        store, limit=10, now=datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+    )
+
+    assert [candidate.candidate_id for candidate in selected] == ["normal"]
+
+
 def test_select_candidates_for_scrape_prioritizes_none_and_earlier_retry_times(
     tmp_path: Path,
 ) -> None:
