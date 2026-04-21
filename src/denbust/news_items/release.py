@@ -6,7 +6,7 @@ import csv
 import hashlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -250,4 +250,5 @@ class NewsItemsReleaseBuilder(ReleaseBuilder):
         )
         payload = [_serialized_row(row) for row in rows]
         table = pa.Table.from_pylist(payload, schema=schema)
-        pq.write_table(table, path)
+        write_table: Callable[[Any, Any], None] = pq.write_table
+        write_table(table, path)

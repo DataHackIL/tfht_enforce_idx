@@ -6,6 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
+from urllib.parse import urlparse
 
 from pydantic import HttpUrl
 
@@ -16,14 +17,58 @@ from denbust.discovery.models import (
     CandidateStatus,
     ContentBasis,
     DiscoveredCandidate,
+    DiscoveryQueryKind,
     DiscoveryRun,
     DiscoveryRunStatus,
     PersistentCandidate,
     ProducerKind,
 )
+from denbust.discovery.queries import SOCIAL_DISCOVERY_DOMAINS
 from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.sources.base import HistoricalSource, Source
+
+
+def _normalize_domain(domain: str | None) -> str | None:
+    if domain is None:
+        return None
+    normalized = domain.strip().casefold()
+    if not normalized:
+        return None
+    if normalized.startswith("www."):
+        normalized = normalized[4:]
+    return normalized or None
+
+
+_NORMALIZED_SOCIAL_DISCOVERY_DOMAINS = frozenset(
+    normalized
+    for domain in SOCIAL_DISCOVERY_DOMAINS
+    if (normalized := _normalize_domain(domain)) is not None
+)
+
+
+def _candidate_domain(discovered: DiscoveredCandidate) -> str | None:
+    normalized_domain = _normalize_domain(discovered.domain)
+    if normalized_domain is not None:
+        return normalized_domain
+    return _normalize_domain(
+        urlparse(str(discovered.canonical_url or discovered.candidate_url)).netloc
+    )
+
+
+def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> DiscoveredCandidate:
+    """Normalize search-engine social results into the social-search producer family."""
+    query_kind = discovered.metadata.get("query_kind")
+    if discovered.producer_kind is ProducerKind.SEARCH_ENGINE and (
+        query_kind == DiscoveryQueryKind.SOCIAL_TARGETED.value
+        or _candidate_domain(discovered) in _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS
+    ):
+        return discovered.model_copy(update={"producer_kind": ProducerKind.SOCIAL_SEARCH})
+    return discovered
+
+
+def _is_social_candidate(discovered: DiscoveredCandidate) -> bool:
+    return discovered.producer_kind is ProducerKind.SOCIAL_SEARCH
 
 
 def build_candidate_id(identity_url: str) -> str:
@@ -126,6 +171,10 @@ def merge_discovered_candidate(
             existing_metadata[key] = discovered.metadata[key]
     if discovered.metadata:
         existing_metadata["latest_discovery_metadata"] = discovered.metadata
+    is_social = _is_social_candidate(discovered)
+    candidate_status = existing.candidate_status if existing else CandidateStatus.NEW
+    if is_social and existing is None:
+        candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
 
     return PersistentCandidate(
         candidate_id=existing.candidate_id
@@ -169,7 +218,7 @@ def merge_discovered_candidate(
                 if value is not None
             ]
         ),
-        candidate_status=existing.candidate_status if existing else CandidateStatus.NEW,
+        candidate_status=candidate_status,
         scrape_attempt_count=existing.scrape_attempt_count if existing else 0,
         last_scrape_attempt_at=existing.last_scrape_attempt_at if existing else None,
         next_scrape_attempt_at=existing.next_scrape_attempt_at if existing else None,
@@ -177,7 +226,7 @@ def merge_discovered_candidate(
         last_scrape_error_message=existing.last_scrape_error_message if existing else None,
         content_basis=existing.content_basis if existing else ContentBasis.CANDIDATE_ONLY,
         retry_priority=existing.retry_priority if existing else 0,
-        needs_review=existing.needs_review if existing else False,
+        needs_review=(existing.needs_review if existing else False) or is_social,
         backfill_batch_id=backfill_batch_id or (existing.backfill_batch_id if existing else None),
         self_heal_eligible=existing.self_heal_eligible if existing else False,
         source_discovery_only=(
@@ -210,6 +259,7 @@ def persist_discovered_candidates(
     provenance_events: list[CandidateProvenance] = []
 
     for discovered in discovered_candidates:
+        discovered = _normalize_discovered_candidate(discovered)
         canonical_url = (
             str(discovered.canonical_url) if discovered.canonical_url is not None else None
         )

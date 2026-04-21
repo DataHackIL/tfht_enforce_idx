@@ -280,6 +280,7 @@ class DiscoveryConfig(BaseModel):
         default_factory=lambda: [
             DiscoveryQueryKind.BROAD,
             DiscoveryQueryKind.SOURCE_TARGETED,
+            DiscoveryQueryKind.SOCIAL_TARGETED,
         ]
     )
 

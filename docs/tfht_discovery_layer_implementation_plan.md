@@ -347,9 +347,12 @@ Lay the groundwork for future source expansion and social/reference discovery.
 - Add source-suggestion reporting from candidate provenance:
   - repeated unseen domains
   - scrape success/failure signals
-- Add `social_targeted` query support in the query builder
-- Allow candidate persistence for Facebook / similar domains via search discovery
+- Add a persisted source-suggestion diagnostics artifact and include it in rendered discovery diagnostics
+- Add `social_targeted` query support in the live and backfill query builders
+- Make `social_targeted` part of the default discovery query-kind set
+- Allow candidate persistence for Facebook search results via search discovery
 - Keep social candidates as candidate/reference-first by default
+- Persist `social_targeted` search results as `social_search` provenance/candidates and mark them non-scrapeable by default
 - Add docs on intended use and limitations
 - Add tests for source suggestion logic and social query handling
 
@@ -359,7 +362,7 @@ Lay the groundwork for future source expansion and social/reference discovery.
 - no event inference yet
 
 ### Deliverable
-The candidate layer now supports future expansion into new sources and social/reference evidence.
+The candidate layer now supports future expansion into new sources and social/reference evidence without treating Facebook discovery as scrapeable source content.
 
 ---
 
@@ -445,7 +448,7 @@ The recommended order is:
 
 ### After DL-PR-09
 - historical backfill becomes feasible
-- the earlier `C-8` vs `DL-PR-09` sequencing choice is resolved; the remaining cross-plan question is whether `C-8` should happen before or after `DL-PR-10`
+- the earlier `C-8` vs `DL-PR-09` sequencing choice is resolved, and `C-8` is now explicitly deferred until after the full `DL-PR-*` sequence completes
 
 ### After DL-PR-11
 - the feature can be used operationally in CI/jobs

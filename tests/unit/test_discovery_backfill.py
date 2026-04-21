@@ -11,6 +11,7 @@ from denbust.config import Config
 from denbust.discovery.backfill import (
     BACKFILL_DATE_FROM_ENV,
     BACKFILL_DATE_TO_ENV,
+    backfill_metadata,
     build_backfill_queries,
     parse_backfill_datetime,
     plan_backfill_windows,
@@ -153,7 +154,7 @@ def test_resolve_backfill_request_window_rejects_missing_or_inverted_env(
 
 
 def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() -> None:
-    """Backfill queries should ignore blank/duplicate keywords and dedupe source-targeted queries."""
+    """Backfill queries should ignore blank/duplicate keywords and emit all enabled query kinds."""
     config = Config(
         keywords=["", "בית בושת", "בית בושת", "  סחר  "],
         sources=[
@@ -166,7 +167,7 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
                 "url": "https://news.walla.co.il/feed",
             },
         ],
-        discovery={"default_query_kinds": ["broad", "source_targeted"]},
+        discovery={"default_query_kinds": ["broad", "source_targeted", "social_targeted"]},
     )
     window = BackfillBatch(
         requested_date_from=datetime(2026, 1, 1, tzinfo=UTC),
@@ -185,11 +186,18 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     source_queries = [
         query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
     ]
+    social_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOCIAL_TARGETED
+    ]
 
     assert [query.query_text for query in broad_queries] == ["בית בושת", "סחר"]
     assert len(source_queries) == 4
+    assert len(social_queries) == 2
     assert {query.source_hint for query in source_queries} == {"ynet", "walla"}
     assert all(query.preferred_domains for query in source_queries)
+    assert {tuple(query.preferred_domains) for query in social_queries} == {
+        ("www.facebook.com",),
+    }
 
 
 def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> None:
@@ -202,6 +210,45 @@ def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> 
     )[0]
 
     assert build_backfill_queries(config, window=window) == []
+
+
+def test_build_backfill_queries_deduplicates_social_targeted_entries() -> None:
+    """Duplicate normalized keywords should not emit duplicate social-targeted backfill queries."""
+    config = Config(
+        keywords=["זנות", "  זנות  "],
+        discovery={"default_query_kinds": ["social_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    social_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOCIAL_TARGETED
+    ]
+    assert len(social_queries) == 1
+    assert social_queries[0].preferred_domains == ["www.facebook.com"]
+
+
+def test_backfill_metadata_serializes_batch_and_window() -> None:
+    """Backfill metadata should preserve stable batch/window identifiers."""
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 3, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    metadata = backfill_metadata(batch_id="batch-1", window=window)
+
+    assert metadata == {
+        "backfill_batch_id": "batch-1",
+        "backfill_window_index": 0,
+        "backfill_window_start": "2026-01-01T00:00:00+00:00",
+        "backfill_window_end": "2026-01-03T00:00:00+00:00",
+    }
 
 
 def test_select_backfill_candidates_prefers_oldest_window_then_oldest_publication(

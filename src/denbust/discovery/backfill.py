@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from denbust.config import Config
 from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
+from denbust.discovery.queries import SOCIAL_DISCOVERY_DOMAINS
 
 BACKFILL_BATCH_ID_ENV = "DENBUST_BACKFILL_BATCH_ID"
 BACKFILL_DATE_FROM_ENV = "DENBUST_BACKFILL_DATE_FROM"
@@ -150,6 +151,20 @@ def build_backfill_queries(
                     )
                 )
                 seen_keys.add(source_key)
+        if DiscoveryQueryKind.SOCIAL_TARGETED in config.discovery.default_query_kinds:
+            for domain in SOCIAL_DISCOVERY_DOMAINS:
+                queries.append(
+                    DiscoveryQuery(
+                        query_text=keyword,
+                        language="he",
+                        date_from=window.date_from,
+                        date_to=window.date_to,
+                        preferred_domains=[domain],
+                        source_hint=domain,
+                        query_kind=DiscoveryQueryKind.SOCIAL_TARGETED,
+                        tags=["backfill", "social", domain, f"window:{window.index}"],
+                    )
+                )
     return queries
 
 

@@ -50,6 +50,7 @@ class TestConfig:
         assert config.discovery.default_query_kinds == [
             DiscoveryQueryKind.BROAD,
             DiscoveryQueryKind.SOURCE_TARGETED,
+            DiscoveryQueryKind.SOCIAL_TARGETED,
         ]
         assert config.source_discovery.enabled is True
         assert config.candidates.discovery_runs_table == "discovery_runs"
