@@ -30,6 +30,7 @@ env:
   JOB_NAME: backfill_discover
   JOB_CONFIG_PATH: agents/news/github.yaml
   STATE_JOB_DIR: state_repo/news_items/discover
+  BACKFILL_DISCOVER_STATE_DIR: state_repo/news_items/backfill_discover
 
 jobs:
   run-backfill-discover:
@@ -92,6 +93,12 @@ jobs:
           fi
           if [[ -d "${{ env.STATE_JOB_DIR }}/backfill_batches" ]]; then
             git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/backfill_batches"
+          fi
+          if [[ -d "${{ env.BACKFILL_DISCOVER_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_discover/runs"
+          fi
+          if [[ -d "${{ env.BACKFILL_DISCOVER_STATE_DIR }}/logs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_discover/logs"
           fi
 
           if [[ -z "$(git -C state_repo status --short)" ]]; then

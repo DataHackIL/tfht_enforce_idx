@@ -24,6 +24,7 @@ env:
   STATE_JOB_DIR: state_repo/news_items/discover
   DISCOVERY_STATE_DIR: state_repo/news_items/discover
   INGEST_STATE_DIR: state_repo/news_items/ingest
+  BACKFILL_SCRAPE_STATE_DIR: state_repo/news_items/backfill_scrape
 
 jobs:
   run-backfill-scrape:
@@ -100,6 +101,12 @@ jobs:
           fi
           if [[ -d "${{ env.INGEST_STATE_DIR }}/publication" ]]; then
             git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/publication"
+          fi
+          if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/runs"
+          fi
+          if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/logs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/logs"
           fi
 
           if [[ -z "$(git -C state_repo status --short)" ]]; then

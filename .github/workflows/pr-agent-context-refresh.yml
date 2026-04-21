@@ -61,7 +61,9 @@ on:
 
 concurrency:
   group: >-
-    ${{ github.workflow }}-${{
+    ${{
+      github.event_name == 'schedule' &&
+      format('{0}-schedule', github.workflow) ||
       github.event_name == 'workflow_dispatch' &&
       format(
         '{0}-{1}-{2}',
