@@ -852,6 +852,13 @@ You want:
   - oldest first for historical gap-closure jobs
   - source-specific priority overrides
 
+### Implementation note
+The current implementation persists `backfill_batches` into Supabase and mirrors them into the
+state repo, with `news_items / backfill_discover` reading
+`DENBUST_BACKFILL_DATE_FROM` / `DENBUST_BACKFILL_DATE_TO` to define one requested batch window per
+invocation. Historical source-native discovery is capability-based and records warnings for sources
+that do not implement explicit window fetching.
+
 ---
 
 ## Self-healing support

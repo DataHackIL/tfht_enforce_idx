@@ -13,13 +13,6 @@ from denbust.ops.storage import OperationalStore
 _REGISTERED = False
 
 
-def _scaffolded_job_error(config: Config) -> ValueError:
-    """Build a clear placeholder error for scaffold-only jobs."""
-    return ValueError(
-        f"{config.dataset_name.value}/{config.job_name.value} is scaffolded but not implemented yet"
-    )
-
-
 async def _run_news_items_ingest(
     config: Config,
     config_path: Path | None,
@@ -67,6 +60,38 @@ async def _run_news_items_scrape_candidates(
     from denbust.pipeline import run_news_scrape_candidates_job
 
     return await run_news_scrape_candidates_job(
+        config,
+        config_path=config_path,
+        days_override=days_override,
+        operational_store=operational_store,
+    )
+
+
+async def _run_news_items_backfill_discover(
+    config: Config,
+    config_path: Path | None,
+    days_override: int | None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    from denbust.pipeline import run_news_backfill_discover_job
+
+    return await run_news_backfill_discover_job(
+        config,
+        config_path=config_path,
+        days_override=days_override,
+        operational_store=operational_store,
+    )
+
+
+async def _run_news_items_backfill_scrape(
+    config: Config,
+    config_path: Path | None,
+    days_override: int | None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    from denbust.pipeline import run_news_backfill_scrape_job
+
+    return await run_news_backfill_scrape_job(
         config,
         config_path=config_path,
         days_override=days_override,
@@ -128,17 +153,6 @@ async def _run_scaffolded_backup(
     )
 
 
-async def _run_unimplemented_scaffold_job(
-    config: Config,
-    config_path: Path | None,
-    days_override: int | None,
-    operational_store: OperationalStore | None = None,
-) -> RunSnapshot:
-    """Fail scaffold-only jobs with a purpose-built message."""
-    del config_path, days_override, operational_store
-    raise _scaffolded_job_error(config)
-
-
 def ensure_default_jobs_registered() -> None:
     """Register default dataset jobs exactly once."""
     global _REGISTERED
@@ -160,12 +174,12 @@ def ensure_default_jobs_registered() -> None:
     register_job(
         DatasetName.NEWS_ITEMS,
         JobName.BACKFILL_DISCOVER,
-        _run_unimplemented_scaffold_job,
+        _run_news_items_backfill_discover,
     )
     register_job(
         DatasetName.NEWS_ITEMS,
         JobName.BACKFILL_SCRAPE,
-        _run_unimplemented_scaffold_job,
+        _run_news_items_backfill_scrape,
     )
     register_job(DatasetName.NEWS_ITEMS, JobName.RELEASE, _run_scaffolded_release)
     register_job(DatasetName.NEWS_ITEMS, JobName.BACKUP, _run_scaffolded_backup)

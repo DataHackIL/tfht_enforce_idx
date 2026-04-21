@@ -9,6 +9,8 @@ import sys
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 from denbust.classifier.relevance import Classifier, create_classifier
 from denbust.config import Config, OutputFormat, SourceType, load_config
@@ -20,19 +22,34 @@ from denbust.diagnostics.discovery import (
     build_discovery_diagnostic_report,
     persist_discovery_diagnostic_artifacts,
 )
+from denbust.discovery.backfill import (
+    BACKFILL_BATCH_ID_ENV,
+    BACKFILL_DATE_FROM_ENV,
+    BACKFILL_DATE_TO_ENV,
+    BackfillWindow,
+    backfill_metadata,
+    build_backfill_queries,
+    plan_backfill_windows,
+    resolve_backfill_request_window,
+)
 from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
 from denbust.discovery.engines.brave import BraveSearchEngine
 from denbust.discovery.engines.exa import ExaSearchEngine
 from denbust.discovery.engines.google_cse import GoogleCseSearchEngine
 from denbust.discovery.models import (
+    BackfillBatch,
+    BackfillBatchStatus,
+    DiscoveredCandidate,
     DiscoveryRun,
     DiscoveryRunStatus,
     PersistentCandidate,
 )
 from denbust.discovery.queries import build_discovery_queries
 from denbust.discovery.scrape_queue import (
+    SCRAPEABLE_CANDIDATE_STATUSES,
     CandidateScrapeBatch,
     scrape_candidates,
+    select_backfill_candidates_for_scrape,
     select_candidates_for_scrape,
 )
 from denbust.discovery.source_native import (
@@ -41,7 +58,7 @@ from denbust.discovery.source_native import (
     persist_discovered_candidates,
     raw_article_to_discovered_candidate,
 )
-from denbust.discovery.storage import create_discovery_persistence
+from denbust.discovery.storage import DiscoveryPersistence, create_discovery_persistence
 from denbust.models.common import DatasetName, JobName
 from denbust.models.policies import PublicationStatus, ReviewStatus
 from denbust.models.runs import RunSnapshot
@@ -105,6 +122,7 @@ logger = logging.getLogger(__name__)
 _OPERATIONAL_STORE_JOBS = {
     JobName.INGEST,
     JobName.SCRAPE_CANDIDATES,
+    JobName.BACKFILL_SCRAPE,
     JobName.MONTHLY_REPORT,
     JobName.RELEASE,
     JobName.BACKUP,
@@ -441,6 +459,150 @@ async def _persist_source_native_candidates(
         persistence.close()
 
 
+def _tag_backfill_discovered_candidates(
+    discovered_candidates: list[DiscoveredCandidate],
+    *,
+    batch_id: str,
+    window: BackfillWindow,
+) -> list[DiscoveredCandidate]:
+    """Attach backfill metadata to discovered candidates before persistence."""
+    metadata = backfill_metadata(batch_id=batch_id, window=window)
+    return [
+        candidate.model_copy(update={"metadata": {**candidate.metadata, **metadata}})
+        for candidate in discovered_candidates
+    ]
+
+
+def _batch_candidate_counts(
+    persistence: DiscoveryPersistence,
+    *,
+    batch_id: str,
+) -> tuple[int, int]:
+    """Return merged-candidate and queued-for-scrape counts for one backfill batch."""
+    batch_candidates = persistence.list_candidates(backfill_batch_id=batch_id)
+    queued_for_scrape_count = sum(
+        1
+        for candidate in batch_candidates
+        if candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES
+    )
+    return len(batch_candidates), queued_for_scrape_count
+
+
+def _update_backfill_batch_state(
+    persistence: DiscoveryPersistence,
+    *,
+    batch: BackfillBatch,
+    status: BackfillBatchStatus,
+    query_count: int | None = None,
+    candidate_count: int | None = None,
+    scrape_attempt_count: int | None = None,
+    scraped_candidate_count: int | None = None,
+    warnings: list[str] | None = None,
+    errors: list[str] | None = None,
+    finished: bool | None = None,
+) -> BackfillBatch:
+    """Persist one batch state transition with refreshed aggregate counts."""
+    merged_candidate_count, queued_for_scrape_count = _batch_candidate_counts(
+        persistence,
+        batch_id=batch.batch_id,
+    )
+    if finished is True:
+        finished_at = datetime.now(UTC)
+    elif finished is False:
+        finished_at = None
+    else:
+        finished_at = batch.finished_at
+    updated = batch.model_copy(
+        update={
+            "updated_at": datetime.now(UTC),
+            "status": status,
+            "query_count": query_count if query_count is not None else batch.query_count,
+            "candidate_count": (
+                candidate_count if candidate_count is not None else batch.candidate_count
+            ),
+            "merged_candidate_count": merged_candidate_count,
+            "queued_for_scrape_count": queued_for_scrape_count,
+            "scrape_attempt_count": (
+                scrape_attempt_count
+                if scrape_attempt_count is not None
+                else batch.scrape_attempt_count
+            ),
+            "scraped_candidate_count": (
+                scraped_candidate_count
+                if scraped_candidate_count is not None
+                else batch.scraped_candidate_count
+            ),
+            "warnings": warnings if warnings is not None else batch.warnings,
+            "errors": errors if errors is not None else batch.errors,
+            "finished_at": finished_at,
+        }
+    )
+    persistence.upsert_backfill_batches([updated])
+    return updated
+
+
+async def _run_source_native_backfill_discovery(
+    *,
+    config: Config,
+    sources: list[Source],
+    run_id: str,
+    window: BackfillWindow,
+    batch_id: str,
+) -> PersistedSourceDiscovery:
+    """Fetch source-native historical candidates when the source supports explicit windows."""
+    enabled_sources = [
+        source for source in sources if _source_discovery_enabled_for_source(config, source.name)
+    ]
+    discovery_run = DiscoveryRun(
+        run_id=run_id,
+        dataset_name=config.dataset_name,
+        job_name=config.job_name,
+        status=DiscoveryRunStatus.RUNNING,
+        query_count=len(enabled_sources),
+    )
+    context = SourceDiscoveryContext(
+        run_id=run_id,
+        source_names=[source.name for source in enabled_sources],
+        keywords=config.keywords,
+        date_from=window.date_from,
+        date_to=window.date_to,
+    )
+    persistence = create_discovery_persistence(config)
+    warnings: list[str] = []
+    try:
+        discovered_candidates = []
+        errors: list[str] = []
+        for source in enabled_sources:
+            adapter = SourceDiscoveryAdapter(source)
+            if not adapter.supports_historical_window:
+                warnings.append(f"{source.name}: historical window discovery is unsupported")
+                continue
+            try:
+                discovered_candidates.extend(
+                    _tag_backfill_discovered_candidates(
+                        await adapter.discover_candidates_for_window(context),
+                        batch_id=batch_id,
+                        window=window,
+                    )
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Error discovering backfill candidates from %s: %s", source.name, exc
+                )
+                errors.append(f"{source.name}: {exc}")
+
+        discovery_run.errors = errors
+        persisted = persist_discovered_candidates(
+            run=discovery_run,
+            discovered_candidates=discovered_candidates,
+            persistence=persistence,
+        )
+        persisted.warnings = warnings
+        return persisted
+    finally:
+        persistence.close()
+
+
 async def _run_source_native_discovery(
     *,
     config: Config,
@@ -699,12 +861,135 @@ async def _run_google_cse_discovery(
         persistence.close()
 
 
+async def _run_backfill_engine_discovery(
+    *,
+    config: Config,
+    run_id: str,
+    batch_id: str,
+    window: BackfillWindow,
+    engine_name: str,
+) -> PersistedSourceDiscovery:
+    """Run one search engine over a historical window and persist tagged candidates."""
+    queries = build_backfill_queries(config, window=window)
+    discovery_run = DiscoveryRun(
+        run_id=run_id,
+        dataset_name=config.dataset_name,
+        job_name=config.job_name,
+        status=DiscoveryRunStatus.RUNNING,
+        query_count=len(queries),
+    )
+    persistence = create_discovery_persistence(config)
+    if not queries:
+        try:
+            return persist_discovered_candidates(
+                run=discovery_run,
+                discovered_candidates=[],
+                persistence=persistence,
+            )
+        finally:
+            persistence.close()
+
+    engine: Any | None = None
+    context: DiscoveryContext | None = None
+    missing_error: str | None = None
+    if engine_name == "brave":
+        if not config.brave_search_api_key:
+            env_name = config.discovery.engines.brave.api_key_env or "DENBUST_BRAVE_SEARCH_API_KEY"
+            missing_error = f"brave: missing {env_name}"
+        else:
+            engine = BraveSearchEngine(
+                api_key=config.brave_search_api_key,
+                max_results_per_query=config.discovery.engines.brave.max_results_per_query,
+            )
+            context = DiscoveryContext(
+                run_id=run_id,
+                max_results_per_query=config.discovery.engines.brave.max_results_per_query,
+                metadata={"engine": "brave", **backfill_metadata(batch_id=batch_id, window=window)},
+            )
+    elif engine_name == "exa":
+        if not config.exa_api_key:
+            env_name = config.discovery.engines.exa.api_key_env or "DENBUST_EXA_API_KEY"
+            missing_error = f"exa: missing {env_name}"
+        else:
+            engine = ExaSearchEngine(
+                api_key=config.exa_api_key,
+                max_results_per_query=config.discovery.engines.exa.max_results_per_query,
+            )
+            context = DiscoveryContext(
+                run_id=run_id,
+                max_results_per_query=config.discovery.engines.exa.max_results_per_query,
+                metadata={
+                    "engine": "exa",
+                    "allow_find_similar": config.discovery.engines.exa.allow_find_similar,
+                    **backfill_metadata(batch_id=batch_id, window=window),
+                },
+            )
+    elif engine_name == "google_cse":
+        if not config.google_cse_api_key:
+            env_name = (
+                config.discovery.engines.google_cse.api_key_env or "DENBUST_GOOGLE_CSE_API_KEY"
+            )
+            missing_error = f"google_cse: missing {env_name}"
+        elif not config.google_cse_id:
+            env_name = config.discovery.engines.google_cse.cse_id_env or "DENBUST_GOOGLE_CSE_ID"
+            missing_error = f"google_cse: missing {env_name}"
+        else:
+            engine = GoogleCseSearchEngine(
+                api_key=config.google_cse_api_key,
+                cse_id=config.google_cse_id,
+                max_results_per_query=config.discovery.engines.google_cse.max_results_per_query,
+            )
+            context = DiscoveryContext(
+                run_id=run_id,
+                max_results_per_query=config.discovery.engines.google_cse.max_results_per_query,
+                metadata={
+                    "engine": "google_cse",
+                    **backfill_metadata(batch_id=batch_id, window=window),
+                },
+            )
+    else:
+        raise ValueError(f"Unsupported backfill engine: {engine_name}")
+
+    if missing_error is not None:
+        discovery_run.errors.append(missing_error)
+        try:
+            return persist_discovered_candidates(
+                run=discovery_run,
+                discovered_candidates=[],
+                persistence=persistence,
+            )
+        finally:
+            persistence.close()
+
+    assert engine is not None
+    assert context is not None
+    try:
+        try:
+            discovered_candidates = _tag_backfill_discovered_candidates(
+                await engine.discover(queries, context=context),
+                batch_id=batch_id,
+                window=window,
+            )
+        except Exception as exc:
+            discovery_run.errors.append(f"{engine_name}: {type(exc).__name__}: {exc}")
+            discovered_candidates = []
+        return persist_discovered_candidates(
+            run=discovery_run,
+            discovered_candidates=discovered_candidates,
+            persistence=persistence,
+        )
+    finally:
+        await engine.aclose()
+        persistence.close()
+
+
 async def _scrape_candidate_batch(
     *,
     config: Config,
     candidates: list[PersistentCandidate],
     sources: list[Source],
     preloaded_source_articles: dict[str, list[RawArticle]] | None = None,
+    backfill_mode: bool = False,
 ) -> CandidateScrapeBatch:
     """Materialize durable candidates into raw articles and record scrape attempts."""
     persistence = create_discovery_persistence(config)
@@ -715,6 +1000,7 @@ async def _scrape_candidate_batch(
             candidates=candidates,
             sources=sources,
             preloaded_source_articles=preloaded_source_articles,
+            backfill_mode=backfill_mode,
         )
     finally:
         persistence.close()
@@ -740,6 +1026,32 @@ async def _run_candidate_scrape_job(
         config=config,
         candidates=selected_candidates,
         sources=sources,
+    )
+
+
+async def _run_backfill_candidate_scrape_job(
+    *,
+    config: Config,
+    sources: list[Source],
+    limit: int,
+    batch_id: str | None = None,
+) -> CandidateScrapeBatch:
+    """Select one historical batch and run the scrape-attempt layer over it."""
+    persistence = create_discovery_persistence(config)
+    try:
+        selected_candidates = select_backfill_candidates_for_scrape(
+            persistence,
+            limit=limit,
+            batch_id=batch_id,
+        )
+    finally:
+        persistence.close()
+
+    return await _scrape_candidate_batch(
+        config=config,
+        candidates=selected_candidates,
+        sources=sources,
+        backfill_mode=True,
     )
 
 
@@ -1587,6 +1899,328 @@ async def run_news_scrape_candidates_job(
         )
         return processed
     finally:
+        if owns_store and store is not None:
+            store.close()
+
+
+async def run_news_backfill_discover_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    """Discover historical candidates over one requested backfill range."""
+    del days_override, operational_store
+    result = _build_run_snapshot(config, config_path=config_path, days=config.days)
+    try:
+        requested_date_from, requested_date_to = resolve_backfill_request_window()
+    except ValueError as exc:
+        result.fatal = True
+        result.errors.append(str(exc))
+        return result.finish("fatal: invalid backfill request window")
+
+    windows = plan_backfill_windows(
+        date_from=requested_date_from,
+        date_to=requested_date_to,
+        batch_window_days=config.backfill.batch_window_days,
+    )
+    sources = create_sources(config)
+    result.source_count = len(sources)
+    source_native_can_run = (
+        config.source_discovery.enabled
+        and config.source_discovery.persist_candidates
+        and bool(sources)
+    )
+    engine_can_run = (
+        config.discovery.enabled
+        and config.discovery.persist_candidates
+        and any(
+            [
+                config.discovery.engines.brave.enabled,
+                config.discovery.engines.exa.enabled,
+                config.discovery.engines.google_cse.enabled,
+            ]
+        )
+    )
+    if not source_native_can_run and not engine_can_run:
+        result.fatal = True
+        result.errors.append("No backfill discovery producers configured")
+        return result.finish("fatal: no backfill discovery producers configured")
+    batch_id = os.getenv(BACKFILL_BATCH_ID_ENV) or str(uuid4())
+    persistence = create_discovery_persistence(config)
+    try:
+        if (
+            os.getenv(BACKFILL_BATCH_ID_ENV)
+            and persistence.get_backfill_batch(batch_id) is not None
+        ):
+            result.fatal = True
+            result.errors.append(f"Backfill batch {batch_id} already exists")
+            return result.finish(f"fatal: backfill batch {batch_id} already exists")
+        batch = BackfillBatch(
+            batch_id=batch_id,
+            created_at=result.run_timestamp,
+            updated_at=result.run_timestamp,
+            started_at=result.run_timestamp,
+            dataset_name=config.dataset_name,
+            job_name=config.job_name,
+            status=BackfillBatchStatus.RUNNING,
+            requested_date_from=requested_date_from,
+            requested_date_to=requested_date_to,
+            window_count=len(windows),
+            metadata={
+                "requested_date_from_env": BACKFILL_DATE_FROM_ENV,
+                "requested_date_to_env": BACKFILL_DATE_TO_ENV,
+            },
+        )
+        persistence.upsert_backfill_batches([batch])
+        run_base = result.run_timestamp.astimezone(UTC).isoformat()
+        query_count = 0
+        discovered_count = 0
+        batch_warnings: list[str] = []
+        batch_errors: list[str] = []
+        persisted_runs: list[PersistedSourceDiscovery] = []
+
+        for window in windows:
+            if source_native_can_run:
+                persisted = await _run_source_native_backfill_discovery(
+                    config=config,
+                    sources=sources,
+                    run_id=f"{run_base}:source_native:{window.index}",
+                    window=window,
+                    batch_id=batch.batch_id,
+                )
+                persisted_runs.append(persisted)
+                if persisted.warnings:
+                    batch_warnings.extend(persisted.warnings)
+
+            if engine_can_run:
+                if config.discovery.engines.brave.enabled:
+                    persisted_runs.append(
+                        await _run_backfill_engine_discovery(
+                            config=config,
+                            run_id=f"{run_base}:brave:{window.index}",
+                            batch_id=batch.batch_id,
+                            window=window,
+                            engine_name="brave",
+                        )
+                    )
+                if config.discovery.engines.exa.enabled:
+                    persisted_runs.append(
+                        await _run_backfill_engine_discovery(
+                            config=config,
+                            run_id=f"{run_base}:exa:{window.index}",
+                            batch_id=batch.batch_id,
+                            window=window,
+                            engine_name="exa",
+                        )
+                    )
+                if config.discovery.engines.google_cse.enabled:
+                    persisted_runs.append(
+                        await _run_backfill_engine_discovery(
+                            config=config,
+                            run_id=f"{run_base}:google_cse:{window.index}",
+                            batch_id=batch.batch_id,
+                            window=window,
+                            engine_name="google_cse",
+                        )
+                    )
+
+        for persisted in persisted_runs:
+            query_count += persisted.run.query_count
+            discovered_count += persisted.run.candidate_count
+            result.raw_article_count += persisted.run.candidate_count
+            result.errors.extend(persisted.run.errors)
+            batch_errors.extend(persisted.run.errors)
+
+        merged_candidate_count, _ = _batch_candidate_counts(persistence, batch_id=batch.batch_id)
+        status = BackfillBatchStatus.DISCOVERED
+        if batch_errors and not merged_candidate_count:
+            status = BackfillBatchStatus.FAILED
+            result.fatal = True
+        elif batch_errors:
+            status = BackfillBatchStatus.PARTIAL
+
+        batch = _update_backfill_batch_state(
+            persistence,
+            batch=batch,
+            status=status,
+            query_count=query_count,
+            candidate_count=discovered_count,
+            warnings=deduplicate_strings(batch_warnings),
+            errors=deduplicate_strings(batch_errors),
+            finished=status is BackfillBatchStatus.FAILED,
+        )
+    finally:
+        persistence.close()
+
+    result.unified_item_count = batch.merged_candidate_count
+    result.warnings.extend(batch.warnings)
+    result.set_debug_payload(
+        {
+            "batch_id": batch.batch_id,
+            "requested_date_from": requested_date_from.isoformat(),
+            "requested_date_to": requested_date_to.isoformat(),
+            "window_count": len(windows),
+        }
+    )
+    if result.fatal:
+        return result.finish(f"fatal: backfill discovery failed for batch {batch.batch_id}")
+    return result.finish(
+        f"backfill discovery persisted {batch.merged_candidate_count} candidate(s) for batch {batch.batch_id}"
+    )
+
+
+async def run_news_backfill_scrape_job(
+    config: Config,
+    config_path: Path | None = None,
+    days_override: int | None = None,
+    operational_store: OperationalStore | None = None,
+) -> RunSnapshot:
+    """Drain one historical backfill batch through the candidate scrape pipeline."""
+    days = days_override if days_override is not None else config.days
+    result = _build_run_snapshot(config, config_path=config_path, days=days)
+    if not config.anthropic_api_key:
+        result.fatal = True
+        result.errors.append("ANTHROPIC_API_KEY not set")
+        return result.finish("fatal: missing anthropic api key")
+
+    sources = create_sources(config)
+    result.source_count = len(sources)
+    if not sources:
+        result.fatal = True
+        result.errors.append("No sources configured")
+        return result.finish("fatal: no sources configured")
+
+    batch_id = os.getenv(BACKFILL_BATCH_ID_ENV)
+    persistence = create_discovery_persistence(config)
+    try:
+        scrape_candidates_for_batch = select_backfill_candidates_for_scrape(
+            persistence,
+            limit=config.backfill.max_scrape_attempts_per_run,
+            batch_id=batch_id,
+        )
+        if not scrape_candidates_for_batch:
+            return result.finish("no queued backfill candidates eligible for scrape")
+        batch_id = scrape_candidates_for_batch[0].backfill_batch_id
+        batch = persistence.get_backfill_batch(batch_id) if batch_id is not None else None
+        if batch is None:
+            result.fatal = True
+            result.errors.append("Missing backfill batch metadata")
+            return result.finish("fatal: missing backfill batch metadata")
+        batch = _update_backfill_batch_state(
+            persistence,
+            batch=batch,
+            status=BackfillBatchStatus.SCRAPING,
+            warnings=batch.warnings,
+            errors=batch.errors,
+            finished=False,
+        )
+    finally:
+        persistence.close()
+
+    classifier = create_classifier(
+        api_key=config.anthropic_api_key,
+        model=config.classifier.model,
+        system_prompt=config.classifier.system_prompt,
+        user_prompt_template=config.classifier.user_prompt_template,
+    )
+    deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
+    seen_store = create_seen_store(config.state_paths.seen_path)
+    result.seen_count_before = seen_store.count
+    store = operational_store
+    owns_store = False
+    scrape_batch: CandidateScrapeBatch | None = None
+
+    try:
+        scrape_batch = await _run_backfill_candidate_scrape_job(
+            config=config.model_copy(update={"days": days}),
+            sources=sources,
+            limit=config.backfill.max_scrape_attempts_per_run,
+            batch_id=batch_id,
+        )
+        result.raw_article_count = len(scrape_batch.raw_articles)
+        if scrape_batch.errors:
+            result.errors.extend(scrape_batch.errors)
+            result.warnings.append(f"candidate_scrape_failures={len(scrape_batch.errors)}")
+        if not scrape_batch.selected_candidates:
+            return result.finish("no queued backfill candidates eligible for scrape")
+
+        if store is None and (scrape_batch.raw_articles or scrape_batch.fallback_candidates):
+            store = create_operational_store(config)
+            owns_store = True
+
+        fallback_records = await _build_fallback_operational_records(
+            candidates=scrape_batch.fallback_candidates,
+            classifier=classifier,
+        )
+        if fallback_records and store is not None:
+            store.upsert_records(
+                config.dataset_name.value,
+                [record.model_dump(mode="json") for record in fallback_records],
+            )
+            result.warnings.append(f"fallback_operational_records={len(fallback_records)}")
+
+        if not scrape_batch.raw_articles:
+            result.unified_item_count = len(fallback_records)
+            return result.finish(
+                "fallback retention completed with "
+                f"{len(fallback_records)} provisional row(s) for backfill batch {batch_id}"
+            )
+
+        processed = await _process_ingest_articles(
+            config=config,
+            result=result,
+            source_names=[source.name for source in sources],
+            sources=sources,
+            all_articles=scrape_batch.raw_articles,
+            seen_store=seen_store,
+            classifier=classifier,
+            deduplicator=deduplicator,
+            operational_store=store,
+        )
+        processed.result_summary = f"backfill batch {batch_id}: {processed.result_summary}"
+        processed.set_debug_payload({"batch_id": batch_id})
+        return processed
+    finally:
+        updated_persistence = create_discovery_persistence(config)
+        try:
+            if batch_id is not None:
+                existing_batch = updated_persistence.get_backfill_batch(batch_id)
+                if existing_batch is not None:
+                    remaining_candidates = updated_persistence.list_candidates(
+                        statuses=SCRAPEABLE_CANDIDATE_STATUSES,
+                        backfill_batch_id=batch_id,
+                        limit=1,
+                    )
+                    scrape_attempts = len(scrape_batch.attempts) if scrape_batch is not None else 0
+                    scraped_candidates = (
+                        len(scrape_batch.selected_candidates) if scrape_batch is not None else 0
+                    )
+                    final_status = (
+                        BackfillBatchStatus.PARTIAL
+                        if result.errors
+                        else BackfillBatchStatus.COMPLETED
+                    )
+                    if remaining_candidates:
+                        final_status = (
+                            BackfillBatchStatus.PARTIAL
+                            if result.errors
+                            else BackfillBatchStatus.DISCOVERED
+                        )
+                    _update_backfill_batch_state(
+                        updated_persistence,
+                        batch=existing_batch,
+                        status=final_status,
+                        scrape_attempt_count=existing_batch.scrape_attempt_count + scrape_attempts,
+                        scraped_candidate_count=(
+                            existing_batch.scraped_candidate_count + scraped_candidates
+                        ),
+                        warnings=deduplicate_strings([*existing_batch.warnings, *result.warnings]),
+                        errors=deduplicate_strings([*existing_batch.errors, *result.errors]),
+                        finished=final_status is BackfillBatchStatus.COMPLETED,
+                    )
+        finally:
+            updated_persistence.close()
         if owns_store and store is not None:
             store.close()
 

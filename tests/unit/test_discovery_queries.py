@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.discovery.models import DiscoveryQueryKind
-from denbust.discovery.queries import build_discovery_queries
+from denbust.discovery.queries import build_discovery_queries, enabled_source_domains
 
 
 def test_build_discovery_queries_creates_broad_and_source_targeted_queries() -> None:
@@ -123,3 +123,20 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
 
     assert len(targeted_queries) == 1
     assert targeted_queries[0].preferred_domains == ["www.ynet.co.il"]
+
+
+def test_enabled_source_domains_returns_only_enabled_resolved_domains() -> None:
+    """Public source-domain resolution should expose reusable enabled discovery domains."""
+    config = Config(
+        sources=[
+            SourceConfig(name="disabled", type=SourceType.SCRAPER, enabled=False),
+            SourceConfig(name="rss-no-url", type=SourceType.RSS),
+            SourceConfig(name="ynet", type=SourceType.RSS, url="https://www.ynet.co.il/feed.xml"),
+            SourceConfig(name="mako", type=SourceType.SCRAPER),
+        ]
+    )
+
+    assert enabled_source_domains(config) == [
+        ("ynet", "www.ynet.co.il"),
+        ("mako", "www.mako.co.il"),
+    ]

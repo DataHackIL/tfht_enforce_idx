@@ -89,6 +89,80 @@ def select_candidates_for_scrape(
     return ordered[:limit]
 
 
+def _metadata_datetime(candidate: PersistentCandidate, key: str) -> datetime | None:
+    value = candidate.metadata.get(key)
+    if not isinstance(value, str):
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _backfill_publication_datetime(candidate: PersistentCandidate) -> datetime | None:
+    return _metadata_datetime(candidate, "latest_publication_datetime_hint") or _metadata_datetime(
+        candidate, "fallback_publication_datetime"
+    )
+
+
+def select_backfill_candidates_for_scrape(
+    persistence: DiscoveryPersistence,
+    *,
+    limit: int,
+    batch_id: str | None = None,
+    now: datetime | None = None,
+) -> list[PersistentCandidate]:
+    """Return eligible durable backfill candidates for one historical drain pass."""
+    current_time = now or datetime.now(UTC)
+    listed_candidates = persistence.list_candidates(
+        statuses=SCRAPEABLE_CANDIDATE_STATUSES,
+        backfill_batch_id=batch_id,
+    )
+    candidates = [
+        candidate
+        for candidate in listed_candidates
+        if candidate.backfill_batch_id is not None
+        and (
+            candidate.next_scrape_attempt_at is None
+            or candidate.next_scrape_attempt_at <= current_time
+        )
+    ]
+    if not candidates:
+        return []
+
+    if batch_id is None:
+        selected_batch = min(
+            candidates,
+            key=lambda candidate: (
+                _metadata_datetime(candidate, "backfill_window_start") or candidate.first_seen_at,
+                candidate.first_seen_at,
+                candidate.backfill_batch_id or "",
+            ),
+        ).backfill_batch_id
+        candidates = [
+            candidate for candidate in candidates if candidate.backfill_batch_id == selected_batch
+        ]
+
+    max_datetime = datetime.max.replace(tzinfo=UTC)
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            _metadata_datetime(candidate, "backfill_window_start") or candidate.first_seen_at,
+            _backfill_publication_datetime(candidate) or candidate.first_seen_at,
+            candidate.first_seen_at,
+            -candidate.retry_priority,
+            0 if candidate.next_scrape_attempt_at is None else 1,
+            candidate.next_scrape_attempt_at or max_datetime,
+            candidate.candidate_id,
+        ),
+    )
+    return ordered[:limit]
+
+
 def queue_candidates_for_scrape(candidates: list[PersistentCandidate]) -> list[PersistentCandidate]:
     """Mark candidates as queued or pending for an immediate scrape pass."""
     queued: list[PersistentCandidate] = []
@@ -286,6 +360,7 @@ async def scrape_candidates(
     candidates: list[PersistentCandidate],
     sources: list[Source],
     preloaded_source_articles: dict[str, list[RawArticle]] | None = None,
+    backfill_mode: bool = False,
 ) -> CandidateScrapeBatch:
     """Attempt to materialize durable candidates into raw articles."""
     if not candidates:
@@ -318,6 +393,13 @@ async def scrape_candidates(
             started_at = datetime.now(UTC)
             article: RawArticle | None = None
             candidate_attempts: list[ScrapeAttempt] = []
+            retry_attempt_kind = (
+                ScrapeAttemptKind.BACKFILL_RETRY
+                if backfill_mode
+                and in_progress.backfill_batch_id is not None
+                and in_progress.scrape_attempt_count > 0
+                else None
+            )
 
             if source_name is not None:
                 source = sources_by_name[source_name]
@@ -342,7 +424,7 @@ async def scrape_candidates(
                                 candidate_id=in_progress.candidate_id,
                                 started_at=started_at,
                                 finished_at=finished_at,
-                                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                                attempt_kind=retry_attempt_kind or ScrapeAttemptKind.SOURCE_ADAPTER,
                                 fetch_status=FetchStatus.SUCCESS,
                                 source_adapter_name=source_name,
                                 article=article,
@@ -361,7 +443,7 @@ async def scrape_candidates(
                             candidate_id=in_progress.candidate_id,
                             started_at=started_at,
                             finished_at=finished_at,
-                            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                            attempt_kind=retry_attempt_kind or ScrapeAttemptKind.SOURCE_ADAPTER,
                             fetch_status=FetchStatus.FAILED,
                             source_adapter_name=source_name,
                             error_code="candidate_not_found",
@@ -376,7 +458,7 @@ async def scrape_candidates(
                             candidate_id=in_progress.candidate_id,
                             started_at=started_at,
                             finished_at=finished_at,
-                            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                            attempt_kind=retry_attempt_kind or ScrapeAttemptKind.SOURCE_ADAPTER,
                             fetch_status=FetchStatus.FAILED,
                             source_adapter_name=source_name,
                             error_code="source_adapter_error",
@@ -393,7 +475,7 @@ async def scrape_candidates(
                     candidate_id=in_progress.candidate_id,
                     started_at=generic_started_at,
                     finished_at=generic_finished_at,
-                    attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                    attempt_kind=retry_attempt_kind or ScrapeAttemptKind.GENERIC_FETCH,
                     fetch_status=fetch_result.fetch_status,
                     error_code=fetch_result.error_code,
                     error_message=fetch_result.error_message,

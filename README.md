@@ -16,6 +16,8 @@ data jobs. Phase A introduced the shared platform spine. Phase B turns the first
 Today, the implemented dataset/jobs are:
 
 - `news_items / discover` (source-native + Brave + Exa + Google CSE candidate persistence)
+- `news_items / backfill_discover`
+- `news_items / backfill_scrape`
 - `news_items / ingest`
 - `news_items / monthly_report`
 - `news_items / release`
@@ -43,6 +45,9 @@ Planned future datasets:
 - Scaffolds a persistent discovery/candidacy layer with dedicated Supabase tables and state-repo
   paths under `news_items/discover/`
 - Runs Brave, Exa, and Google CSE as external discovery engines feeding the durable candidate layer
+- Plans historical backfill windows and persists durable `backfill_batches` metadata for slow-drain
+  discovery/scrape work
+- Drains one historical backfill batch at a time with oldest-window-first scrape prioritization
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
 - Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
@@ -53,6 +58,10 @@ Planned future datasets:
 pip install -e ".[dev]"
 python -m playwright install chromium
 denbust scan --config agents/news/local.yaml
+DENBUST_BACKFILL_DATE_FROM=2026-01-01T00:00:00+00:00 \
+DENBUST_BACKFILL_DATE_TO=2026-01-31T23:59:59+00:00 \
+denbust run --dataset news_items --job backfill_discover --config agents/news/local.yaml
+denbust run --dataset news_items --job backfill_scrape --config agents/news/local.yaml
 denbust report monthly --month 2026-03 --config agents/news/local.yaml
 denbust diagnose-discovery --config agents/news/local.yaml
 denbust release --config agents/release/news_items.yaml
@@ -83,6 +92,8 @@ Future-facing commands now exist as real `news_items` jobs:
 
 ```bash
 denbust run --dataset news_items --job discover --config agents/news/local.yaml
+denbust run --dataset news_items --job backfill_discover --config agents/news/local.yaml
+denbust run --dataset news_items --job backfill_scrape --config agents/news/local.yaml
 denbust run --dataset news_items --job scrape_candidates --config agents/news/local.yaml
 denbust run --dataset news_items --job ingest --config agents/news/local.yaml
 denbust run --dataset news_items --job monthly_report --config agents/news/local.yaml
@@ -175,9 +186,13 @@ tfht_enforce_idx_state/
     └── discover/
         ├── runs/
         ├── candidates/
+        │   ├── backfill_queue.jsonl
         │   ├── latest_candidates.jsonl
         │   ├── retry_queue.jsonl
-        │   └── backfill_queue.jsonl
+        │   └── scrape_attempts.jsonl
+        ├── backfill_batches/
+        │   ├── latest_backfill_batches.jsonl
+        │   └── <batch-id>.json
         └── metrics/
             └── engine_overlap_latest.json
 ```
@@ -238,6 +253,7 @@ DL-PR-06 now builds on the earlier discovery milestones:
 - `src/denbust/discovery/` with durable candidate, provenance, scrape-attempt, and discovery-run
   models
 - config sections for `discovery`, `source_discovery`, `candidates`, and `backfill`
+- durable `backfill_batches` metadata mirrored to the state repo and Supabase
 - explicit state-repo path helpers for candidate-layer snapshots and queue files
 - source-native candidate normalization and merge/upsert persistence
 - a real `news_items / discover` job that persists source-native candidates and Brave-discovered
@@ -251,11 +267,17 @@ DL-PR-06 now builds on the earlier discovery milestones:
 - candidate selection / queueing helpers for retryable scrape work
 - scrape-attempt persistence and candidate status transitions underneath the ingest path
 - a real `news_items / scrape_candidates` job that drains queued candidates into article ingest
+- a real `news_items / backfill_discover` job that requires
+  `DENBUST_BACKFILL_DATE_FROM` / `DENBUST_BACKFILL_DATE_TO`, creates a durable batch record,
+  and runs historical search-engine discovery plus capability-based source-native discovery
+- a real `news_items / backfill_scrape` job that drains one historical batch at a time through the
+  existing scrape-to-ingest path
 - `news_items / ingest` now uses the candidate scrape layer for source-native candidates while
   preserving the existing direct-fetch convenience flow as a compatibility fallback
 - Supabase migrations for:
   - `discovery_runs`
   - `persistent_candidates`
+  - `backfill_batches`
   - `candidate_provenance`
   - `scrape_attempts`
 

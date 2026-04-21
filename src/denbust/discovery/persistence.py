@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
 from denbust.discovery.models import (
+    BackfillBatch,
+    BackfillBatchStatus,
     CandidateProvenance,
     CandidateStatus,
     DiscoveryRun,
@@ -38,9 +40,10 @@ class CandidateStore(ABC):
         self,
         *,
         statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
-        """List durable candidates, optionally filtered by status."""
+        """List durable candidates, optionally filtered by status and batch."""
 
     @abstractmethod
     def find_candidate_by_urls(
@@ -50,6 +53,27 @@ class CandidateStore(ABC):
         current_url: str,
     ) -> PersistentCandidate | None:
         """Fetch a single durable candidate by canonical or current URL."""
+
+
+class BackfillBatchStore(ABC):
+    """Persistence interface for historical backfill batches."""
+
+    @abstractmethod
+    def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
+        """Insert or update durable backfill-batch rows."""
+
+    @abstractmethod
+    def get_backfill_batch(self, batch_id: str) -> BackfillBatch | None:
+        """Fetch one backfill batch by id."""
+
+    @abstractmethod
+    def list_backfill_batches(
+        self,
+        *,
+        statuses: Sequence[BackfillBatchStatus] | None = None,
+        limit: int | None = None,
+    ) -> list[BackfillBatch]:
+        """List backfill batches, optionally filtered by status."""
 
 
 class ProvenanceStore(ABC):

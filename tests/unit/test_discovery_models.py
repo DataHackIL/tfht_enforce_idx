@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from denbust.discovery.models import (
+    BackfillBatch,
+    BackfillBatchStatus,
     CandidateProvenance,
     CandidateStatus,
     ContentBasis,
@@ -162,4 +164,27 @@ def test_discovery_run_rejects_finished_at_before_started_at() -> None:
         DiscoveryRun(
             started_at=started_at,
             finished_at=started_at - timedelta(minutes=1),
+        )
+
+
+def test_backfill_batch_rejects_invalid_started_and_finished_timestamps() -> None:
+    """Backfill batches should reject invalid started/finished timestamps."""
+    created_at = datetime(2026, 4, 10, 10, 0, tzinfo=UTC)
+
+    with pytest.raises(ValueError):
+        BackfillBatch(
+            created_at=created_at,
+            started_at=created_at - timedelta(minutes=1),
+            requested_date_from=datetime(2026, 1, 1, tzinfo=UTC),
+            requested_date_to=datetime(2026, 1, 2, tzinfo=UTC),
+        )
+
+    with pytest.raises(ValueError):
+        BackfillBatch(
+            created_at=created_at,
+            started_at=created_at + timedelta(minutes=1),
+            finished_at=created_at,
+            status=BackfillBatchStatus.COMPLETED,
+            requested_date_from=datetime(2026, 1, 1, tzinfo=UTC),
+            requested_date_to=datetime(2026, 1, 2, tzinfo=UTC),
         )
