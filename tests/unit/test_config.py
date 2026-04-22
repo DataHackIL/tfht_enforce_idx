@@ -50,6 +50,7 @@ class TestConfig:
         assert config.discovery.default_query_kinds == [
             DiscoveryQueryKind.BROAD,
             DiscoveryQueryKind.SOURCE_TARGETED,
+            DiscoveryQueryKind.TAXONOMY_TARGETED,
             DiscoveryQueryKind.SOCIAL_TARGETED,
         ]
         assert config.source_discovery.enabled is True
@@ -470,3 +471,18 @@ store:
         assert config.store.runs_dir is None
         assert config.state_paths.seen_path == Path("state/seen.json")
         assert config.state_paths.runs_dir == Path("data/news_items/ingest/runs")
+
+    def test_load_checked_in_news_configs_include_c8_keyword_expansion(self) -> None:
+        """Tracked operator configs should load with the expanded C-8 keyword set."""
+        local_config = load_config(Path("agents/news/local.yaml"))
+        github_config = load_config(Path("agents/news/github.yaml"))
+
+        for config in (local_config, github_config):
+            assert "נישואין בכפייה" in config.keywords
+            assert "עבדות מינית" in config.keywords
+            assert "זנות מקוונת" in config.keywords
+            assert "צו הגבלת שימוש" in config.keywords
+            assert "קנס צריכת זנות" in config.keywords
+            assert "החזקת מקום לשם זנות" in config.keywords
+            assert "השכרת מקום לשם זנות" in config.keywords
+            assert "פרסום זנות" in config.keywords

@@ -20,6 +20,8 @@ denbust run --dataset news_items --job backfill_scrape --config agents/news/loca
 `discover` writes into the candidate-layer namespace under `news_items/discover/`.
 `ingest` remains the article-processing job and still owns `news_items/ingest/`.
 Backfill jobs also read and write the shared `news_items/discover/` candidate-layer state.
+The search-engine side of `discover` and `backfill_discover` now emits `taxonomy_targeted` queries
+from the packaged TFHT taxonomy in addition to the coarse operator keyword list.
 
 ## GitHub Actions Run Path
 
@@ -127,6 +129,23 @@ state_repo/news_items/backfill_scrape/
 `backfill_scrape` remains manual in this phase because historical drain rates and retry backlog are
 operationally sensitive. Operators should choose when to spend scrape budget on historical work
 instead of scheduling it blindly.
+
+## One-Time 90-Day Re-Scan
+
+`C-8` does not add a dedicated workflow. The catch-up run uses the existing backfill jobs with the
+default 7-day backfill slicing:
+
+```bash
+DENBUST_BACKFILL_DATE_FROM=2026-01-23T00:00:00+00:00 \
+DENBUST_BACKFILL_DATE_TO=2026-04-22T23:59:59+00:00 \
+denbust run --dataset news_items --job backfill_discover --config agents/news/local.yaml
+
+DENBUST_BACKFILL_BATCH_ID=batch-optional \
+denbust run --dataset news_items --job backfill_scrape --config agents/news/local.yaml
+```
+
+Use `DENBUST_BACKFILL_BATCH_ID` only if operators want to drain one batch explicitly; otherwise
+`backfill_scrape` can drain the oldest eligible batch.
 
 ## Migration And Setup Checklist
 

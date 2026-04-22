@@ -458,16 +458,26 @@ Run `denbust validation evaluate` in CI and publish the results as an artifact.
 
 ---
 
-## C-8: Update keywords and re-scan (deferred)
+## C-8: Update keywords and re-scan (implemented)
 
-The ingest keywords in `agents/news/github.yaml` and `local.yaml` were assembled before the official typology. Now that we have the authoritative Hebrew subcategory labels, review and extend:
+The ingest keywords in `agents/news/github.yaml` and `local.yaml` have been refreshed to include
+the high-signal TFHT terms that were missing before the official typology landed. The compact
+checked-in keyword list now covers forced marriage, sexual slavery, online prostitution,
+administrative/use-restriction order phrasing, prostitution-consumption fines, and
+keeping/renting/advertising a brothel.
 
-- Add: `"נישואין בכפייה"`, `"עבדות מינית"`, `"זנות מקוונת"`, `"צו הגבלת שימוש"`, `"קנס צריכת זנות"`
-- The stage-1 relevance gate in the new classifier means false positives from broader keywords are cheap — the classifier filters them.
+The search-engine side of discovery also now emits `taxonomy_targeted` queries from the packaged
+TFHT taxonomy. That wider term set is intentionally limited to search-engine discovery and the
+manual backfill path; source-native ingest and source diagnostics still use the coarse operator
+keyword list.
 
-A one-time re-scan over the last 90 days with updated keywords can be run manually after the taxonomy migration to catch events that were previously missed.
+The one-time 90-day catch-up run remains an operator-run manual backfill using the existing
+`backfill_discover` and `backfill_scrape` jobs with the default 7-day backfill slicing.
 
-Cross-plan sequencing note: the earlier choice between `C-8` and `DL-PR-09` was resolved in favor of `DL-PR-09`, which shipped in PR `#87` on 2026-04-21. That sequencing question is now fully closed: `C-8` was deferred until the entire `DL-PR-*` track, including `DL-PR-10` and `DL-PR-11`, was complete.
+Cross-plan sequencing note: the earlier choice between `C-8` and `DL-PR-09` was resolved in favor
+of `DL-PR-09`, which shipped in PR `#87` on 2026-04-21. That sequencing question is now fully
+closed: `C-8` shipped after the full `DL-PR-*` discovery rollout, including `DL-PR-10` and
+`DL-PR-11`.
 
 ---
 

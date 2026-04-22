@@ -15,7 +15,7 @@ data jobs. Phase A introduced the shared platform spine. Phase B turns the first
 
 Today, the implemented dataset/jobs are:
 
-- `news_items / discover` (source-native + Brave + Exa + Google CSE candidate persistence, plus Facebook-targeted social discovery queries)
+- `news_items / discover` (source-native + Brave + Exa + Google CSE candidate persistence, plus taxonomy-targeted and Facebook-targeted social discovery queries)
 - `news_items / backfill_discover`
 - `news_items / backfill_scrape`
 - `news_items / ingest`
@@ -45,6 +45,8 @@ Planned future datasets:
 - Scaffolds a persistent discovery/candidacy layer with dedicated Supabase tables and state-repo
   paths under `news_items/discover/`
 - Runs Brave, Exa, and Google CSE as external discovery engines feeding the durable candidate layer
+- Adds taxonomy-targeted discovery queries from the packaged TFHT taxonomy for broader
+  search-engine recall
 - Emits Facebook-targeted `social_targeted` search queries and retains those results as non-scrapeable reference candidates
 - Plans historical backfill windows and persists durable `backfill_batches` metadata for slow-drain
   discovery/scrape work
@@ -62,9 +64,10 @@ Planned future datasets:
 pip install -e ".[dev]"
 python -m playwright install chromium
 denbust scan --config agents/news/local.yaml
-DENBUST_BACKFILL_DATE_FROM=2026-01-01T00:00:00+00:00 \
-DENBUST_BACKFILL_DATE_TO=2026-01-31T23:59:59+00:00 \
+DENBUST_BACKFILL_DATE_FROM=2026-01-23T00:00:00+00:00 \
+DENBUST_BACKFILL_DATE_TO=2026-04-22T23:59:59+00:00 \
 denbust run --dataset news_items --job backfill_discover --config agents/news/local.yaml
+DENBUST_BACKFILL_BATCH_ID=batch-optional \
 denbust run --dataset news_items --job backfill_scrape --config agents/news/local.yaml
 denbust report monthly --month 2026-03 --config agents/news/local.yaml
 denbust diagnose-discovery --config agents/news/local.yaml
@@ -229,6 +232,8 @@ Bootstrap notes:
 - a small `README.md` in the state repo is fine but optional
 - see [docs/discovery_operations.md](docs/discovery_operations.md) for the detailed discover /
   ingest / backfill runbook and migration checklist
+- the one-time `C-8` catch-up path is a manual 90-day `backfill_discover` plus `backfill_scrape`
+  run using the existing 7-day backfill window slicing
 
 ## Architecture Direction
 
@@ -285,6 +290,7 @@ DL-PR-06 now builds on the earlier discovery milestones:
 - a real `news_items / discover` job that persists source-native candidates and Brave-discovered
   plus Exa-discovered and Google CSE-discovered candidates into the same durable substrate
 - Brave query building for broad and source-targeted discovery searches
+- taxonomy-targeted query building from packaged TFHT discovery terms
 - Exa query execution for the same broad and source-targeted discovery searches
 - Google CSE query execution for the same broad and source-targeted discovery searches
 - dedicated `DENBUST_BRAVE_SEARCH_API_KEY`, `DENBUST_EXA_API_KEY`, and

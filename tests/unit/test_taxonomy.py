@@ -26,6 +26,10 @@ def test_default_taxonomy_contains_expected_index_relevant_flags() -> None:
     assert taxonomy.is_index_relevant("brothels", "administrative_closure")
     assert not taxonomy.is_index_relevant("pimping_prostitution", "women_testimonies")
     assert not taxonomy.is_index_relevant("human_trafficking", "trafficking_forced_labor")
+    assert taxonomy.subcategory(
+        "brothels",
+        "administrative_closure",
+    ).discovery_terms_he == ["צו סגירה", "צו הגבלת שימוש", "סגירה מנהלית"]
 
 
 def test_examples_csv_contains_known_reference_urls() -> None:
@@ -82,6 +86,56 @@ def test_taxonomy_lookup_errors_and_prompt_table() -> None:
     assert "- brothels (בתי בושת) -> " in prompt_table
     assert "administrative_closure" in prompt_table
     assert "closure_appeal" in prompt_table
+
+
+def test_taxonomy_discovery_terms_include_curated_non_index_and_dedupe_per_leaf() -> None:
+    taxonomy = default_taxonomy()
+
+    terms = taxonomy.discovery_terms()
+
+    assert (
+        "human_trafficking",
+        "trafficking_forced_marriage",
+        "נישואין בכפייה",
+    ) in terms
+    assert ("brothels", "client_fine", "קנס צריכת זנות") in terms
+    assert ("pimping_prostitution", "nordic_model_law", "המודל הנורדי") in terms
+    assert ("pimping_prostitution", "women_testimonies", "עדויות של נשים בזנות") not in terms
+
+
+def test_taxonomy_discovery_terms_can_exclude_adjacent_non_index_terms() -> None:
+    taxonomy = default_taxonomy()
+
+    terms = taxonomy.discovery_terms(include_adjacent_non_index=False)
+
+    assert ("pimping_prostitution", "nordic_model_law", "המודל הנורדי") not in terms
+
+
+def test_taxonomy_discovery_terms_skip_blank_aliases() -> None:
+    taxonomy = TaxonomyDefinition(
+        version="1",
+        categories=[
+            CategoryDefinition(
+                id="cat",
+                label_he="קטגוריה",
+                subcategories=[
+                    SubcategoryDefinition(
+                        id="leaf",
+                        label_he="מונח בסיס",
+                        index_relevant=True,
+                        discovery_terms_he=["", "   ", "מונח נוסף"],
+                        legacy_category=Category.BROTHEL,
+                        legacy_sub_category=SubCategory.CLOSURE,
+                    )
+                ],
+            )
+        ],
+    )
+
+    assert taxonomy.discovery_terms() == [
+        ("cat", "leaf", "מונח בסיס"),
+        ("cat", "leaf", "מונח נוסף"),
+    ]
 
 
 def test_taxonomy_validate_unique_ids_rejects_duplicates() -> None:

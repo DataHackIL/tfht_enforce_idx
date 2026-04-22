@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
+from denbust.taxonomy import default_taxonomy
 
 _SCRAPER_SOURCE_DOMAINS: dict[str, str] = {
     "mako": "www.mako.co.il",
@@ -53,6 +54,17 @@ def enabled_source_domains(config: Config) -> list[tuple[str, str]]:
     return source_domains
 
 
+def _taxonomy_query_specs() -> list[tuple[str, list[str]]]:
+    specs_by_term: dict[str, set[str]] = {}
+    for category_id, subcategory_id, term in default_taxonomy().discovery_terms():
+        tags = specs_by_term.setdefault(term, set())
+        tags.update({"taxonomy", f"category:{category_id}", f"subcategory:{subcategory_id}"})
+    return [
+        (term, sorted(tags))
+        for term, tags in sorted(specs_by_term.items(), key=lambda item: item[0])
+    ]
+
+
 def build_discovery_queries(
     config: Config,
     *,
@@ -61,7 +73,8 @@ def build_discovery_queries(
 ) -> list[DiscoveryQuery]:
     """Build normalized discovery queries for enabled discovery engines."""
     keywords = _normalize_keywords(config.keywords)
-    if not keywords:
+    taxonomy_enabled = DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds
+    if not keywords and not taxonomy_enabled:
         return []
 
     current_time = now or datetime.now(UTC)
@@ -119,5 +132,23 @@ def build_discovery_queries(
                         tags=["social", domain],
                     )
                 )
+
+    if taxonomy_enabled:
+        taxonomy_specs = _taxonomy_query_specs()
+        for term, tags in taxonomy_specs:
+            taxonomy_key = (DiscoveryQueryKind.TAXONOMY_TARGETED, term)
+            if taxonomy_key in seen_keys:
+                continue
+            queries.append(
+                DiscoveryQuery(
+                    query_text=term,
+                    language="he",
+                    date_from=date_from,
+                    date_to=date_to,
+                    query_kind=DiscoveryQueryKind.TAXONOMY_TARGETED,
+                    tags=tags,
+                )
+            )
+            seen_keys.add(taxonomy_key)
 
     return queries

@@ -18,6 +18,8 @@ categories:
         label_he: סחר למטרת נישואין בכפייה
         label_en: Trafficking for forced marriage
         index_relevant: true
+        discovery_terms_he:
+          - נישואין בכפייה
         legacy_category: trafficking
         legacy_sub_category:
       - id: trafficking_forced_labor
@@ -48,6 +50,8 @@ categories:
         label_he: עבדות מינית
         label_en: Sexual slavery
         index_relevant: true
+        discovery_terms_he:
+          - עבדות מינית
         legacy_category: trafficking
         legacy_sub_category: rescue
       - id: trafficking_women
@@ -97,12 +101,17 @@ categories:
         label_he: זנות מקוונת
         label_en: Online prostitution
         index_relevant: true
+        discovery_terms_he:
+          - זנות מקוונת
         legacy_category: prostitution
         legacy_sub_category:
       - id: nordic_model_law
         label_he: חוק איסור צריכת זנות / המודל הנורדי
         label_en: Nordic model / prohibition on buying prostitution
         index_relevant: false
+        discovery_terms_he:
+          - חוק איסור צריכת זנות
+          - המודל הנורדי
         legacy_category: prostitution
         legacy_sub_category:
   - id: brothels
@@ -113,24 +122,33 @@ categories:
         label_he: החזקת מקום לשם זנות
         label_en: Keeping a place for prostitution
         index_relevant: true
+        discovery_terms_he:
+          - החזקת מקום לשם זנות
         legacy_category: brothel
         legacy_sub_category:
       - id: renting_brothel
         label_he: השכרת מקום לשם זנות
         label_en: Renting a place for prostitution
         index_relevant: true
+        discovery_terms_he:
+          - השכרת מקום לשם זנות
         legacy_category: brothel
         legacy_sub_category:
       - id: advertising_prostitution
         label_he: פרסום זנות
         label_en: Advertising prostitution
         index_relevant: true
+        discovery_terms_he:
+          - פרסום זנות
         legacy_category: brothel
         legacy_sub_category:
       - id: client_fine
         label_he: קנס בגין צריכת זנות
         label_en: Fine for buying prostitution
         index_relevant: true
+        discovery_terms_he:
+          - קנס צריכת זנות
+          - קנס בגין צריכת זנות
         legacy_category: prostitution
         legacy_sub_category: fine
         example_urls:
@@ -139,6 +157,10 @@ categories:
         label_he: סגירה מנהלית / צו מנהלי לפי חוק הגבלת שימוש במקום לשם ביצוע עבירה
         label_en: Administrative closure order
         index_relevant: true
+        discovery_terms_he:
+          - צו סגירה
+          - צו הגבלת שימוש
+          - סגירה מנהלית
         legacy_category: brothel
         legacy_sub_category: closure
         example_urls:
