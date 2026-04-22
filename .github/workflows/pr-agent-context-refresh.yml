@@ -94,6 +94,7 @@ jobs:
       contents: read
       actions: write
       pull-requests: read
+      issues: read
     steps:
       - uses: actions/github-script@v7
         with:
@@ -114,6 +115,7 @@ jobs:
             let skipCount = 0;
             let errorCount = 0;
             const recentDispatchWindowMs = 60 * 60 * 1000;
+            const maxCommentPages = 4;
 
             const recentDispatchCutoff = Date.now() - recentDispatchWindowMs;
             const { data: workflowRunsResponse } =
@@ -130,21 +132,34 @@ jobs:
             });
 
             const hasCurrentRefreshComment = async (pull) => {
-              const { data: comments } = await github.rest.issues.listComments({
-                owner,
-                repo,
-                issue_number: pull.number,
-                per_page: 50,
-                sort: 'created',
-                direction: 'desc',
-              });
+              for (let page = 1; page <= maxCommentPages; page += 1) {
+                const { data: comments } = await github.rest.issues.listComments({
+                  owner,
+                  repo,
+                  issue_number: pull.number,
+                  per_page: 50,
+                  page,
+                  sort: 'created',
+                  direction: 'desc',
+                });
 
-              return comments.some(
-                (comment) =>
-                  comment.body?.startsWith(markerPrefix) &&
-                  comment.body.includes('execution_mode=refresh;') &&
-                  comment.body.includes(`head_sha=${pull.head.sha};`),
-              );
+                if (
+                  comments.some(
+                    (comment) =>
+                      comment.body?.startsWith(markerPrefix) &&
+                      comment.body.includes('execution_mode=refresh;') &&
+                      comment.body.includes(`head_sha=${pull.head.sha};`),
+                  )
+                ) {
+                  return true;
+                }
+
+                if (comments.length < 50) {
+                  break;
+                }
+              }
+
+              return false;
             };
 
             const hasRecentOrInFlightScheduledDispatchRun = (pull) => {

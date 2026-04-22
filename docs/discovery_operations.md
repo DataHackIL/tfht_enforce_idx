@@ -95,8 +95,24 @@ state_repo/news_items/ingest/
 └── publication/
 ```
 
-Backfill scrape may update both namespaces because it drains discovery candidates and can also
-produce ingest outputs.
+Backfill job namespaces also appear in the state repo:
+
+```text
+state_repo/news_items/backfill_discover/
+├── runs/
+└── logs/
+
+state_repo/news_items/backfill_scrape/
+├── seen.json
+├── runs/
+└── logs/
+```
+
+- `news-items-backfill-discover` owns the `backfill_discover/` run-artifact namespace and also
+  updates the shared `discover/` candidate-layer namespace.
+- `news-items-backfill-scrape` owns the `backfill_scrape/` run-artifact namespace and may also
+  update both `discover/` and `ingest/` because it drains discovery candidates through the existing
+  ingest pipeline.
 
 ## Retry Semantics
 
