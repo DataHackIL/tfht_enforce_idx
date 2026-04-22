@@ -1,0 +1,110 @@
+name: news-items-backfill-discover
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_from:
+        description: "Required ISO timestamp for the batch start window"
+        required: true
+        type: string
+      date_to:
+        description: "Required ISO timestamp for the batch end window"
+        required: true
+        type: string
+      batch_id:
+        description: "Optional durable batch id override"
+        required: false
+        type: string
+
+concurrency:
+  group: state-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.11"
+  STATE_REPO: DataHackIL/tfht_enforce_idx_state
+  DATASET_NAME: news_items
+  JOB_NAME: backfill_discover
+  JOB_CONFIG_PATH: agents/news/github.yaml
+  STATE_JOB_DIR: state_repo/news_items/discover
+  BACKFILL_DISCOVER_STATE_DIR: state_repo/news_items/backfill_discover
+
+jobs:
+  run-backfill-discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: news-items-ingest
+
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@v6
+
+      - name: Checkout state repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.STATE_REPO }}
+          token: ${{ secrets.STATE_REPO_PAT }}
+          path: state_repo
+
+      - name: Set up denbust job
+        uses: ./.github/actions/setup-denbust-state-job
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
+          install-playwright: "true"
+          state-job-dir: ${{ env.STATE_JOB_DIR }}
+
+      - name: Run backfill discover job
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
+          DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
+          DENBUST_BRAVE_SEARCH_API_KEY: ${{ secrets.DENBUST_BRAVE_SEARCH_API_KEY }}
+          DENBUST_EXA_API_KEY: ${{ secrets.DENBUST_EXA_API_KEY }}
+          DENBUST_GOOGLE_CSE_API_KEY: ${{ secrets.DENBUST_GOOGLE_CSE_API_KEY }}
+          DENBUST_GOOGLE_CSE_ID: ${{ secrets.DENBUST_GOOGLE_CSE_ID }}
+          DENBUST_STATE_ROOT: state_repo
+          DENBUST_BACKFILL_DATE_FROM: ${{ inputs.date_from }}
+          DENBUST_BACKFILL_DATE_TO: ${{ inputs.date_to }}
+          DENBUST_BACKFILL_BATCH_ID: ${{ inputs.batch_id }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
+
+      - name: Commit and push backfill discovery state changes
+        if: ${{ always() }}
+        run: |
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo config user.name "github-actions[bot]"
+          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/runs"
+          fi
+          if [[ -d "${{ env.STATE_JOB_DIR }}/candidates" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/candidates"
+          fi
+          if [[ -d "${{ env.STATE_JOB_DIR }}/metrics" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/metrics"
+          fi
+          if [[ -d "${{ env.STATE_JOB_DIR }}/backfill_batches" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/backfill_batches"
+          fi
+          if [[ -d "${{ env.BACKFILL_DISCOVER_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_discover/runs"
+          fi
+          if [[ -d "${{ env.BACKFILL_DISCOVER_STATE_DIR }}/logs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_discover/logs"
+          fi
+
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No staged state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo commit -m "chore(state): update news_items backfill discovery state"
+          git -C state_repo push

@@ -13,6 +13,10 @@ Use this guidance when working on GitHub Actions, coverage, Codecov, or `pr-agen
 
 - The main PR workflow invokes `pr-agent-context` from `ci-test.yml`
 - Refresh runs live in `.github/workflows/pr-agent-context-refresh.yml`
+- Refresh wiring should keep normal review/check-driven updates and add the guarded scheduled
+  `workflow_dispatch` fallback for same-repo PRs
+- Scheduled refresh dispatches should pass explicit pull request number, base SHA, and head SHA
+  overrides into the reusable workflow
 - Refresh is intentionally separate from main CI
 - `pr-agent-context` consumes the `coverage-xml` artifact directly for patch coverage
 - When changing patch coverage behavior, preserve the shared `coverage` job as the source of truth
@@ -21,6 +25,7 @@ Use this guidance when working on GitHub Actions, coverage, Codecov, or `pr-agen
 
 - `codecov-yaml-validate.yml` validates `codecov.yml` / `.codecov.yml`
 - `pyproject-validate.yml` validates `pyproject.toml`
+- `validate-agent-plan` in `ci-test.yml` validates `.agent-plan.md` structure and wording
 - Keep those workflows narrowly scoped to the files they validate
 
 ## Editing Rules
@@ -29,3 +34,4 @@ Use this guidance when working on GitHub Actions, coverage, Codecov, or `pr-agen
 - Avoid adding duplicate status sources when an existing workflow or artifact already provides the needed data
 - Preserve current prompt template usage for `pr-agent-context` unless the task explicitly changes it
 - When updating agent guidance, keep `AGENTS.md` and `CLAUDE.md` aligned
+- Treat `.agent-plan.md` drift as CI-visible repo hygiene, not optional documentation cleanup

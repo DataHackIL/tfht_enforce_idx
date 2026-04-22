@@ -1,7 +1,7 @@
 name: daily-state-run
 
 on:
-  # Daily scheduled ingest for news_items, with manual dispatch for ad hoc reruns.
+  # Daily scheduled candidate-driven ingest for news_items, with manual dispatch for ad hoc reruns.
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
           install-playwright: "true"
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run daily scan
+      - name: Run daily ingest job
         # Required secrets:
         # - ANTHROPIC_API_KEY
         # - DENBUST_SUPABASE_URL
@@ -65,7 +65,7 @@ jobs:
           DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
           DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
           DENBUST_STATE_ROOT: state_repo
-        run: denbust scan --config ${{ env.JOB_CONFIG_PATH }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
 
       - name: Commit and push state changes
         if: ${{ always() }}

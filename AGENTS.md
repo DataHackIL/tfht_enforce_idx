@@ -21,6 +21,23 @@
 - When opening a PR, apply appropriate GitHub labels for the workstream or tracked plan item and assign the PR to the relevant GitHub milestone.
 - Create missing labels or milestones when needed, preferring the repo-specific GitHub MCP over CLI fallbacks for those actions.
 - When a PR is opened against a tracked plan item, update `.agent-plan.md`, `README.md`, and any relevant human-facing plan document in that same PR so they reflect the expected post-merge state.
+- `.agent-plan.md` must be written as mainline truth: on a feature branch it is a forward-looking merge contract, and on `main` the same text must read as present-tense fact after merge.
+- `.agent-plan.md` must keep these headings exactly:
+  - `## Mainline Status`
+  - `## Task Ledger`
+  - `## Planning Workflow`
+  - `## Context Pointers`
+- The `Mainline Status` section must include exactly these field prefixes:
+  - `- Last merged PR on main:`
+  - `- Next planned PR:`
+  - `- Current blockers on main:`
+- The `Task Ledger` section must use only these status markers:
+  - `[done]`
+  - `[next]`
+  - `[later]`
+  - `[blocked]`
+- `.agent-plan.md` must contain exactly one `[next]` item.
+- Avoid ambiguous branch-local status prose such as `in progress`; the repo validator treats that as invalid in `.agent-plan.md`.
 - Preserve `CLAUDE.md -> AGENTS.md` when changing repo guidance.
 
 ## Environment

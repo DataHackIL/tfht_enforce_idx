@@ -343,6 +343,9 @@ Historical discovery becomes operationally possible without overwhelming the pip
 ### Goal
 Lay the groundwork for future source expansion and social/reference discovery.
 
+### Status
+Implemented in PR `#91`.
+
 ### Scope
 - Add source-suggestion reporting from candidate provenance:
   - repeated unseen domains
@@ -370,6 +373,10 @@ The candidate layer now supports future expansion into new sources and social/re
 
 ### Goal
 Expose the new layer safely in GitHub Actions and local operations.
+
+### Status
+Implemented by the workflow/docs rollout PR that adds dedicated discover and manual backfill
+operations plus mainline-semantic `.agent-plan.md` validation.
 
 ### Scope
 - Add/update workflows for:

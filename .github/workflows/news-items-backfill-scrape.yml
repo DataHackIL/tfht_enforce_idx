@@ -1,0 +1,121 @@
+name: news-items-backfill-scrape
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_id:
+        description: "Optional durable batch id to constrain the scrape drain"
+        required: false
+        type: string
+
+concurrency:
+  group: state-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.11"
+  STATE_REPO: DataHackIL/tfht_enforce_idx_state
+  DATASET_NAME: news_items
+  JOB_NAME: backfill_scrape
+  JOB_CONFIG_PATH: agents/news/github.yaml
+  STATE_JOB_DIR: state_repo/news_items/discover
+  DISCOVERY_STATE_DIR: state_repo/news_items/discover
+  INGEST_STATE_DIR: state_repo/news_items/ingest
+  BACKFILL_SCRAPE_STATE_DIR: state_repo/news_items/backfill_scrape
+
+jobs:
+  run-backfill-scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: news-items-ingest
+
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@v6
+
+      - name: Checkout state repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.STATE_REPO }}
+          token: ${{ secrets.STATE_REPO_PAT }}
+          path: state_repo
+
+      - name: Set up denbust job
+        uses: ./.github/actions/setup-denbust-state-job
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
+          install-playwright: "true"
+          state-job-dir: ${{ env.STATE_JOB_DIR }}
+
+      - name: Run backfill scrape job
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
+          DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
+          DENBUST_EMAIL_SMTP_HOST: ${{ secrets.DENBUST_EMAIL_SMTP_HOST }}
+          DENBUST_EMAIL_SMTP_PORT: ${{ secrets.DENBUST_EMAIL_SMTP_PORT }}
+          DENBUST_EMAIL_SMTP_USERNAME: ${{ secrets.DENBUST_EMAIL_SMTP_USERNAME }}
+          DENBUST_EMAIL_SMTP_PASSWORD: ${{ secrets.DENBUST_EMAIL_SMTP_PASSWORD }}
+          DENBUST_EMAIL_FROM: ${{ secrets.DENBUST_EMAIL_FROM }}
+          DENBUST_EMAIL_TO: ${{ secrets.DENBUST_EMAIL_TO }}
+          DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
+          DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
+          DENBUST_STATE_ROOT: state_repo
+          DENBUST_BACKFILL_BATCH_ID: ${{ inputs.batch_id }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
+
+      - name: Commit and push backfill scrape state changes
+        if: ${{ always() }}
+        run: |
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo config user.name "github-actions[bot]"
+          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/runs"
+          fi
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/candidates" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/candidates"
+          fi
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/metrics" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/metrics"
+          fi
+          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/backfill_batches" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/backfill_batches"
+          fi
+          if [[ -d "${{ env.INGEST_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/runs"
+          fi
+          if [[ -f "${{ env.INGEST_STATE_DIR }}/seen.json" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/seen.json"
+          fi
+          if [[ -d "${{ env.INGEST_STATE_DIR }}/logs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/logs"
+          fi
+          if [[ -d "${{ env.INGEST_STATE_DIR }}/publication" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/publication"
+          fi
+          if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/runs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/runs"
+          fi
+          if [[ -f "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/seen.json" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/seen.json"
+          fi
+          if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/logs" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/logs"
+          fi
+
+          if [[ -z "$(git -C state_repo status --short)" ]]; then
+            echo "No staged state changes to commit."
+            exit 0
+          fi
+
+          git -C state_repo commit -m "chore(state): update news_items backfill scrape state"
+          git -C state_repo push

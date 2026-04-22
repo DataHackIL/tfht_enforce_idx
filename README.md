@@ -52,6 +52,8 @@ Planned future datasets:
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains
+- Runs scheduled GitHub Actions discovery separately from candidate-driven ingest
+- Exposes manual GitHub Actions workflows for historical `backfill_discover` and `backfill_scrape`
 - Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
 
 ## Quick Start
@@ -137,19 +139,29 @@ Precedence rules:
 Scheduled GitHub Actions runs use this repo as the code runner and a separate repo,
 `tfht_enforce_idx_state`, as the canonical mutable state store.
 
-The workflow:
+The workflow family:
 
 - checks out this repo
 - checks out the state repo into `state_repo/`
-- sets dataset/job env such as `DATASET_NAME=news_items` and `JOB_NAME=ingest`
-- runs `denbust scan --config agents/news/github.yaml`
+- sets dataset/job env such as `DATASET_NAME=news_items` and `JOB_NAME=discover` or `ingest`
+- runs `denbust run --dataset news_items --job <job> --config agents/news/github.yaml`
 - points persistence at the checked-out state repo via `DENBUST_STATE_ROOT=state_repo`
 - commits and pushes the updated namespaced state files only if files changed
+
+Operational workflow ownership after `DL-PR-11`:
+
+- `news-items-discover` owns scheduled discovery writes under `news_items/discover/`
+- `daily-state-run` and `weekly-state-run` own candidate-driven ingest under `news_items/ingest/`
+- `news-items-backfill-discover` and `news-items-backfill-scrape` are manual operator workflows
+  for historical recovery
+- `news-items-daily-review` still follows `daily-state-run`
 
 Required secrets for GitHub-run mode:
 
 - `ANTHROPIC_API_KEY`
 - `STATE_REPO_PAT`
+- `DENBUST_SUPABASE_URL`
+- `DENBUST_SUPABASE_SERVICE_ROLE_KEY`
 - `DENBUST_EMAIL_SMTP_HOST`
 - `DENBUST_EMAIL_SMTP_PORT`
 - `DENBUST_EMAIL_SMTP_USERNAME`
@@ -159,6 +171,13 @@ Required secrets for GitHub-run mode:
 - `DENBUST_EMAIL_USE_TLS`
 - `DENBUST_EMAIL_SUBJECT`
 
+Optional discovery-engine secrets:
+
+- `DENBUST_BRAVE_SEARCH_API_KEY`
+- `DENBUST_EXA_API_KEY`
+- `DENBUST_GOOGLE_CSE_API_KEY`
+- `DENBUST_GOOGLE_CSE_ID`
+
 Expected `tfht_enforce_idx_state` structure:
 
 ```text
@@ -167,6 +186,7 @@ tfht_enforce_idx_state/
     ├── ingest/
     │   ├── seen.json
     │   ├── runs/
+    │   ├── logs/
     │   └── publication/
     ├── release/
     │   ├── runs/
@@ -207,6 +227,8 @@ Bootstrap notes:
 - `runs/` and `publication/` directories are created automatically by the workflows when needed
 - `logs/` is created automatically once ingest debug artifacts are written
 - a small `README.md` in the state repo is fine but optional
+- see [docs/discovery_operations.md](docs/discovery_operations.md) for the detailed discover /
+  ingest / backfill runbook and migration checklist
 
 ## Architecture Direction
 
@@ -589,6 +611,7 @@ For backup specifically:
 
 - [Agent Plan](.agent-plan.md) - Current operational priority pointer
 - [Repo Plan Summary](PLAN.md) - Human-friendly map of the main plan and active sub-plans
+- [Discovery Operations](docs/discovery_operations.md) - Local and GitHub Actions runbook for discover/ingest/backfill
 - [Product Definition](docs/product_def.md) - Full project background (Hebrew)
 - [MVP Spec](docs/MVP_SPEC.md) - Phase 1 technical scope
 - [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) - Task breakdown
@@ -600,6 +623,10 @@ For backup specifically:
   `README.md`, and the relevant human-facing plan document(s) in the same branch.
 - Those documentation updates should describe the state the repo is expected to be in after the PR
   is merged, not the pre-merge state from before the work landed.
+- `.agent-plan.md` is written as mainline truth using `Mainline Status` and `Task Ledger`; on a
+  branch it acts as the merge contract, and on `main` the same text is read as present-tense fact.
+- `.agent-plan.md` task ledger entries use only `[done]`, `[next]`, `[later]`, and `[blocked]`,
+  with exactly one `[next]` item at any time.
 - Plan-tracked PRs should not leave planning and docs surfaces one merge behind the code.
 
 ## Roadmap
