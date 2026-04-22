@@ -73,11 +73,8 @@ def build_discovery_queries(
 ) -> list[DiscoveryQuery]:
     """Build normalized discovery queries for enabled discovery engines."""
     keywords = _normalize_keywords(config.keywords)
-    taxonomy_specs = _taxonomy_query_specs()
-    if (
-        not keywords
-        and DiscoveryQueryKind.TAXONOMY_TARGETED not in config.discovery.default_query_kinds
-    ):
+    taxonomy_enabled = DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds
+    if not keywords and not taxonomy_enabled:
         return []
 
     current_time = now or datetime.now(UTC)
@@ -136,7 +133,8 @@ def build_discovery_queries(
                     )
                 )
 
-    if DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds:
+    if taxonomy_enabled:
+        taxonomy_specs = _taxonomy_query_specs()
         for term, tags in taxonomy_specs:
             taxonomy_key = (DiscoveryQueryKind.TAXONOMY_TARGETED, term)
             if taxonomy_key in seen_keys:

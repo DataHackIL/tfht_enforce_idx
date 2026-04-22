@@ -250,6 +250,31 @@ def test_build_backfill_queries_allows_taxonomy_only_generation() -> None:
     assert all(query.query_kind is DiscoveryQueryKind.TAXONOMY_TARGETED for query in queries)
 
 
+def test_build_backfill_queries_does_not_load_taxonomy_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backfill should avoid taxonomy helper work when taxonomy-targeted discovery is disabled."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: (_ for _ in ()).throw(AssertionError("should not load taxonomy specs")),
+    )
+
+    config = Config(
+        keywords=["זנות"],
+        discovery={"default_query_kinds": ["broad", "source_targeted", "social_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    assert queries
+    assert all(query.query_kind is not DiscoveryQueryKind.TAXONOMY_TARGETED for query in queries)
+
+
 def test_build_backfill_queries_deduplicates_social_targeted_entries() -> None:
     """Duplicate normalized keywords should not emit duplicate social-targeted backfill queries."""
     config = Config(

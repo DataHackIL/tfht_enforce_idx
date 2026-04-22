@@ -261,6 +261,25 @@ def test_build_discovery_queries_returns_empty_when_only_keyword_driven_kinds_ar
     assert build_discovery_queries(config, days=3) == []
 
 
+def test_build_discovery_queries_does_not_load_taxonomy_when_disabled(monkeypatch) -> None:
+    """Taxonomy helpers should not run when taxonomy-targeted discovery is disabled."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: (_ for _ in ()).throw(AssertionError("should not load taxonomy specs")),
+    )
+
+    config = Config(
+        keywords=["זנות"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["broad", "source_targeted", "social_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    assert queries
+    assert all(query.query_kind is not DiscoveryQueryKind.TAXONOMY_TARGETED for query in queries)
+
+
 def test_enabled_source_domains_returns_only_enabled_resolved_domains() -> None:
     """Public source-domain resolution should expose reusable enabled discovery domains."""
     config = Config(
