@@ -65,6 +65,13 @@ def validate_agent_plan(path: Path) -> list[str]:
     task_ledger = _extract_section(lines, TASK_LEDGER_HEADING)
     next_count = 0
     for line in task_ledger:
+        if not line.strip():
+            continue
+        if line.startswith((" ", "\t")):
+            continue
+        if line.startswith("- ") and not line.startswith("- ["):
+            errors.append(f"invalid task ledger entry format: {line}")
+            continue
         if not line.startswith("- ["):
             continue
         match = TASK_STATUS_RE.match(line)

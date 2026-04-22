@@ -105,6 +105,9 @@ jobs:
           if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/runs" ]]; then
             git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/runs"
           fi
+          if [[ -f "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/seen.json" ]]; then
+            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/seen.json"
+          fi
           if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/logs" ]]; then
             git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/logs"
           fi
