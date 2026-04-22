@@ -111,6 +111,33 @@ def test_taxonomy_discovery_terms_can_exclude_adjacent_non_index_terms() -> None
     assert ("pimping_prostitution", "nordic_model_law", "המודל הנורדי") not in terms
 
 
+def test_taxonomy_discovery_terms_skip_blank_aliases() -> None:
+    taxonomy = TaxonomyDefinition(
+        version="1",
+        categories=[
+            CategoryDefinition(
+                id="cat",
+                label_he="קטגוריה",
+                subcategories=[
+                    SubcategoryDefinition(
+                        id="leaf",
+                        label_he="מונח בסיס",
+                        index_relevant=True,
+                        discovery_terms_he=["", "   ", "מונח נוסף"],
+                        legacy_category=Category.BROTHEL,
+                        legacy_sub_category=SubCategory.CLOSURE,
+                    )
+                ],
+            )
+        ],
+    )
+
+    assert taxonomy.discovery_terms() == [
+        ("cat", "leaf", "מונח בסיס"),
+        ("cat", "leaf", "מונח נוסף"),
+    ]
+
+
 def test_taxonomy_validate_unique_ids_rejects_duplicates() -> None:
     duplicate_category = TaxonomyDefinition(
         version="1",

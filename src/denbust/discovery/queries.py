@@ -73,7 +73,11 @@ def build_discovery_queries(
 ) -> list[DiscoveryQuery]:
     """Build normalized discovery queries for enabled discovery engines."""
     keywords = _normalize_keywords(config.keywords)
-    if not keywords:
+    taxonomy_specs = _taxonomy_query_specs()
+    if (
+        not keywords
+        and DiscoveryQueryKind.TAXONOMY_TARGETED not in config.discovery.default_query_kinds
+    ):
         return []
 
     current_time = now or datetime.now(UTC)
@@ -117,23 +121,6 @@ def build_discovery_queries(
                 )
                 seen_keys.add(source_key)
 
-        if DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds:
-            for term, tags in _taxonomy_query_specs():
-                taxonomy_key = (DiscoveryQueryKind.TAXONOMY_TARGETED, term)
-                if taxonomy_key in seen_keys:
-                    continue
-                queries.append(
-                    DiscoveryQuery(
-                        query_text=term,
-                        language="he",
-                        date_from=date_from,
-                        date_to=date_to,
-                        query_kind=DiscoveryQueryKind.TAXONOMY_TARGETED,
-                        tags=tags,
-                    )
-                )
-                seen_keys.add(taxonomy_key)
-
         if DiscoveryQueryKind.SOCIAL_TARGETED in config.discovery.default_query_kinds:
             for domain in SOCIAL_DISCOVERY_DOMAINS:
                 queries.append(
@@ -148,5 +135,22 @@ def build_discovery_queries(
                         tags=["social", domain],
                     )
                 )
+
+    if DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds:
+        for term, tags in taxonomy_specs:
+            taxonomy_key = (DiscoveryQueryKind.TAXONOMY_TARGETED, term)
+            if taxonomy_key in seen_keys:
+                continue
+            queries.append(
+                DiscoveryQuery(
+                    query_text=term,
+                    language="he",
+                    date_from=date_from,
+                    date_to=date_to,
+                    query_kind=DiscoveryQueryKind.TAXONOMY_TARGETED,
+                    tags=tags,
+                )
+            )
+            seen_keys.add(taxonomy_key)
 
     return queries

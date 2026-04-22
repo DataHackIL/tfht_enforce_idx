@@ -224,7 +224,7 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
 
 
 def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> None:
-    """Backfill query generation should short-circuit when no usable keywords remain."""
+    """Backfill query generation should short-circuit when no usable keyword-driven queries remain."""
     config = Config(keywords=["", "   "], discovery={"default_query_kinds": ["source_targeted"]})
     window = plan_backfill_windows(
         date_from=datetime(2026, 1, 1, tzinfo=UTC),
@@ -233,6 +233,21 @@ def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> 
     )[0]
 
     assert build_backfill_queries(config, window=window) == []
+
+
+def test_build_backfill_queries_allows_taxonomy_only_generation() -> None:
+    """Backfill should still emit taxonomy-targeted queries when operator keywords are blank."""
+    config = Config(keywords=["", "   "], discovery={"default_query_kinds": ["taxonomy_targeted"]})
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    assert queries
+    assert all(query.query_kind is DiscoveryQueryKind.TAXONOMY_TARGETED for query in queries)
 
 
 def test_build_backfill_queries_deduplicates_social_targeted_entries() -> None:
@@ -268,7 +283,7 @@ def test_build_backfill_queries_deduplicates_taxonomy_terms(
                 ("cat_b", "leaf_b", "מונח משותף"),
             ]
 
-    monkeypatch.setattr("denbust.discovery.backfill.default_taxonomy", lambda: _FakeTaxonomy())
+    monkeypatch.setattr("denbust.discovery.queries.default_taxonomy", lambda: _FakeTaxonomy())
 
     config = Config(
         keywords=["זנות"],

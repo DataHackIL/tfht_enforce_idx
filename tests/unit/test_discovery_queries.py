@@ -119,14 +119,17 @@ def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() 
 
 
 def test_build_discovery_queries_returns_empty_for_empty_keyword_set() -> None:
-    """If all keywords collapse away, no discovery queries should be built."""
+    """If all keywords collapse away, only taxonomy-targeted queries should remain."""
     config = Config(
         keywords=["", "   "],
         sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
         discovery={"enabled": True},
     )
 
-    assert build_discovery_queries(config, days=3) == []
+    queries = build_discovery_queries(config, days=3)
+
+    assert queries
+    assert all(query.query_kind is DiscoveryQueryKind.TAXONOMY_TARGETED for query in queries)
 
 
 def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> None:
@@ -223,6 +226,17 @@ def test_build_discovery_queries_deduplicates_taxonomy_terms(monkeypatch) -> Non
     assert "category:cat_b" in shared_query.tags
     assert "subcategory:leaf_a" in shared_query.tags
     assert "subcategory:leaf_b" in shared_query.tags
+
+
+def test_build_discovery_queries_returns_empty_when_only_keyword_driven_kinds_are_enabled() -> None:
+    """Empty keyword sets should short-circuit when taxonomy-targeted discovery is disabled."""
+    config = Config(
+        keywords=["", "   "],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["broad", "source_targeted", "social_targeted"]},
+    )
+
+    assert build_discovery_queries(config, days=3) == []
 
 
 def test_enabled_source_domains_returns_only_enabled_resolved_domains() -> None:
