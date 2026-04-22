@@ -304,6 +304,34 @@ def test_build_backfill_queries_deduplicates_taxonomy_terms(
     assert "window:0" in queries[0].tags
 
 
+def test_build_backfill_queries_skips_duplicate_taxonomy_specs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated taxonomy specs should hit the backfill seen-key guard only once."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [
+            ("מונח משותף", ["taxonomy", "category:cat_a"]),
+            ("מונח משותף", ["taxonomy", "category:cat_b"]),
+        ],
+    )
+
+    config = Config(
+        keywords=[],
+        discovery={"default_query_kinds": ["taxonomy_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    assert len(queries) == 1
+    assert queries[0].query_text == "מונח משותף"
+
+
 def test_backfill_metadata_serializes_batch_and_window() -> None:
     """Backfill metadata should preserve stable batch/window identifiers."""
     window = plan_backfill_windows(

@@ -228,6 +228,28 @@ def test_build_discovery_queries_deduplicates_taxonomy_terms(monkeypatch) -> Non
     assert "subcategory:leaf_b" in shared_query.tags
 
 
+def test_build_discovery_queries_skips_duplicate_taxonomy_specs(monkeypatch) -> None:
+    """Repeated taxonomy specs should hit the seen-key guard only once."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [
+            ("מונח משותף", ["taxonomy", "category:cat_a"]),
+            ("מונח משותף", ["taxonomy", "category:cat_b"]),
+        ],
+    )
+
+    config = Config(
+        keywords=[],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["taxonomy_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    assert len(queries) == 1
+    assert queries[0].query_text == "מונח משותף"
+
+
 def test_build_discovery_queries_returns_empty_when_only_keyword_driven_kinds_are_enabled() -> None:
     """Empty keyword sets should short-circuit when taxonomy-targeted discovery is disabled."""
     config = Config(
