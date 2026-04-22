@@ -280,6 +280,7 @@ class DiscoveryConfig(BaseModel):
         default_factory=lambda: [
             DiscoveryQueryKind.BROAD,
             DiscoveryQueryKind.SOURCE_TARGETED,
+            DiscoveryQueryKind.TAXONOMY_TARGETED,
             DiscoveryQueryKind.SOCIAL_TARGETED,
         ]
     )
@@ -356,11 +357,19 @@ DEFAULT_KEYWORDS: list[str] = [
     "סרסור",  # pimping
     "סחר בבני אדם",  # human trafficking
     "צו סגירה",  # closure order
+    "צו הגבלת שימוש",  # use restriction order
     "ליווי",  # escort
     "נערות ליווי",  # escort girls
     "תעשיית המין",  # sex industry
     "עיסוי חשוד",  # suspicious massage
     "זירת זנות",  # prostitution site
+    "נישואין בכפייה",  # forced marriage
+    "עבדות מינית",  # sexual slavery
+    "זנות מקוונת",  # online prostitution
+    "קנס צריכת זנות",  # prostitution-consumption fine
+    "החזקת מקום לשם זנות",  # keeping a place for prostitution
+    "השכרת מקום לשם זנות",  # renting a place for prostitution
+    "פרסום זנות",  # advertising prostitution
 ]
 
 

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
+from denbust.taxonomy import default_taxonomy
 
 _SCRAPER_SOURCE_DOMAINS: dict[str, str] = {
     "mako": "www.mako.co.il",
@@ -51,6 +52,17 @@ def enabled_source_domains(config: Config) -> list[tuple[str, str]]:
             continue
         source_domains.append((source.name, domain))
     return source_domains
+
+
+def _taxonomy_query_specs() -> list[tuple[str, list[str]]]:
+    specs_by_term: dict[str, set[str]] = {}
+    for category_id, subcategory_id, term in default_taxonomy().discovery_terms():
+        tags = specs_by_term.setdefault(term, set())
+        tags.update({"taxonomy", f"category:{category_id}", f"subcategory:{subcategory_id}"})
+    return [
+        (term, sorted(tags))
+        for term, tags in sorted(specs_by_term.items(), key=lambda item: item[0])
+    ]
 
 
 def build_discovery_queries(
@@ -104,6 +116,23 @@ def build_discovery_queries(
                     )
                 )
                 seen_keys.add(source_key)
+
+        if DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds:
+            for term, tags in _taxonomy_query_specs():
+                taxonomy_key = (DiscoveryQueryKind.TAXONOMY_TARGETED, term)
+                if taxonomy_key in seen_keys:
+                    continue
+                queries.append(
+                    DiscoveryQuery(
+                        query_text=term,
+                        language="he",
+                        date_from=date_from,
+                        date_to=date_to,
+                        query_kind=DiscoveryQueryKind.TAXONOMY_TARGETED,
+                        tags=tags,
+                    )
+                )
+                seen_keys.add(taxonomy_key)
 
         if DiscoveryQueryKind.SOCIAL_TARGETED in config.discovery.default_query_kinds:
             for domain in SOCIAL_DISCOVERY_DOMAINS:

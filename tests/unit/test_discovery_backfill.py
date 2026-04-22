@@ -167,7 +167,14 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
                 "url": "https://news.walla.co.il/feed",
             },
         ],
-        discovery={"default_query_kinds": ["broad", "source_targeted", "social_targeted"]},
+        discovery={
+            "default_query_kinds": [
+                "broad",
+                "source_targeted",
+                "taxonomy_targeted",
+                "social_targeted",
+            ]
+        },
     )
     window = BackfillBatch(
         requested_date_from=datetime(2026, 1, 1, tzinfo=UTC),
@@ -186,15 +193,31 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     source_queries = [
         query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
     ]
+    taxonomy_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.TAXONOMY_TARGETED
+    ]
     social_queries = [
         query for query in queries if query.query_kind is DiscoveryQueryKind.SOCIAL_TARGETED
     ]
 
     assert [query.query_text for query in broad_queries] == ["בית בושת", "סחר"]
     assert len(source_queries) == 4
+    assert taxonomy_queries
     assert len(social_queries) == 2
     assert {query.source_hint for query in source_queries} == {"ynet", "walla"}
     assert all(query.preferred_domains for query in source_queries)
+    assert all(not query.preferred_domains for query in taxonomy_queries)
+    assert any(
+        query.query_text == "צו הגבלת שימוש"
+        and {
+            "backfill",
+            "taxonomy",
+            "category:brothels",
+            "subcategory:administrative_closure",
+            "window:0",
+        }.issubset(set(query.tags))
+        for query in taxonomy_queries
+    )
     assert {tuple(query.preferred_domains) for query in social_queries} == {
         ("www.facebook.com",),
     }
@@ -231,6 +254,39 @@ def test_build_backfill_queries_deduplicates_social_targeted_entries() -> None:
     ]
     assert len(social_queries) == 1
     assert social_queries[0].preferred_domains == ["www.facebook.com"]
+
+
+def test_build_backfill_queries_deduplicates_taxonomy_terms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Duplicate taxonomy terms should collapse into one backfill query with merged tags."""
+
+    class _FakeTaxonomy:
+        def discovery_terms(self) -> list[tuple[str, str, str]]:
+            return [
+                ("cat_a", "leaf_a", "מונח משותף"),
+                ("cat_b", "leaf_b", "מונח משותף"),
+            ]
+
+    monkeypatch.setattr("denbust.discovery.backfill.default_taxonomy", lambda: _FakeTaxonomy())
+
+    config = Config(
+        keywords=["זנות"],
+        discovery={"default_query_kinds": ["taxonomy_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    assert len(queries) == 1
+    assert queries[0].query_text == "מונח משותף"
+    assert "category:cat_a" in queries[0].tags
+    assert "category:cat_b" in queries[0].tags
+    assert "window:0" in queries[0].tags
 
 
 def test_backfill_metadata_serializes_batch_and_window() -> None:

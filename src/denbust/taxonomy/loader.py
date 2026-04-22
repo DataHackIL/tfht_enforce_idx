@@ -20,6 +20,7 @@ class SubcategoryDefinition(BaseModel):
     label_he: str
     label_en: str | None = None
     index_relevant: bool
+    discovery_terms_he: list[str] = Field(default_factory=list)
     legacy_category: Category
     legacy_sub_category: SubCategory | None = None
     example_urls: list[str] = Field(default_factory=list)
@@ -40,6 +41,8 @@ class TaxonomyDefinition(BaseModel):
     version: str
     asset_name: str = TFHT_TYPOLOGY_V1
     categories: list[CategoryDefinition]
+
+    _DISCOVERY_ADJACENT_NON_INDEX_SUBCATEGORY_IDS = frozenset({"nordic_model_law"})
 
     def category_ids(self) -> list[str]:
         """Return all category identifiers in order."""
@@ -98,6 +101,33 @@ class TaxonomyDefinition(BaseModel):
             options = " | ".join(f"{leaf.id} ({leaf.label_he})" for leaf in category.subcategories)
             lines.append(f"- {category.id} ({category.label_he}) -> {options}")
         return "\n".join(lines)
+
+    def discovery_terms(
+        self,
+        *,
+        include_adjacent_non_index: bool = True,
+    ) -> list[tuple[str, str, str]]:
+        """Return `(category_id, subcategory_id, term_he)` discovery terms."""
+        terms: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for category in self.categories:
+            for leaf in category.subcategories:
+                include_leaf = leaf.index_relevant or (
+                    include_adjacent_non_index
+                    and leaf.id in self._DISCOVERY_ADJACENT_NON_INDEX_SUBCATEGORY_IDS
+                )
+                if not include_leaf:
+                    continue
+                for raw_term in [leaf.label_he, *leaf.discovery_terms_he]:
+                    term = raw_term.strip()
+                    if not term:
+                        continue
+                    key = (category.id, leaf.id, term)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    terms.append(key)
+        return terms
 
     def validate_unique_ids(self) -> None:
         """Validate category/subcategory ids are unique."""
