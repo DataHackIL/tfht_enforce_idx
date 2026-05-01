@@ -22,7 +22,7 @@ from denbust.sources.haaretz import (
 from denbust.sources.ice import IceScraper, create_ice_source
 from denbust.sources.maariv import MaarivScraper, create_maariv_source
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source
-from denbust.sources.rss import RSSSource
+from denbust.sources.rss import RSSSource, YnetRSSSource, diagnose_ynet_category_html
 from denbust.sources.walla import WallaArchiveEntry, WallaScraper, create_walla_source
 
 # Load fixture files
@@ -69,6 +69,24 @@ def format_walla_pub_date(value: datetime) -> str:
     return (
         f"עודכן: {value.hour:02d}:{value.minute:02d} {value.day:02d}/{value.month:02d}/{value.year}"
     )
+
+
+def ynet_category_fixture(*, title: str, url: str, snippet: str, date: str = "01.05.26") -> str:
+    """Build a minimal Ynet category card fixture."""
+    return f"""
+    <html>
+      <body>
+        <div class="slotView">
+          <a href="{url}"><img alt="" /></a>
+          <div class="textDiv">
+            <div class="slotTitle"><a href="{url}">{title}</a></div>
+            <div class="slotSubTitle"><a href="{url}">{snippet}</a></div>
+            <div class="moreDetails"><span class="dateView"> {date} </span></div>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
 
 
 def load_recent_walla_archive_fixture() -> str:
@@ -3642,6 +3660,141 @@ class TestRSSSource:
 
         assert len(articles) == 1
         assert articles[0].title.startswith("חשד לבית בושת")
+
+    def test_parse_ynet_category_page_cards(self) -> None:
+        """Ynet category parsing should extract card text, dates, and article URLs."""
+        parsed = diagnose_ynet_category_html(
+            ynet_category_fixture(
+                title="חשד לבית בושת בחיפה",
+                url="https://www.ynet.co.il/news/article/rkpeb8zbwg?utm_source=front",
+                snippet="המשטרה עצרה חשודים לאחר פשיטה על דירה.",
+            ),
+            cutoff=datetime(2026, 1, 1, tzinfo=UTC),
+            keywords=["זנות"],
+        )
+
+        assert parsed.container_count == 1
+        assert parsed.parsed_article_count == 1
+        assert parsed.keyword_match_count == 1
+        assert parsed.article_urls == ["https://www.ynet.co.il/news/article/rkpeb8zbwg"]
+        assert parsed.articles[0].title == "חשד לבית בושת בחיפה"
+        assert parsed.articles[0].date == datetime(2026, 5, 1, tzinfo=UTC)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ynet_category_backstop_deduplicates_rss_urls(self) -> None:
+        """Ynet category articles should supplement RSS without duplicating canonical URLs."""
+        rss_content = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>חשד לבית בושת בחיפה</title>
+              <link>https://www.ynet.co.il/news/article/shared?utm_source=rss</link>
+              <description>המשטרה עצרה חשודים.</description>
+              <pubDate>Fri, 01 May 2026 10:00:00 +0200</pubDate>
+            </item>
+          </channel>
+        </rss>"""
+        category_html = ynet_category_fixture(
+            title="חשד לבית בושת בחיפה",
+            url="https://www.ynet.co.il/news/article/shared",
+            snippet="המשטרה עצרה חשודים.",
+        )
+
+        respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
+        respx.get("https://www.ynet.co.il/news/category/190").mock(
+            return_value=Response(200, text=category_html)
+        )
+
+        source = YnetRSSSource("https://ynet.co.il/feed.xml")
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
+
+        assert len(articles) == 1
+        assert str(articles[0].url) == "https://www.ynet.co.il/news/article/shared?utm_source=rss"
+        debug_state = source.get_debug_state()
+        assert debug_state is not None
+        assert debug_state["rss"]["status"] == "ok"
+        assert debug_state["category"]["status"] == "ok"
+        assert debug_state["result"]["deduped_category_article_count"] == 0
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ynet_category_backstop_handles_http_failure(self) -> None:
+        """A category HTTP failure should not discard RSS results."""
+        rss_content = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>חשד לבית בושת בחיפה</title>
+              <link>https://www.ynet.co.il/news/article/rssonly</link>
+              <description>המשטרה עצרה חשודים.</description>
+              <pubDate>Fri, 01 May 2026 10:00:00 +0200</pubDate>
+            </item>
+          </channel>
+        </rss>"""
+
+        respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
+        respx.get("https://www.ynet.co.il/news/category/190").mock(return_value=Response(503))
+
+        source = YnetRSSSource("https://ynet.co.il/feed.xml")
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
+
+        assert len(articles) == 1
+        debug_state = source.get_debug_state()
+        assert debug_state is not None
+        assert debug_state["category"]["status"] == "http_failure"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ynet_category_backstop_records_parse_zero(self) -> None:
+        """A fetched category page with no parseable cards should be visible in debug state."""
+        respx.get("https://ynet.co.il/feed.xml").mock(
+            return_value=Response(200, text="<rss version='2.0'><channel /></rss>")
+        )
+        respx.get("https://www.ynet.co.il/news/category/190").mock(
+            return_value=Response(200, text="<html><body>no article cards</body></html>")
+        )
+
+        source = YnetRSSSource("https://ynet.co.il/feed.xml")
+        articles = await source.fetch(days=TEST_LOOKBACK_DAYS, keywords=["זנות"])
+
+        assert articles == []
+        debug_state = source.get_debug_state()
+        assert debug_state is not None
+        assert debug_state["rss"]["status"] == "empty_or_stale"
+        assert debug_state["category"]["status"] == "parse_zero"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ynet_category_backstop_records_rss_low_coverage(self) -> None:
+        """RSS low coverage should mean recent feed entries survived but did not match keywords."""
+        recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        rss_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>חדשות כלליות</title>
+              <link>https://www.ynet.co.il/news/article/nonmatch</link>
+              <description>ללא התאמה</description>
+              <pubDate>{recent}</pubDate>
+            </item>
+          </channel>
+        </rss>"""
+
+        respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
+        respx.get("https://www.ynet.co.il/news/category/190").mock(
+            return_value=Response(200, text="<html><body>no article cards</body></html>")
+        )
+
+        source = YnetRSSSource("https://ynet.co.il/feed.xml")
+        articles = await source.fetch(days=21, keywords=["זנות"])
+
+        assert articles == []
+        debug_state = source.get_debug_state()
+        assert debug_state is not None
+        assert debug_state["rss"]["status"] == "low_coverage"
+        assert debug_state["rss"]["recent_entry_count"] == 1
+        assert debug_state["rss"]["keyword_match_count"] == 0
 
     def test_effective_keywords_for_generic_rss_source_deduplicates_and_skips_blank_values(
         self,

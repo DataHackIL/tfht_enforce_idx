@@ -47,6 +47,8 @@ Planned future datasets:
 - Runs Brave, Exa, and Google CSE as external discovery engines feeding the durable candidate layer
 - Adds taxonomy-targeted discovery queries from the packaged TFHT taxonomy for broader
   search-engine recall
+- Keeps Ynet RSS as the primary משפט ופלילים source while adding a non-browser category-page
+  backstop for source-native recall
 - Emits Facebook-targeted `social_targeted` search queries and retains those results as non-scrapeable reference candidates
 - Plans historical backfill windows and persists durable `backfill_batches` metadata for slow-drain
   discovery/scrape work
@@ -330,6 +332,8 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   monitoring and review, while staying excluded from public release by default
 - discovery diagnostics now report candidate-basis counts so operators can distinguish full-page,
   partial-page, and search-result-only retention
+- Ynet source-health diagnostics now report separate RSS and category-page checks, distinguishing
+  RSS low coverage, category HTTP failure, category parse-zero, and category keyword-zero cases
 
 ## Config Layout
 

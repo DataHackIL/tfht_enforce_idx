@@ -113,7 +113,7 @@ from denbust.sources.haaretz import create_haaretz_source
 from denbust.sources.ice import create_ice_source
 from denbust.sources.maariv import create_maariv_source
 from denbust.sources.mako import create_mako_source
-from denbust.sources.rss import RSSSource
+from denbust.sources.rss import RSSSource, YnetRSSSource
 from denbust.sources.walla import create_walla_source
 from denbust.store.run_snapshots import (
     write_run_debug_log,
@@ -179,7 +179,10 @@ def create_sources(config: Config) -> list[Source]:
 
         if source_cfg.type == SourceType.RSS:
             if source_cfg.url:
-                sources.append(RSSSource(source_name=source_cfg.name, feed_url=source_cfg.url))
+                if source_cfg.name == "ynet":
+                    sources.append(YnetRSSSource(feed_url=source_cfg.url))
+                else:
+                    sources.append(RSSSource(source_name=source_cfg.name, feed_url=source_cfg.url))
             else:
                 logger.warning("RSS source %s missing URL, skipping", source_cfg.name)
 

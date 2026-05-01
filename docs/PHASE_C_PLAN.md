@@ -471,6 +471,11 @@ TFHT taxonomy. That wider term set is intentionally limited to search-engine dis
 manual backfill path; source-native ingest and source diagnostics still use the coarse operator
 keyword list.
 
+Ynet source-native ingest now keeps the משפט ופלילים RSS feed as primary and supplements it with a
+non-browser category-page backstop from `https://www.ynet.co.il/news/category/190`. The backstop
+parses category cards conservatively, deduplicates against RSS by canonical URL, and exposes
+separate RSS/category-page source-health signals.
+
 The one-time 90-day catch-up run remains an operator-run manual backfill using the existing
 `backfill_discover` and `backfill_scrape` jobs with the default 7-day backfill slicing.
 
