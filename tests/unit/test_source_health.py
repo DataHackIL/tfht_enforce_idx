@@ -2478,6 +2478,58 @@ async def test_probe_mako_reports_unexpected_redirect_after_keyword_hit(
 
 
 @pytest.mark.asyncio
+async def test_probe_mako_redirect_failure_mode_overrides_parse_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    article = SimpleNamespace(url="https://www.mako.co.il/men-men_news/Article-123.htm")
+
+    class FakeScraper:
+        def __init__(self, *, rate_limit_delay_seconds: float = 0.0) -> None:
+            del rate_limit_delay_seconds
+
+        async def _open_browser_session(self) -> SimpleNamespace:
+            return SimpleNamespace(page=SimpleNamespace(url="https://www.mako.co.il/Search"))
+
+        async def _close_browser_session(self, _session: object) -> None:
+            return None
+
+        def _build_search_url(self, keyword: str) -> str:
+            return f"https://www.mako.co.il/Search?searchstring_input={keyword}"
+
+        async def _fetch_search_html(self, session: SimpleNamespace, keyword: str) -> str:
+            del keyword
+            session.page.url = "https://example.com/redirected-search"
+            return "<html><body>redirect body</body></html>"
+
+        async def _fetch_section_html(self, session: SimpleNamespace, _url: str) -> str:
+            session.page.url = "https://www.mako.co.il/men-men_news"
+            return "<html><body><article>candidate</article></body></html>"
+
+        def _parse_search_results(self, html: str | None, cutoff: datetime) -> list[object]:
+            del html, cutoff
+            return []
+
+        def _parse_article_item(self, item: object, cutoff: datetime) -> object:
+            del item, cutoff
+            return article
+
+        def _matches_keywords(self, candidate: object, keywords: list[str]) -> bool:
+            del keywords
+            return candidate is article
+
+    monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
+
+    result = await source_health._probe_mako(days=21, sample_keywords=["בית בושת"])
+
+    search_check = next(check for check in result.checks if check.name == "search:בית בושת")
+    assert result.failure_bucket == FailureBucket.UNEXPECTED_REDIRECT
+    assert (
+        search_check.details["failure_mode"]
+        == source_health.MakoFailureMode.REDIRECT_OR_ANTI_BOT.value
+    )
+
+
+@pytest.mark.asyncio
 async def test_probe_mako_reports_keyword_zeroing_with_search_hits_and_section_parse_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

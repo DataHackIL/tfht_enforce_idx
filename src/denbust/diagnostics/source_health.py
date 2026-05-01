@@ -955,7 +955,7 @@ async def _probe_mako(
     if unexpected_redirect:
         for check in checks:
             if _mako_check_redirected(check):
-                check.details.setdefault("failure_mode", MakoFailureMode.REDIRECT_OR_ANTI_BOT.value)
+                check.details["failure_mode"] = MakoFailureMode.REDIRECT_OR_ANTI_BOT.value
         return _live_result(
             source_name="mako",
             status=DiagnosticStatus.WARN,
