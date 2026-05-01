@@ -301,11 +301,7 @@ class YnetRSSSource(RSSSource):
             "rss": {"status": "not_run", "requested_url": self._feed_url},
             "category": {"status": "not_run", "requested_url": self._category_url},
         }
-        rss_articles = await super().fetch(days=days, keywords=keywords)
-        rss_status = self._debug_state.get("rss", {}).get("status")
-        if rss_status == "ok" and not rss_articles:
-            self._debug_state["rss"]["status"] = "low_coverage"
-        self._debug_state["rss"]["article_count"] = len(rss_articles)
+        rss_articles = await self._fetch_rss_articles(days=days, keywords=keywords)
 
         category_articles = await self._fetch_category_articles(days=days, keywords=keywords)
         rss_urls = {canonicalize_news_url(str(article.url)) for article in rss_articles}
@@ -325,6 +321,56 @@ class YnetRSSSource(RSSSource):
             "unique_article_count": len(rss_articles) + len(deduped_category_articles),
         }
         return [*rss_articles, *deduped_category_articles]
+
+    async def _fetch_rss_articles(self, *, days: int, keywords: list[str]) -> list[RawArticle]:
+        content = await self._fetch_feed()
+        if not content:
+            self._debug_state["rss"]["article_count"] = 0
+            return []
+
+        feed = feedparser.parse(content)
+        parse_warning = None
+        if feed.bozo and feed.bozo_exception:
+            parse_warning = str(feed.bozo_exception)
+            logger.warning(f"Feed parsing warning for {self._name}: {feed.bozo_exception}")
+
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        effective_keywords = effective_keywords_for_source(self._name, keywords)
+        entries = list(feed.entries)
+        recent_entry_count = 0
+        articles: list[RawArticle] = []
+
+        for entry in entries:
+            date = self._parse_date(entry)
+            if date is None:
+                date = datetime.now(UTC)
+            if date >= cutoff:
+                recent_entry_count += 1
+
+            article = self._parse_entry(entry, cutoff, effective_keywords)
+            if article is not None:
+                articles.append(article)
+
+        if articles:
+            status = "ok"
+        elif recent_entry_count > 0:
+            status = "low_coverage"
+        else:
+            status = "empty_or_stale"
+
+        self._debug_state["rss"].update(
+            {
+                "status": status,
+                "total_entry_count": len(entries),
+                "recent_entry_count": recent_entry_count,
+                "keyword_match_count": len(articles),
+                "article_count": len(articles),
+                "bozo": bool(getattr(feed, "bozo", 0)),
+                "bozo_exception": parse_warning,
+            }
+        )
+        logger.info(f"Found {len(articles)} matching articles from {self._name}")
+        return articles
 
     async def _fetch_feed(self) -> str | None:
         try:
@@ -378,7 +424,9 @@ class YnetRSSSource(RSSSource):
             keywords=keywords,
             category_url=self._category_url,
         )
-        if parsed.parsed_article_count == 0:
+        if parsed.parsed_article_count == 0 and parsed.stale_article_count > 0:
+            status = "stale"
+        elif parsed.parsed_article_count == 0:
             status = "parse_zero"
         elif parsed.keyword_match_count == 0:
             status = "keyword_zero"

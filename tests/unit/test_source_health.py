@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -48,6 +48,28 @@ def _write_summary(logs_dir: Path, stem: str, payload: dict[str, object]) -> Pat
     path = logs_dir / f"{stem}.summary.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
+
+
+def _ynet_category_card(
+    *,
+    title: str = "חשד לבית בושת",
+    snippet: str = "המשטרה עצרה חשודים",
+    date: datetime | None = None,
+) -> str:
+    value = date or datetime.now(UTC)
+    date_text = value.strftime("%d.%m.%y")
+    return f"""
+    <div class="slotView">
+      <a href="https://www.ynet.co.il/news/article/category1"></a>
+      <div class="slotTitle">
+        <a href="https://www.ynet.co.il/news/article/category1">{title}</a>
+      </div>
+      <div class="slotSubTitle">
+        <a href="https://www.ynet.co.il/news/article/category1">{snippet}</a>
+      </div>
+      <span class="dateView">{date_text}</span>
+    </div>
+    """
 
 
 def test_maariv_diagnostic_helper_reports_public_parse_counts() -> None:
@@ -458,18 +480,7 @@ async def test_probe_ynet_distinguishes_keyword_zeroing(
                 final_url=url,
                 status_code=200,
                 content_type="text/html",
-                text="""
-                <div class="slotView">
-                  <a href="https://www.ynet.co.il/news/article/category1"></a>
-                  <div class="slotTitle">
-                    <a href="https://www.ynet.co.il/news/article/category1">חשד לבית בושת</a>
-                  </div>
-                  <div class="slotSubTitle">
-                    <a href="https://www.ynet.co.il/news/article/category1">המשטרה עצרה חשודים</a>
-                  </div>
-                  <span class="dateView">01.05.26</span>
-                </div>
-                """,
+                text=_ynet_category_card(),
             )
         return _FetchResult(
             requested_url=url,
@@ -525,18 +536,7 @@ async def test_probe_ynet_distinguishes_unexpected_redirect(
                 final_url=url,
                 status_code=200,
                 content_type="text/html",
-                text="""
-                <div class="slotView">
-                  <a href="https://www.ynet.co.il/news/article/category1"></a>
-                  <div class="slotTitle">
-                    <a href="https://www.ynet.co.il/news/article/category1">חשד לבית בושת</a>
-                  </div>
-                  <div class="slotSubTitle">
-                    <a href="https://www.ynet.co.il/news/article/category1">המשטרה עצרה חשודים</a>
-                  </div>
-                  <span class="dateView">01.05.26</span>
-                </div>
-                """,
+                text=_ynet_category_card(),
             )
         return _FetchResult(
             requested_url=url,
@@ -589,18 +589,7 @@ async def test_probe_ynet_reports_success(monkeypatch: pytest.MonkeyPatch) -> No
                 final_url=url,
                 status_code=200,
                 content_type="text/html",
-                text="""
-                <div class="slotView">
-                  <a href="https://www.ynet.co.il/news/article/category1"></a>
-                  <div class="slotTitle">
-                    <a href="https://www.ynet.co.il/news/article/category1">חשד לבית בושת</a>
-                  </div>
-                  <div class="slotSubTitle">
-                    <a href="https://www.ynet.co.il/news/article/category1">המשטרה עצרה חשודים</a>
-                  </div>
-                  <span class="dateView">01.05.26</span>
-                </div>
-                """,
+                text=_ynet_category_card(),
             )
         return _FetchResult(
             requested_url=url,
@@ -687,6 +676,108 @@ async def test_probe_ynet_distinguishes_category_http_failure(
     assert result.failure_bucket == FailureBucket.HTTP_FETCH_FAILED
     category_check = next(check for check in result.checks if check.name == "category_page")
     assert category_check.details["failure_bucket"] == FailureBucket.HTTP_FETCH_FAILED.value
+
+
+@pytest.mark.asyncio
+async def test_probe_ynet_top_level_bucket_prefers_failure_over_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        if url == source_health.rss_source.YNET_CATEGORY_URL:
+            raise httpx.ConnectError("category boom")
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="application/rss+xml",
+            text="<rss />",
+        )
+
+    def fake_parse(text: str) -> object:
+        del text
+        return SimpleNamespace(
+            entries=[
+                {
+                    "link": "https://example.com/1",
+                    "title": "חדשות כלליות",
+                    "summary": "ללא התאמה",
+                    "published": recent,
+                }
+            ],
+            bozo=False,
+            bozo_exception=None,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+    monkeypatch.setattr(source_health.feedparser, "parse", fake_parse)
+
+    result = await source_health._probe_ynet(
+        source_cfg=SimpleNamespace(url="https://example.com/rss"),
+        days=21,
+        sample_keywords=["זנות"],
+    )
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.HTTP_FETCH_FAILED
+
+
+@pytest.mark.asyncio
+async def test_probe_ynet_distinguishes_stale_category_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    stale_category_date = datetime.now(UTC) - timedelta(days=30)
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html"
+            if url == source_health.rss_source.YNET_CATEGORY_URL
+            else "application/rss+xml",
+            text=_ynet_category_card(date=stale_category_date)
+            if url == source_health.rss_source.YNET_CATEGORY_URL
+            else "<rss />",
+        )
+
+    def fake_parse(text: str) -> object:
+        del text
+        return SimpleNamespace(
+            entries=[
+                {
+                    "link": "https://example.com/1",
+                    "title": "זנות",
+                    "summary": "זנות",
+                    "published": recent,
+                }
+            ],
+            bozo=False,
+            bozo_exception=None,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+    monkeypatch.setattr(source_health.feedparser, "parse", fake_parse)
+
+    result = await source_health._probe_ynet(
+        source_cfg=SimpleNamespace(url="https://example.com/rss"),
+        days=21,
+        sample_keywords=["זנות"],
+    )
+
+    assert result.live_status == DiagnosticStatus.WARN
+    assert result.failure_bucket == FailureBucket.STALE_RESULTS
+    category_check = next(check for check in result.checks if check.name == "category_page")
+    assert category_check.details["failure_bucket"] == FailureBucket.STALE_RESULTS.value
+    assert category_check.details["stale_article_count"] == 1
 
 
 @pytest.mark.asyncio

@@ -386,19 +386,19 @@ async def _probe_ynet(
     cutoff = datetime.now(UTC) - timedelta(days=days)
     feed_url = source_cfg.url or ""
     checks: list[ProbeCheck] = []
-    buckets: list[FailureBucket] = []
+    bucket_candidates: list[tuple[DiagnosticStatus, FailureBucket]] = []
 
     try:
         fetch_result = await _fetch_text(feed_url, user_agent=rss_source.USER_AGENT)
     except Exception as exc:
-        buckets.append(FailureBucket.FEED_FETCH_FAILED)
+        bucket_candidates.append((DiagnosticStatus.FAIL, FailureBucket.FEED_FETCH_FAILED))
         checks.append(
             ProbeCheck(
                 name="rss_feed",
                 status=DiagnosticStatus.FAIL,
                 summary=f"RSS fetch failed: {exc}",
                 details={
-                    "url": feed_url,
+                    "requested_url": feed_url,
                     "failure_bucket": FailureBucket.FEED_FETCH_FAILED.value,
                 },
             )
@@ -438,7 +438,7 @@ async def _probe_ynet(
 
         if _is_unexpected_redirect(fetch_result.final_url, feed_url):
             details["failure_bucket"] = FailureBucket.UNEXPECTED_REDIRECT.value
-            buckets.append(FailureBucket.UNEXPECTED_REDIRECT)
+            bucket_candidates.append((DiagnosticStatus.WARN, FailureBucket.UNEXPECTED_REDIRECT))
             checks.append(
                 ProbeCheck(
                     name="rss_feed",
@@ -449,7 +449,7 @@ async def _probe_ynet(
             )
         elif len(entries) == 0 or recent_entry_count == 0:
             details["failure_bucket"] = FailureBucket.FEED_EMPTY_OR_STALE.value
-            buckets.append(FailureBucket.FEED_EMPTY_OR_STALE)
+            bucket_candidates.append((DiagnosticStatus.FAIL, FailureBucket.FEED_EMPTY_OR_STALE))
             checks.append(
                 ProbeCheck(
                     name="rss_feed",
@@ -460,7 +460,9 @@ async def _probe_ynet(
             )
         elif keyword_match_count == 0:
             details["failure_bucket"] = FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS.value
-            buckets.append(FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS)
+            bucket_candidates.append(
+                (DiagnosticStatus.WARN, FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS)
+            )
             checks.append(
                 ProbeCheck(
                     name="rss_feed",
@@ -485,7 +487,7 @@ async def _probe_ynet(
             user_agent=rss_source.USER_AGENT,
         )
     except Exception as exc:
-        buckets.append(FailureBucket.HTTP_FETCH_FAILED)
+        bucket_candidates.append((DiagnosticStatus.FAIL, FailureBucket.HTTP_FETCH_FAILED))
         checks.append(
             ProbeCheck(
                 name="category_page",
@@ -518,7 +520,7 @@ async def _probe_ynet(
         }
         if _is_unexpected_redirect(category_fetch.final_url, rss_source.YNET_CATEGORY_URL):
             category_details["failure_bucket"] = FailureBucket.UNEXPECTED_REDIRECT.value
-            buckets.append(FailureBucket.UNEXPECTED_REDIRECT)
+            bucket_candidates.append((DiagnosticStatus.WARN, FailureBucket.UNEXPECTED_REDIRECT))
             checks.append(
                 ProbeCheck(
                     name="category_page",
@@ -527,9 +529,20 @@ async def _probe_ynet(
                     details=category_details,
                 )
             )
+        elif parsed_category.parsed_article_count == 0 and parsed_category.stale_article_count > 0:
+            category_details["failure_bucket"] = FailureBucket.STALE_RESULTS.value
+            bucket_candidates.append((DiagnosticStatus.WARN, FailureBucket.STALE_RESULTS))
+            checks.append(
+                ProbeCheck(
+                    name="category_page",
+                    status=DiagnosticStatus.WARN,
+                    summary="Category page only contained stale articles inside the cutoff window",
+                    details=category_details,
+                )
+            )
         elif parsed_category.container_count == 0 or parsed_category.parsed_article_count == 0:
             category_details["failure_bucket"] = FailureBucket.PARSE_ZEROED_RESULTS.value
-            buckets.append(FailureBucket.PARSE_ZEROED_RESULTS)
+            bucket_candidates.append((DiagnosticStatus.FAIL, FailureBucket.PARSE_ZEROED_RESULTS))
             checks.append(
                 ProbeCheck(
                     name="category_page",
@@ -540,7 +553,9 @@ async def _probe_ynet(
             )
         elif parsed_category.keyword_match_count == 0:
             category_details["failure_bucket"] = FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS.value
-            buckets.append(FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS)
+            bucket_candidates.append(
+                (DiagnosticStatus.WARN, FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS)
+            )
             checks.append(
                 ProbeCheck(
                     name="category_page",
@@ -560,7 +575,7 @@ async def _probe_ynet(
             )
 
     status = _merge_status(*(check.status for check in checks))
-    bucket = buckets[0] if buckets else None
+    bucket = _select_bucket_by_status(bucket_candidates)
     return SourceDiagnosticResult(
         source_name="ynet",
         status=status,
@@ -1417,6 +1432,16 @@ def _merge_status(*statuses: DiagnosticStatus) -> DiagnosticStatus:
         if candidate in statuses:
             return candidate
     return DiagnosticStatus.SKIP
+
+
+def _select_bucket_by_status(
+    candidates: list[tuple[DiagnosticStatus, FailureBucket]],
+) -> FailureBucket | None:
+    for status in (DiagnosticStatus.FAIL, DiagnosticStatus.WARN):
+        for candidate_status, bucket in candidates:
+            if candidate_status == status:
+                return bucket
+    return None
 
 
 def _derive_bucket_from_checks(checks: list[ProbeCheck]) -> FailureBucket | None:

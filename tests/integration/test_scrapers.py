@@ -3761,8 +3761,40 @@ class TestRSSSource:
         assert articles == []
         debug_state = source.get_debug_state()
         assert debug_state is not None
-        assert debug_state["rss"]["status"] == "low_coverage"
+        assert debug_state["rss"]["status"] == "empty_or_stale"
         assert debug_state["category"]["status"] == "parse_zero"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ynet_category_backstop_records_rss_low_coverage(self) -> None:
+        """RSS low coverage should mean recent feed entries survived but did not match keywords."""
+        recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        rss_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>חדשות כלליות</title>
+              <link>https://www.ynet.co.il/news/article/nonmatch</link>
+              <description>ללא התאמה</description>
+              <pubDate>{recent}</pubDate>
+            </item>
+          </channel>
+        </rss>"""
+
+        respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
+        respx.get("https://www.ynet.co.il/news/category/190").mock(
+            return_value=Response(200, text="<html><body>no article cards</body></html>")
+        )
+
+        source = YnetRSSSource("https://ynet.co.il/feed.xml")
+        articles = await source.fetch(days=21, keywords=["זנות"])
+
+        assert articles == []
+        debug_state = source.get_debug_state()
+        assert debug_state is not None
+        assert debug_state["rss"]["status"] == "low_coverage"
+        assert debug_state["rss"]["recent_entry_count"] == 1
+        assert debug_state["rss"]["keyword_match_count"] == 0
 
     def test_effective_keywords_for_generic_rss_source_deduplicates_and_skips_blank_values(
         self,
