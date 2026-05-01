@@ -486,3 +486,22 @@ store:
             assert "החזקת מקום לשם זנות" in config.keywords
             assert "השכרת מקום לשם זנות" in config.keywords
             assert "פרסום זנות" in config.keywords
+
+    def test_local_search_config_enables_explicit_search_and_backfill(self) -> None:
+        """The opt-in local search config should enable all search discovery producers."""
+        config = load_config(Path("agents/news/local_search.yaml"))
+
+        assert config.discovery.enabled is True
+        assert config.discovery.persist_candidates is True
+        assert config.discovery.engines.brave.enabled is True
+        assert config.discovery.engines.brave.api_key_env == "DENBUST_BRAVE_SEARCH_API_KEY"
+        assert config.discovery.engines.exa.enabled is True
+        assert config.discovery.engines.exa.api_key_env == "DENBUST_EXA_API_KEY"
+        assert config.discovery.engines.exa.allow_find_similar is True
+        assert config.discovery.engines.google_cse.enabled is True
+        assert config.discovery.engines.google_cse.api_key_env == "DENBUST_GOOGLE_CSE_API_KEY"
+        assert config.discovery.engines.google_cse.cse_id_env == "DENBUST_GOOGLE_CSE_ID"
+        assert config.source_discovery.enabled is True
+        assert config.source_discovery.persist_candidates is True
+        assert config.backfill.enabled is True
+        assert config.backfill.batch_window_days == 7

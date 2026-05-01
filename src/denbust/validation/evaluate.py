@@ -25,6 +25,7 @@ from denbust.validation.common import (
     parse_datetime,
     read_csv_rows,
 )
+from denbust.validation.lint import lint_validation_set
 from denbust.validation.models import (
     AccuracyStageMetrics,
     BinaryStageMetrics,
@@ -654,12 +655,14 @@ async def evaluate_classifier_variants(
 ) -> ValidationEvaluateResult:
     """Evaluate tracked classifier variants against the permanent validation set."""
     config = Config()
+    lint_validation_set(validation_set_path).raise_for_issues()
+    articles, labels = _load_validation_examples(validation_set_path)
+    matrix = _load_variant_matrix(variants_path)
+
     api_key = config.anthropic_api_key
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY environment variable not set")
 
-    articles, labels = _load_validation_examples(validation_set_path)
-    matrix = _load_variant_matrix(variants_path)
     collected_at = datetime.now(UTC)
     dataset_summary = _build_dataset_summary(labels)
 

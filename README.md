@@ -51,9 +51,13 @@ Planned future datasets:
 - Plans historical backfill windows and persists durable `backfill_batches` metadata for slow-drain
   discovery/scrape work
 - Drains one historical backfill batch at a time with oldest-window-first scrape prioritization
+- Provides an opt-in `agents/news/local_search.yaml` config for local source-native + Brave + Exa
+  + Google CSE discovery experiments
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains
+- Lints the tracked classifier validation CSV with `denbust validation-lint`
+- Runs tracked classifier/live-source scenarios with `denbust live-check`
 - Runs scheduled GitHub Actions discovery separately from candidate-driven ingest
 - Exposes manual GitHub Actions workflows for historical `backfill_discover` and `backfill_scrape`
 - Reviews the latest daily ingest artifacts and can open GitHub issues for suspicious runs
@@ -71,6 +75,7 @@ DENBUST_BACKFILL_BATCH_ID=batch-optional \
 denbust run --dataset news_items --job backfill_scrape --config agents/news/local.yaml
 denbust report monthly --month 2026-03 --config agents/news/local.yaml
 denbust diagnose-discovery --config agents/news/local.yaml
+denbust validation-lint --validation-set validation/news_items/classifier_validation.csv
 denbust release --config agents/release/news_items.yaml
 denbust backup --config agents/backup/news_items.yaml
 ```

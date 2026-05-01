@@ -56,6 +56,7 @@ from denbust.validation.evaluate import (
     render_rankings_table,
     run_validation_evaluate,
 )
+from denbust.validation.lint import lint_validation_set, run_validation_lint
 from denbust.validation.models import ClassifierVariantSpec, VariantMetrics
 
 
@@ -96,6 +97,41 @@ def build_classified_article(
             confidence="high",
         ),
     )
+
+
+def build_validation_csv_row(**overrides: str) -> dict[str, str]:
+    """Create a valid permanent validation CSV row for tests."""
+    row = {
+        "source_name": "ynet",
+        "article_date": "2026-03-01T00:00:00+00:00",
+        "url": "https://example.com/a",
+        "canonical_url": "https://example.com/a",
+        "title": "title a",
+        "snippet": "snippet a",
+        "relevant": "True",
+        "enforcement_related": "True",
+        "index_relevant": "True",
+        "taxonomy_version": "1",
+        "taxonomy_category_id": "brothels",
+        "taxonomy_subcategory_id": "administrative_closure",
+        "category": "brothel",
+        "sub_category": "closure",
+        "review_status": "reviewed",
+        "annotation_source": "",
+        "expected_month_bucket": "",
+        "expected_city": "",
+        "expected_status": "",
+        "manual_city": "",
+        "manual_address": "",
+        "manual_event_label": "",
+        "manual_status": "",
+        "annotation_notes": "",
+        "collected_at": "2026-03-01T00:00:00+00:00",
+        "finalized_at": "2026-03-02T00:00:00+00:00",
+        "draft_source": "draft.csv",
+    }
+    row.update(overrides)
+    return row
 
 
 class FakeSource:
@@ -1281,6 +1317,62 @@ class TestValidationEvaluate:
         assert "{title}" in matrix.variants[1].user_prompt_template
         assert "{snippet}" in matrix.variants[1].user_prompt_template
 
+    def test_validation_lint_catches_malformed_extra_fields_before_api_calls(
+        self, tmp_path: Path
+    ) -> None:
+        validation_path = tmp_path / "validation.csv"
+        validation_path.write_text(
+            ",".join(VALIDATION_SET_COLUMNS)
+            + "\n"
+            + "ynet,2026-03-01T00:00:00+00:00,https://example.com/a,"
+            + "https://example.com/a,title with, comma,snippet,True,True,True,"
+            + "1,brothels,administrative_closure,brothel,closure,reviewed,,,,,,,,,,"
+            + "2026-03-01T00:00:00+00:00,2026-03-02T00:00:00+00:00,draft.csv\n",
+            encoding="utf-8",
+        )
+
+        result = lint_validation_set(validation_path)
+
+        assert result.passed is False
+        assert any(issue.field == "<extra_fields>" for issue in result.issues)
+        assert any(issue.row_number == 2 for issue in result.issues)
+
+    def test_validation_lint_reports_invalid_taxonomy_and_missing_relevant_labels(
+        self, tmp_path: Path
+    ) -> None:
+        validation_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                build_validation_csv_row(
+                    taxonomy_category_id="brothels",
+                    taxonomy_subcategory_id="soliciting_prostitution",
+                ),
+                build_validation_csv_row(
+                    url="https://example.com/b",
+                    canonical_url="https://example.com/b",
+                    taxonomy_version="",
+                    taxonomy_category_id="",
+                    taxonomy_subcategory_id="",
+                ),
+            ],
+        )
+
+        result = lint_validation_set(validation_path)
+
+        rendered = "\n".join(issue.render() for issue in result.issues)
+        assert "Invalid taxonomy pair" in rendered
+        assert "Relevant rows must include taxonomy_version and taxonomy ids" in rendered
+
+    def test_validation_lint_passes_tracked_validation_set(self) -> None:
+        result = run_validation_lint(
+            validation_set_path=Path("validation/news_items/classifier_validation.csv")
+        )
+
+        assert result.passed is True
+        assert result.row_count == 5
+
     def test_load_validation_examples_defaults_missing_enforcement_flag_false(
         self, tmp_path: Path
     ) -> None:
@@ -1380,25 +1472,7 @@ class TestValidationEvaluate:
         write_csv_rows(
             validation_set_path,
             VALIDATION_SET_COLUMNS,
-            [
-                {
-                    "source_name": "ynet",
-                    "article_date": "2026-03-01T00:00:00+00:00",
-                    "url": "https://example.com/a",
-                    "canonical_url": "https://example.com/a",
-                    "title": "title a",
-                    "snippet": "snippet a",
-                    "relevant": "True",
-                    "enforcement_related": "True",
-                    "category": "brothel",
-                    "sub_category": "closure",
-                    "review_status": "reviewed",
-                    "annotation_notes": "",
-                    "collected_at": "2026-03-01T00:00:00+00:00",
-                    "finalized_at": "2026-03-02T00:00:00+00:00",
-                    "draft_source": "draft.csv",
-                }
-            ],
+            [build_validation_csv_row()],
         )
         variants_path = tmp_path / "variants.yaml"
         variants_path.write_text(
@@ -1407,6 +1481,46 @@ class TestValidationEvaluate:
         )
 
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            await evaluate_classifier_variants(
+                validation_set_path=validation_set_path,
+                variants_path=variants_path,
+                output_path=tmp_path / "report.json",
+            )
+
+    @pytest.mark.asyncio
+    async def test_evaluate_classifier_variants_lints_before_creating_classifiers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        validation_set_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_set_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                build_validation_csv_row(
+                    relevant="maybe",
+                    taxonomy_category_id="",
+                    taxonomy_subcategory_id="",
+                )
+            ],
+        )
+        variants_path = tmp_path / "variants.yaml"
+        variants_path.write_text(
+            yaml.safe_dump({"variants": [{"name": "baseline"}]}),
+            encoding="utf-8",
+        )
+
+        def fail_create_classifier(**_kwargs: object) -> object:
+            raise AssertionError("classifier should not be constructed")
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.validation.evaluate.create_classifier",
+            fail_create_classifier,
+        )
+
+        with pytest.raises(ValueError, match="Validation set lint failed"):
             await evaluate_classifier_variants(
                 validation_set_path=validation_set_path,
                 variants_path=variants_path,
@@ -1425,64 +1539,25 @@ class TestValidationEvaluate:
             validation_set_path,
             VALIDATION_SET_COLUMNS,
             [
-                {
-                    "source_name": "ynet",
-                    "article_date": "2026-03-01T00:00:00+00:00",
-                    "url": "https://example.com/a",
-                    "canonical_url": "https://example.com/a",
-                    "title": "title a",
-                    "snippet": "snippet a",
-                    "relevant": "True",
-                    "enforcement_related": "True",
-                    "index_relevant": "False",
-                    "taxonomy_version": "",
-                    "taxonomy_category_id": "",
-                    "taxonomy_subcategory_id": "",
-                    "category": "brothel",
-                    "sub_category": "closure",
-                    "review_status": "reviewed",
-                    "annotation_source": "",
-                    "expected_month_bucket": "",
-                    "expected_city": "",
-                    "expected_status": "",
-                    "manual_city": "",
-                    "manual_address": "",
-                    "manual_event_label": "",
-                    "manual_status": "",
-                    "annotation_notes": "",
-                    "collected_at": "2026-03-01T00:00:00+00:00",
-                    "finalized_at": "2026-03-02T00:00:00+00:00",
-                    "draft_source": "draft.csv",
-                },
-                {
-                    "source_name": "mako",
-                    "article_date": "2026-03-02T00:00:00+00:00",
-                    "url": "https://example.com/b",
-                    "canonical_url": "https://example.com/b",
-                    "title": "title b",
-                    "snippet": "snippet b",
-                    "relevant": "False",
-                    "enforcement_related": "False",
-                    "index_relevant": "False",
-                    "taxonomy_version": "",
-                    "taxonomy_category_id": "",
-                    "taxonomy_subcategory_id": "",
-                    "category": "not_relevant",
-                    "sub_category": "",
-                    "review_status": "reviewed",
-                    "annotation_source": "",
-                    "expected_month_bucket": "",
-                    "expected_city": "",
-                    "expected_status": "",
-                    "manual_city": "",
-                    "manual_address": "",
-                    "manual_event_label": "",
-                    "manual_status": "",
-                    "annotation_notes": "",
-                    "collected_at": "2026-03-02T00:00:00+00:00",
-                    "finalized_at": "2026-03-03T00:00:00+00:00",
-                    "draft_source": "draft.csv",
-                },
+                build_validation_csv_row(),
+                build_validation_csv_row(
+                    source_name="mako",
+                    article_date="2026-03-02T00:00:00+00:00",
+                    url="https://example.com/b",
+                    canonical_url="https://example.com/b",
+                    title="title b",
+                    snippet="snippet b",
+                    relevant="False",
+                    enforcement_related="False",
+                    index_relevant="False",
+                    taxonomy_version="",
+                    taxonomy_category_id="",
+                    taxonomy_subcategory_id="",
+                    category="not_relevant",
+                    sub_category="",
+                    collected_at="2026-03-02T00:00:00+00:00",
+                    finalized_at="2026-03-03T00:00:00+00:00",
+                ),
             ],
         )
         variants_path = tmp_path / "variants.yaml"
@@ -1572,7 +1647,8 @@ class TestValidationEvaluate:
         assert result.markdown_path.exists()
         report = json.loads(result.output_path.read_text(encoding="utf-8"))
         assert report["dataset_summary"]["total_examples"] == 2
-        assert report["dataset_summary"]["legacy_only_examples"] == 2
+        assert report["dataset_summary"]["legacy_only_examples"] == 1
+        assert report["dataset_summary"]["taxonomy_labeled_examples"] == 1
         assert report["dataset_summary"]["legacy_category_counts_relevant_only"][0] == {
             "label": "brothel",
             "evaluated_examples": 1,
@@ -1581,8 +1657,8 @@ class TestValidationEvaluate:
         assert first["relevance_stage"]["evaluated_examples"] == 2
         assert first["enforcement_stage_relevant_only"]["evaluated_examples"] == 1
         assert first["category_stage_relevant_only"]["evaluated_examples"] == 1
-        assert first["taxonomy_subcategory_stage_taxonomy_labeled"]["evaluated_examples"] == 0
-        assert first["index_relevance_stage_taxonomy_labeled"]["evaluated_examples"] == 0
+        assert first["taxonomy_subcategory_stage_taxonomy_labeled"]["evaluated_examples"] == 1
+        assert first["index_relevance_stage_taxonomy_labeled"]["evaluated_examples"] == 1
         assert first["legacy_category_breakdown_relevant_only"][0]["label"] == "brothel"
         markdown = result.markdown_path.read_text(encoding="utf-8")
         assert "## Dataset Coverage" in markdown

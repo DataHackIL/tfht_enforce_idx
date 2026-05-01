@@ -105,6 +105,38 @@ If not relevant: {{"relevant": false, "enforcement_related": false, "taxonomy_ca
 CLASSIFICATION_PROMPT = _build_classification_prompt()
 
 
+class ClassifierProviderError(RuntimeError):
+    """Raised when the configured classifier provider fails before returning usable text."""
+
+
+class _LiteralFormatValue:
+    """Preserve unknown format fields as literal brace-delimited text."""
+
+    def __init__(self, field_name: str) -> None:
+        self._field_name = field_name
+
+    def __format__(self, format_spec: str) -> str:
+        suffix = f":{format_spec}" if format_spec else ""
+        return "{" + self._field_name + suffix + "}"
+
+
+class _PromptFormatMap(dict[str, str]):
+    """Format map that substitutes article fields while preserving JSON examples."""
+
+    def __missing__(self, key: str) -> _LiteralFormatValue:
+        return _LiteralFormatValue(key)
+
+
+def _render_classification_prompt(
+    template: str,
+    *,
+    title: str,
+    snippet: str,
+) -> str:
+    """Render article fields without treating prompt JSON examples as placeholders."""
+    return template.format_map(_PromptFormatMap(title=title, snippet=snippet))
+
+
 class Classifier:
     """LLM-based article classifier."""
 
@@ -124,7 +156,8 @@ class Classifier:
 
     async def classify(self, article: RawArticle) -> ClassificationResult:
         """Classify a single article."""
-        prompt = self._user_prompt_template.format(
+        prompt = _render_classification_prompt(
+            self._user_prompt_template,
             title=article.title,
             snippet=article.snippet[:300],
         )
@@ -146,13 +179,7 @@ class Classifier:
 
         except anthropic.APIError as error:
             logger.error("Error classifying article: %s", error)
-            return ClassificationResult(
-                relevant=False,
-                enforcement_related=False,
-                category=Category.NOT_RELEVANT,
-                sub_category=None,
-                confidence="low",
-            )
+            raise ClassifierProviderError(str(error)) from error
 
     async def classify_batch(self, articles: list[RawArticle]) -> list[ClassifiedArticle]:
         """Classify a batch of articles."""

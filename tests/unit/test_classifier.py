@@ -14,6 +14,8 @@ from denbust.classifier.relevance import (
     CLASSIFICATION_PROMPT,
     CLASSIFICATION_SYSTEM_PROMPT,
     Classifier,
+    ClassifierProviderError,
+    _render_classification_prompt,
     create_classifier,
 )
 from denbust.data_models import Category, RawArticle, SubCategory
@@ -47,6 +49,18 @@ class TestClassifierParsing:
         assert result.enforcement_related is False
         assert result.category == Category.NOT_RELEVANT
         assert result.sub_category is None
+
+    def test_render_classification_prompt_preserves_literal_json_examples(self) -> None:
+        """Custom prompts may include JSON examples with literal braces."""
+        rendered = _render_classification_prompt(
+            'Title: {title}\nExample: {"relevant": true, "confidence": "high"}\n{snippet}',
+            title="כותרת",
+            snippet="תקציר",
+        )
+
+        assert "Title: כותרת" in rendered
+        assert '{"relevant": true, "confidence": "high"}' in rendered
+        assert rendered.endswith("תקציר")
 
     def test_parse_missing_enforcement_related_defaults_false(self) -> None:
         """Older classifier JSON without the second axis should still parse safely."""
@@ -353,8 +367,8 @@ class TestClassifierRuntime:
         assert call_kwargs["system"] == CLASSIFICATION_SYSTEM_PROMPT
 
     @pytest.mark.asyncio
-    async def test_classify_returns_not_relevant_on_api_error(self) -> None:
-        """Anthropic API failures should degrade safely."""
+    async def test_classify_raises_provider_error_on_api_error(self) -> None:
+        """Anthropic API failures should be visible to callers."""
         classifier = Classifier(api_key="test-key")
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         messages = MagicMock()
@@ -368,11 +382,8 @@ class TestClassifierRuntime:
             source_name="test",
         )
 
-        result = await classifier.classify(article)
-
-        assert result.relevant is False
-        assert result.category == Category.NOT_RELEVANT
-        assert result.confidence == "low"
+        with pytest.raises(ClassifierProviderError, match="boom"):
+            await classifier.classify(article)
 
     @pytest.mark.asyncio
     async def test_classify_batch_wraps_each_article(self) -> None:

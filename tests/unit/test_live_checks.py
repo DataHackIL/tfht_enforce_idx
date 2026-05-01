@@ -11,6 +11,7 @@ import pytest
 import yaml
 from pydantic import HttpUrl
 
+from denbust.classifier.relevance import ClassifierProviderError
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.data_models import Category, ClassificationResult, RawArticle, SubCategory
 from denbust.live_checks.runner import (
@@ -41,6 +42,14 @@ class FakeClassifier:
     async def classify(self, article: RawArticle) -> ClassificationResult:
         del article
         return self._result
+
+
+class FailingClassifier:
+    """Classifier stub that simulates a provider outage."""
+
+    async def classify(self, article: RawArticle) -> ClassificationResult:
+        del article
+        raise ClassifierProviderError("provider unavailable")
 
 
 class FakeSource:
@@ -240,6 +249,61 @@ class TestLiveChecks:
         assert len(report.case_results) == 2
         assert report.case_results[0].passed is False
         assert report.case_results[1].passed is True
+
+    def test_runner_records_classifier_provider_error_as_case_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        repo_root = _init_repo(tmp_path)
+        fixture_path = repo_root / "tests" / "fixtures" / "articles" / "case.json"
+        _write_fixture(
+            fixture_path,
+            {
+                "url": "https://example.com/case",
+                "title": "פשיטה על בית בושת",
+                "snippet": "המשטרה פשטה על בית בושת",
+                "date": "2026-04-07T12:00:00+00:00",
+                "source_name": "test",
+                "expected_classification": {
+                    "relevant": True,
+                    "enforcement_related": True,
+                    "category": "brothel",
+                    "sub_category": "closure",
+                },
+            },
+        )
+        scenario_path = repo_root / "agents" / "live_checks" / "provider-error.yaml"
+        _write_scenario(
+            scenario_path,
+            {
+                "name": "provider-error",
+                "runtime_config": "agents/news/local.yaml",
+                "cases": [
+                    {
+                        "id": "fixture-case",
+                        "type": "fixture_article",
+                        "fixture": "tests/fixtures/articles/case.json",
+                    }
+                ],
+            },
+        )
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.load_config",
+            lambda _path: Config(classifier={"model": "mock-model"}),
+        )
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.create_classifier",
+            lambda **_kwargs: FailingClassifier(),
+        )
+
+        report = run_live_check_scenario_sync(scenario_path)
+
+        assert report.overall_status == "failed"
+        assert report.case_results[0].actual is None
+        assert report.case_results[0].error == ("classifier provider error: provider unavailable")
 
     def test_missing_api_key_writes_failed_report_bundle(
         self,

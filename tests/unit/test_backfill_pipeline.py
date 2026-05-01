@@ -10,6 +10,7 @@ import pytest
 from pydantic import HttpUrl
 
 import denbust.pipeline as pipeline_module
+from denbust.classifier.relevance import ClassifierProviderError
 from denbust.config import Config
 from denbust.data_models import RawArticle
 from denbust.discovery.backfill import BackfillWindow
@@ -642,6 +643,53 @@ async def test_run_news_backfill_scrape_job_finishes_when_queue_is_empty(
 
     assert result.fatal is False
     assert result.result_summary == "no queued backfill candidates eligible for scrape"
+
+
+@pytest.mark.asyncio
+async def test_run_news_backfill_scrape_job_marks_classifier_provider_error_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Backfill scrape should fail visibly when the classifier provider is unavailable."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [FakeSource("ynet")])
+    classifier = MagicMock()
+    classifier.classify_batch = AsyncMock(side_effect=ClassifierProviderError("api down"))
+    monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+    monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+    monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
+    store = build_store(tmp_path)
+    store.upsert_backfill_batches([build_batch(status=BackfillBatchStatus.DISCOVERED)])
+    store.upsert_candidates([build_candidate("batch-1")])
+    monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: store)
+    monkeypatch.setattr(
+        "denbust.pipeline._run_backfill_candidate_scrape_job",
+        AsyncMock(
+            return_value=build_scrape_batch(
+                raw_articles=[
+                    RawArticle(
+                        url=HttpUrl("https://example.com/raw"),
+                        title="title",
+                        snippet="snippet",
+                        date=datetime(2026, 1, 2, tzinfo=UTC),
+                        source_name="ynet",
+                    )
+                ]
+            )
+        ),
+    )
+    monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
+
+    result = await run_news_backfill_scrape_job(
+        Config(job_name=JobName.BACKFILL_SCRAPE, store={"state_root": tmp_path})
+    )
+
+    assert result.fatal is True
+    assert result.result_summary == "backfill batch batch-1: fatal: classifier provider error"
+    assert result.errors == ["classifier_provider_error=api down"]
+    assert result.debug_payload is not None
+    assert result.debug_payload["batch_id"] == "batch-1"
+    assert result.debug_payload["classifier_summary"]["classification_failed"] is True
 
 
 @pytest.mark.asyncio

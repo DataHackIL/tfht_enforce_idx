@@ -23,6 +23,12 @@ from denbust.validation.import_reviewed import (
     ReviewedTableImportResult,
     import_reviewed_table,
 )
+from denbust.validation.lint import (
+    ValidationLintIssue,
+    ValidationLintResult,
+    lint_validation_set,
+    run_validation_lint,
+)
 
 __all__ = [
     "DEFAULT_VALIDATION_SET_PATH",
@@ -34,11 +40,15 @@ __all__ = [
     "ValidationCollectResult",
     "ValidationEvaluateResult",
     "ValidationFinalizeResult",
+    "ValidationLintIssue",
+    "ValidationLintResult",
     "collect_validation_draft",
     "evaluate_classifier_variants",
     "finalize_validation_set",
     "import_reviewed_table",
+    "lint_validation_set",
     "run_validation_collect",
     "run_validation_evaluate",
     "run_validation_finalize",
+    "run_validation_lint",
 ]

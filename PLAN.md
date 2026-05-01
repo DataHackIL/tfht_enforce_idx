@@ -26,29 +26,29 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: Post-`DL-PR-07` Discovery Work
+## Current Next Focus: May 2026 Experiment Follow-Through
 
-`DL-PR-07` is now merged via PR `#82`. The next default discovery-layer step in the rollout plan is `DL-PR-08`, while `DL-PR-09` remains queued immediately after it unless priorities are explicitly reordered.
+PR `#95` added the May 2026 local experiment plan. The immediate follow-up hardens that plan's
+execution path so local validation data problems and Anthropic provider failures fail visibly before
+operators trust the resulting metrics.
 
-### What `DL-PR-07` delivered
+### What is already in place
 
-- Candidate persistence, scrape attempts, and queue state already exist under `src/denbust/discovery/`.
-- A lightweight overlap artifact already exists at `state_repo/.../metrics/engine_overlap_latest.json`.
-- Discovery overlap/diagnostics generation already flows through `src/denbust/diagnostics/discovery.py`; the pipeline no longer keeps separate per-engine candidate ID sets.
-- The repo already has a diagnostics pattern in `src/denbust/diagnostics/source_health.py` and `src/denbust/cli.py`.
-- Discovery diagnostics now also emit a fuller `discovery_diagnostics_latest.json` artifact and a `denbust diagnose-discovery` CLI entry point.
+- Candidate persistence, scrape attempts, queue state, fallback retention, and backfill jobs already
+  exist under `src/denbust/discovery/` and `src/denbust/pipeline.py`.
+- Discovery diagnostics already flow through `src/denbust/diagnostics/discovery.py` and
+  `denbust diagnose-discovery`.
+- Source-health diagnostics already cover selector drift, parse-zero, stale-result, and keyword-zero
+  cases.
+- Validation evaluation already reports stage-wise relevance, enforcement, taxonomy, and index
+  metrics.
 
 ### What comes next
 
-1. `DL-PR-08` is the default next discovery PR in the rollout plan:
-   - search-result-only fallback rows
-   - partial retention
-   - lower-confidence review/publication handling
-2. `DL-PR-09` remains the next queued follow-up after that:
-   - backfill batches
-   - historical query generation
-   - backfill discover/scrape jobs
-3. Phase C follow-through is still open in parallel, so `.agent-plan.md` should be treated as the operational priority pointer when sequencing work.
+1. Use the hardened May experiment path to rerun validation and live checks locally.
+2. Prioritize source recall, search-backed discovery, and backfill gaps from those outputs.
+3. Treat optional self-healing scaffolding as later work unless the hardened experiment data shows it
+   is the highest-leverage next step.
 
 ### Likely code touchpoints
 
@@ -57,7 +57,7 @@ This repo currently has one main plan and two important sub-plans.
 - `src/denbust/discovery/storage.py`
 - `src/denbust/discovery/models.py`
 - `src/denbust/diagnostics/__init__.py`
-- `src/denbust/diagnostics/source_health.py` as a structural reference only
+- `src/denbust/diagnostics/source_health.py`
 - `src/denbust/cli.py`
 - `tests/unit/test_pipeline_core.py`
 - `tests/unit/test_cli.py`
@@ -65,9 +65,10 @@ This repo currently has one main plan and two important sub-plans.
 
 ### Scope guardrails
 
-- Do not fold `DL-PR-09` backfill work into the next PR unless priorities are explicitly changed.
-- Do not add self-healing or event-table work yet.
-- Keep the next discovery PR focused on its slice rather than mixing in workflow rollout or later-stage architecture work.
+- Do not commit local experiment output bundles under `data/`.
+- Do not hide missing search credentials in local configs; explicit search configs should surface
+  discovery errors when required env vars are absent.
+- Keep the next implementation PR focused on the evidence from the hardened local run.
 
 ## Planning Workflow
 

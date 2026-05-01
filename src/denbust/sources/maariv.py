@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urljoin
 
@@ -37,6 +38,18 @@ MAARIV_SUPPLEMENTAL_KEYWORDS = [
     "מכון עיסוי",
 ]
 TIME_PATTERN = re.compile(r"(\d{1,2}):(\d{2})")
+MAARIV_DIAGNOSTIC_SECTION_SELECTOR = "article.category-article, article, .article"
+
+
+@dataclass(frozen=True)
+class MaarivDiagnosticParseResult:
+    """Public parse counters for source-health diagnostics."""
+
+    container_selector: str
+    container_count: int
+    parsed_article_count: int
+    keyword_match_count: int
+    article_urls: list[str]
 
 
 def effective_maariv_keywords(keywords: list[str]) -> list[str]:
@@ -61,6 +74,33 @@ def matches_maariv_keywords(article: RawArticle, keywords: list[str]) -> bool:
     """Check whether an article matches Maariv's effective keyword set."""
     text = f"{article.title} {article.snippet}".casefold()
     return any(keyword.casefold() in text for keyword in effective_maariv_keywords(keywords))
+
+
+def diagnose_maariv_section_html(
+    html: str,
+    *,
+    cutoff: datetime,
+    keywords: list[str],
+) -> MaarivDiagnosticParseResult:
+    """Return public parse counters for a Maariv section HTML payload."""
+    scraper = MaarivScraper()
+    soup = BeautifulSoup(html, "lxml")
+    containers = soup.select(MAARIV_DIAGNOSTIC_SECTION_SELECTOR)
+    parsed_articles = [
+        article
+        for article in (scraper._parse_article_item(item, cutoff) for item in containers)
+        if article is not None
+    ]
+    keyword_matches = [
+        article for article in parsed_articles if matches_maariv_keywords(article, keywords)
+    ]
+    return MaarivDiagnosticParseResult(
+        container_selector=MAARIV_DIAGNOSTIC_SECTION_SELECTOR,
+        container_count=len(containers),
+        parsed_article_count=len(parsed_articles),
+        keyword_match_count=len(keyword_matches),
+        article_urls=[str(article.url) for article in keyword_matches[:5]],
+    )
 
 
 class MaarivScraper(Source):

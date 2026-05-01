@@ -21,6 +21,8 @@ from denbust.diagnostics.source_health import (
     _FetchResult,
 )
 from denbust.sources.base import Source
+from denbust.sources.ice import build_ice_search_url, diagnose_ice_search_html
+from denbust.sources.maariv import diagnose_maariv_section_html
 
 
 def _config_with_state_root(state_root: Path) -> Config:
@@ -46,6 +48,70 @@ def _write_summary(logs_dir: Path, stem: str, payload: dict[str, object]) -> Pat
     path = logs_dir / f"{stem}.summary.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
+
+
+def test_maariv_diagnostic_helper_reports_public_parse_counts() -> None:
+    html = """
+    <article class="category-article">
+      <a class="category-article-link" href="/news/article-123">לינק</a>
+      <h2>חשד לבית בושת בבני ברק</h2>
+      <p>המשטרה עצרה חשודים.</p>
+      <time datetime="2099-01-01T00:00:00+00:00"></time>
+    </article>
+    """
+
+    result = diagnose_maariv_section_html(
+        html,
+        cutoff=datetime(2026, 1, 1, tzinfo=UTC),
+        keywords=["זנות"],
+    )
+
+    assert result.container_count == 1
+    assert result.parsed_article_count == 1
+    assert result.keyword_match_count == 1
+    assert result.article_urls == ["https://www.maariv.co.il/news/article-123"]
+
+
+def test_ice_diagnostic_helper_reports_public_parse_counts() -> None:
+    html = """
+    <html>
+      <body>
+        <h1>תוצאות חיפוש</h1>
+        <article>
+          <ul>
+            <li>
+              <a href="/article/123">בית בושת נסגר</a>
+              <p>משטרה 02/01/2026 09:00</p>
+            </li>
+          </ul>
+        </article>
+      </body>
+    </html>
+    """
+
+    result = diagnose_ice_search_html(
+        html,
+        cutoff=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert build_ice_search_url("בית בושת") == (
+        "https://www.ice.co.il/list/searchresult/%D7%91%D7%99%D7%AA%20%D7%91%D7%95%D7%A9%D7%AA"
+    )
+    assert result.has_results_container is True
+    assert result.candidate_count == 1
+    assert result.parsed_article_count == 1
+    assert result.stale_candidate_count == 0
+    assert result.unparseable_date_count == 0
+    assert result.article_urls == ["https://www.ice.co.il/article/123"]
+
+
+def test_source_health_diagnostics_do_not_call_maariv_or_ice_private_parse_methods() -> None:
+    source = Path(source_health.__file__).read_text(encoding="utf-8")
+
+    assert "maariv_source.MaarivScraper()" not in source
+    assert "ice_source.IceScraper(" not in source
+    assert "._find_results_article" not in source
+    assert "._parse_date" not in source
 
 
 def test_build_artifact_check_marks_zero_result_source_as_warn(tmp_path: Path) -> None:

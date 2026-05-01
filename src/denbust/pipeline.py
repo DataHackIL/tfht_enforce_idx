@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sys
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from denbust.classifier.relevance import Classifier, create_classifier
+from denbust.classifier.relevance import Classifier, ClassifierProviderError, create_classifier
 from denbust.config import Config, OutputFormat, SourceType, load_config
 from denbust.data_models import ClassifiedArticle, RawArticle, SourceReference, UnifiedItem
 from denbust.datasets.jobs import ensure_default_jobs_registered
@@ -119,6 +120,10 @@ from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
 
+_SECRET_FRAGMENT_PATTERN = re.compile(
+    r"(?i)(sk-ant-[a-z0-9_-]+|bearer\s+[a-z0-9._~+/=-]+|api[_-]?key[=:]\s*[^,\s]+)"
+)
+
 _OPERATIONAL_STORE_JOBS = {
     JobName.INGEST,
     JobName.SCRAPE_CANDIDATES,
@@ -127,6 +132,24 @@ _OPERATIONAL_STORE_JOBS = {
     JobName.RELEASE,
     JobName.BACKUP,
 }
+
+
+def _sanitize_classifier_provider_error(error: ClassifierProviderError) -> str:
+    """Return a compact provider error string safe for run artifacts."""
+    raw_message = str(error) or type(error).__name__
+    redacted = _SECRET_FRAGMENT_PATTERN.sub("[redacted]", raw_message)
+    return " ".join(redacted.split())[:500]
+
+
+def _mark_classifier_provider_error(
+    result: RunSnapshot,
+    error: ClassifierProviderError,
+) -> str:
+    """Mark a run fatal after a classifier provider failure."""
+    sanitized = _sanitize_classifier_provider_error(error)
+    result.fatal = True
+    result.errors.append(f"classifier_provider_error={sanitized}")
+    return sanitized
 
 
 def release_publication_dir(config: Config) -> Path:
@@ -1117,7 +1140,26 @@ async def _process_ingest_articles(
         logger.warning(warning)
         result.warnings.append(warning)
 
-    classified_articles = await classifier.classify_batch(unseen_articles)
+    try:
+        classified_articles = await classifier.classify_batch(unseen_articles)
+    except ClassifierProviderError as exc:
+        logger.error("Classifier provider failed during ingest: %s", exc)
+        sanitized_error = _mark_classifier_provider_error(result, exc)
+        result.seen_count_after = seen_store.count
+        result.finish("fatal: classifier provider error")
+        result.set_debug_payload(
+            _build_ingest_debug_payload(
+                result=result,
+                sources=sources,
+                source_names=source_names,
+                raw_articles=all_articles,
+                unseen_articles=unseen_articles,
+                classified_articles=classified_articles,
+                unified_items=unified_items,
+                classifier_error=sanitized_error,
+            )
+        )
+        return result
     relevant_articles = [
         article for article in classified_articles if article.classification.relevant
     ]
@@ -1287,12 +1329,14 @@ def _build_source_summaries(
             continue
         error_map.setdefault(source_name, []).append(error)
 
-    source_debug = {
-        source.name: debug_state
-        for source in sources
-        for debug_state in [source.get_debug_state()]
-        if debug_state is not None
-    }
+    source_debug: dict[str, object] = {}
+    for source in sources:
+        get_debug_state = getattr(source, "get_debug_state", None)
+        if get_debug_state is None:
+            continue
+        debug_state = get_debug_state()
+        if debug_state is not None:
+            source_debug[source.name] = debug_state
 
     return [
         {
@@ -1312,6 +1356,7 @@ def _build_classifier_summary(
     *,
     unseen_articles: list[RawArticle],
     classified_articles: list[ClassifiedArticle],
+    classifier_error: str | None = None,
 ) -> dict[str, object]:
     """Summarize classifier outputs and anomalies."""
     rejected_by_category: dict[str, int] = {}
@@ -1332,6 +1377,8 @@ def _build_classifier_summary(
         "rejected_article_count": rejected_count,
         "rejected_by_category": rejected_by_category,
         "classification_output_anomaly": len(classified_articles) != len(unseen_articles),
+        "classification_failed": classifier_error is not None,
+        "classifier_error": classifier_error,
     }
 
 
@@ -1359,6 +1406,7 @@ def _build_problem_summary(
     classification_output_anomaly = bool(
         classifier_summary.get("classification_output_anomaly", False)
     )
+    classification_failed = bool(classifier_summary.get("classification_failed", False))
     classified_article_count = _summary_int(classifier_summary, "classified_article_count")
     unseen_article_count = _summary_int(classifier_summary, "unseen_article_count")
     rejected_article_count = _summary_int(classifier_summary, "rejected_article_count")
@@ -1374,6 +1422,7 @@ def _build_problem_summary(
         "all_unseen_rejected": all_unseen_rejected,
         "no_relevant_items": result.relevant_article_count == 0,
         "classification_output_anomaly": classification_output_anomaly,
+        "classification_failed": classification_failed,
     }
 
 
@@ -1417,6 +1466,8 @@ def _build_suspicions(
         suspicions.append("no_relevant_items")
     if bool(classifier_summary.get("classification_output_anomaly", False)):
         suspicions.append("classification_output_anomaly")
+    if bool(classifier_summary.get("classification_failed", False)):
+        suspicions.append("classifier_provider_error")
     return suspicions
 
 
@@ -1449,6 +1500,7 @@ def _build_ingest_debug_payload(
     unseen_articles: list[RawArticle],
     classified_articles: list[ClassifiedArticle],
     unified_items: list[UnifiedItem],
+    classifier_error: str | None = None,
 ) -> dict[str, object]:
     """Build a detailed ingest diagnostic log for state-repo inspection."""
     relevant_articles = [
@@ -1459,7 +1511,10 @@ def _build_ingest_debug_payload(
     ]
     source_runtime_debug: dict[str, object] = {}
     for source in sources:
-        debug_state = source.get_debug_state()
+        get_debug_state = getattr(source, "get_debug_state", None)
+        if get_debug_state is None:
+            continue
+        debug_state = get_debug_state()
         if debug_state is not None:
             source_runtime_debug[source.name] = debug_state
     source_summaries = _build_source_summaries(
@@ -1471,6 +1526,7 @@ def _build_ingest_debug_payload(
     classifier_summary = _build_classifier_summary(
         unseen_articles=unseen_articles,
         classified_articles=classified_articles,
+        classifier_error=classifier_error,
     )
     problems = _build_problem_summary(
         source_summaries=source_summaries,
@@ -1867,10 +1923,16 @@ async def run_news_scrape_candidates_job(
             store = create_operational_store(config)
             owns_store = True
 
-        fallback_records = await _build_fallback_operational_records(
-            candidates=scrape_batch.fallback_candidates,
-            classifier=classifier,
-        )
+        try:
+            fallback_records = await _build_fallback_operational_records(
+                candidates=scrape_batch.fallback_candidates,
+                classifier=classifier,
+            )
+        except ClassifierProviderError as exc:
+            logger.error("Classifier provider failed during candidate fallback retention: %s", exc)
+            _mark_classifier_provider_error(result, exc)
+            result.seen_count_after = seen_store.count
+            return result.finish("fatal: classifier provider error")
         if fallback_records and store is not None:
             store.upsert_records(
                 config.dataset_name.value,
@@ -2149,10 +2211,16 @@ async def run_news_backfill_scrape_job(
             store = create_operational_store(config)
             owns_store = True
 
-        fallback_records = await _build_fallback_operational_records(
-            candidates=scrape_batch.fallback_candidates,
-            classifier=classifier,
-        )
+        try:
+            fallback_records = await _build_fallback_operational_records(
+                candidates=scrape_batch.fallback_candidates,
+                classifier=classifier,
+            )
+        except ClassifierProviderError as exc:
+            logger.error("Classifier provider failed during backfill fallback retention: %s", exc)
+            _mark_classifier_provider_error(result, exc)
+            result.seen_count_after = seen_store.count
+            return result.finish("fatal: classifier provider error")
         if fallback_records and store is not None:
             store.upsert_records(
                 config.dataset_name.value,
@@ -2179,7 +2247,12 @@ async def run_news_backfill_scrape_job(
             operational_store=store,
         )
         processed.result_summary = f"backfill batch {batch_id}: {processed.result_summary}"
-        processed.set_debug_payload({"batch_id": batch_id})
+        processed.set_debug_payload(
+            {
+                **(processed.debug_payload or {}),
+                "batch_id": batch_id,
+            }
+        )
         return processed
     finally:
         updated_persistence = create_discovery_persistence(config)
