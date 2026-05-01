@@ -1107,9 +1107,9 @@ async def test_probe_haaretz_distinguishes_keyword_zeroing(
             <html><head><title>search</title></head><body>
               <h2>מציג תוצאות בנושא</h2>
               <article>
-                <h3><a href="/news/politics/2026-04-06/ty-article/abc">מתנחלים הקימו מאחז חדש בצפון הגדה - בליווי חיילים</a></h3>
+                <h3><a href="/news/politics/2099-01-01/ty-article/abc">מתנחלים הקימו מאחז חדש בצפון הגדה - בליווי חיילים</a></h3>
                 <div>כתבה פוליטית כללית.</div>
-                <time>6 באפריל 2026</time>
+                <time>1 בינואר 2099</time>
               </article>
             </body></html>
             """,
@@ -1139,9 +1139,9 @@ async def test_probe_haaretz_reports_success(monkeypatch: pytest.MonkeyPatch) ->
             <html><head><title>search</title></head><body>
               <h2>מציג תוצאות בנושא</h2>
               <article>
-                <h3><a href="/news/law/2026-04-06/ty-article/abc">המשטרה חשפה שירותי ליווי בדירה בתל אביב</a></h3>
+                <h3><a href="/news/law/2099-01-01/ty-article/abc">המשטרה חשפה שירותי ליווי בדירה בתל אביב</a></h3>
                 <div>חשד להפעלת זנות במקום.</div>
-                <time>6 באפריל 2026</time>
+                <time>1 בינואר 2099</time>
               </article>
             </body></html>
             """,
