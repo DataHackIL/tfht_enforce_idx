@@ -233,16 +233,18 @@ def lint_validation_set(
                         message=f"Malformed CSV row has {len(extra_values)} extra field(s)",
                     )
                 )
-            row = {key: value or "" for key, value in raw_row.items() if key is not None}
-            missing_fields = [field for field in VALIDATION_SET_COLUMNS if field not in row]
-            for field in missing_fields:
+            missing_fields = [
+                field for field in VALIDATION_SET_COLUMNS if raw_row.get(field) is None
+            ]
+            if missing_fields:
                 issues.append(
                     ValidationLintIssue(
                         row_number=row_number,
-                        field=field,
-                        message="Missing validation CSV field",
+                        field="<missing_fields>",
+                        message=("Missing validation CSV field(s): " + ", ".join(missing_fields)),
                     )
                 )
+            row = {key: value or "" for key, value in raw_row.items() if key is not None}
 
             for field in ("article_date", "collected_at", "finalized_at"):
                 _lint_datetime(issues, row_number=row_number, row=row, field=field)

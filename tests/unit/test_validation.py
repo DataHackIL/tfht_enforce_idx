@@ -1422,7 +1422,26 @@ class TestValidationEvaluate:
         bad_header_result = lint_validation_set(bad_header_path)
         rendered = "\n".join(issue.render() for issue in bad_header_result.issues)
         assert "Validation CSV header does not match the tracked schema" in rendered
-        assert "Missing validation CSV field" in rendered
+        assert "Missing validation CSV field(s)" in rendered
+
+    def test_validation_lint_reports_truncated_rows_missing_string_fields(
+        self, tmp_path: Path
+    ) -> None:
+        validation_path = tmp_path / "validation.csv"
+        row = build_validation_csv_row()
+        validation_path.write_text(
+            ",".join(VALIDATION_SET_COLUMNS)
+            + "\n"
+            + ",".join(row[field] for field in VALIDATION_SET_COLUMNS[:-1])
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = lint_validation_set(validation_path)
+
+        rendered = "\n".join(issue.render() for issue in result.issues)
+        assert "row 2, field <missing_fields>" in rendered
+        assert "Missing validation CSV field(s): draft_source" in rendered
 
     def test_validation_lint_passes_tracked_validation_set(self) -> None:
         result = run_validation_lint(
