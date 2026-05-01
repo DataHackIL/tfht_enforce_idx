@@ -334,6 +334,10 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   partial-page, and search-result-only retention
 - Ynet source-health diagnostics now report separate RSS and category-page checks, distinguishing
   RSS low coverage, category HTTP failure, category parse-zero, and category keyword-zero cases
+- source-health diagnostics now include a report-level `source_zero_summary` for the Phase C
+  4+ affected-source guardrail, plus Mako `failure_mode` details for missing Chromium, navigation
+  timeout, context teardown, redirect/anti-bot, selector drift, parse-zero, and stale/keyword-zero
+  outcomes
 
 ## Config Layout
 

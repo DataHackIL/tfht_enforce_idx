@@ -59,6 +59,31 @@ class FailureBucket(StrEnum):
     LIVE_PROBE_EXCEPTION = "live_probe_exception"
 
 
+SOURCE_ZERO_GUARDRAIL_BUCKETS = {
+    FailureBucket.FEED_FETCH_FAILED,
+    FailureBucket.FEED_EMPTY_OR_STALE,
+    FailureBucket.STALE_RESULTS,
+    FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+    FailureBucket.HTTP_FETCH_FAILED,
+    FailureBucket.UNEXPECTED_REDIRECT,
+    FailureBucket.SELECTOR_DRIFT_SUSPECTED,
+    FailureBucket.PARSE_ZEROED_RESULTS,
+}
+
+
+class MakoFailureMode(StrEnum):
+    """Mako-specific live-probe failure modes."""
+
+    BROWSER_RUNTIME_MISSING = "browser_runtime_missing"
+    NAVIGATION_TIMEOUT = "navigation_timeout"
+    CONTEXT_DESTROYED = "context_destroyed"
+    REDIRECT_OR_ANTI_BOT = "redirect_or_antibot"
+    SELECTOR_DRIFT = "selector_drift"
+    PARSE_ZERO = "parse_zero"
+    STALE_OR_KEYWORD_ZERO = "stale_or_keyword_zero"
+    UNKNOWN_EXCEPTION = "unknown_exception"
+
+
 class ProbeCheck(BaseModel):
     """A single diagnostic check and its structured details."""
 
@@ -80,6 +105,17 @@ class SourceDiagnosticResult(BaseModel):
     checks: list[ProbeCheck] = Field(default_factory=list)
 
 
+class SourceZeroSummary(BaseModel):
+    """Report-level source-zero guardrail summary."""
+
+    threshold: int = 4
+    enabled_source_count: int
+    selected_source_count: int
+    affected_source_count: int
+    affected_sources: list[str] = Field(default_factory=list)
+    systemic_source_zero_suspected: bool
+
+
 class SourceDiagnosticReport(BaseModel):
     """Full diagnostic report for a source-health run."""
 
@@ -90,6 +126,7 @@ class SourceDiagnosticReport(BaseModel):
     artifact_analysis_enabled: bool
     live_probe_enabled: bool
     latest_artifact_path: str | None = None
+    source_zero_summary: SourceZeroSummary | None = None
     results: list[SourceDiagnosticResult] = Field(default_factory=list)
 
 
@@ -209,6 +246,10 @@ async def run_source_diagnostics_async(
             result.failure_bucket = _derive_bucket_from_checks(checks)
         report.results.append(result)
 
+    report.source_zero_summary = _build_source_zero_summary(
+        report.results,
+        enabled_source_count=len(enabled_source_configs),
+    )
     return report
 
 
@@ -230,6 +271,19 @@ def render_source_diagnostic_report(report: SourceDiagnosticReport) -> str:
                 findings.append(f"- {result.source_name} [{check.name}]: {check.summary}")
 
     lines.append("")
+    if report.source_zero_summary is not None:
+        summary = report.source_zero_summary
+        sources = ", ".join(summary.affected_sources) if summary.affected_sources else "-"
+        lines.append(
+            "Source-zero guardrail: "
+            f"{summary.affected_source_count}/{summary.enabled_source_count} enabled affected "
+            f"(threshold={summary.threshold}; "
+            f"selected={summary.selected_source_count}; "
+            f"systemic={str(summary.systemic_source_zero_suspected).lower()}; "
+            f"sources={sources})"
+        )
+        lines.append("")
+
     lines.append("Key findings")
     if findings:
         lines.extend(findings)
@@ -712,9 +766,10 @@ async def _probe_mako(
         session = await scraper._open_browser_session()
     except RuntimeError as exc:
         message = str(exc)
+        session_failure_mode = _classify_mako_exception(exc)
         status = (
             DiagnosticStatus.SKIP
-            if "playwright" in message.lower() or "chromium" in message.lower()
+            if session_failure_mode is MakoFailureMode.BROWSER_RUNTIME_MISSING
             else DiagnosticStatus.FAIL
         )
         return _live_result(
@@ -726,10 +781,12 @@ async def _probe_mako(
                     name="browser_session",
                     status=status,
                     summary=message,
+                    details={"failure_mode": session_failure_mode.value},
                 )
             ],
         )
     except Exception as exc:
+        session_failure_mode = _classify_mako_exception(exc)
         return _live_result(
             source_name="mako",
             status=DiagnosticStatus.FAIL,
@@ -739,6 +796,7 @@ async def _probe_mako(
                     name="browser_session",
                     status=DiagnosticStatus.FAIL,
                     summary=f"Browser session failed unexpectedly: {exc}",
+                    details={"failure_mode": session_failure_mode.value},
                 )
             ],
         )
@@ -758,12 +816,13 @@ async def _probe_mako(
             try:
                 html = await scraper._fetch_search_html(session, keyword)
             except Exception as exc:
+                fetch_failure_details = _mako_failure_details(exc, requested_url=search_url)
                 checks.append(
                     ProbeCheck(
                         name=f"search:{keyword}",
                         status=DiagnosticStatus.FAIL,
                         summary=f"Search fetch failed: {exc}",
-                        details={"requested_url": search_url},
+                        details=fetch_failure_details,
                     )
                 )
                 continue
@@ -779,44 +838,55 @@ async def _probe_mako(
             )
             saw_search_keyword_match = saw_search_keyword_match or keyword_hit
 
+            search_failure_mode: MakoFailureMode | None
             if html is None:
                 status = DiagnosticStatus.WARN
                 summary = "Search reached Mako's not-found terminal state"
+                search_failure_mode = MakoFailureMode.STALE_OR_KEYWORD_ZERO
             elif len(parsed_articles) == 0:
                 status = DiagnosticStatus.WARN
                 summary = "Search page rendered but parsing returned zero articles"
+                search_failure_mode = MakoFailureMode.PARSE_ZERO
             elif keyword_hit:
                 status = DiagnosticStatus.OK
                 summary = "Search page returned parsed keyword-matching articles"
+                search_failure_mode = None
             else:
                 status = DiagnosticStatus.OK
                 summary = "Search page returned parsed articles"
+                search_failure_mode = None
 
+            search_details: dict[str, Any] = {
+                "requested_url": search_url,
+                "final_url": session.page.url,
+                "terminal_state": "not_found" if html is None else "results",
+                "payload_length": len(html) if html is not None else 0,
+                "article_count": len(parsed_articles),
+                "article_urls": [str(article.url) for article in parsed_articles[:5]],
+            }
+            if search_failure_mode is not None:
+                search_details["failure_mode"] = search_failure_mode.value
             checks.append(
                 ProbeCheck(
                     name=f"search:{keyword}",
                     status=status,
                     summary=summary,
-                    details={
-                        "requested_url": search_url,
-                        "final_url": session.page.url,
-                        "terminal_state": "not_found" if html is None else "results",
-                        "payload_length": len(html) if html is not None else 0,
-                        "article_count": len(parsed_articles),
-                        "article_urls": [str(article.url) for article in parsed_articles[:5]],
-                    },
+                    details=search_details,
                 )
             )
 
         try:
             section_html = await scraper._fetch_section_html(session, mako_source.MAKO_MEN_NEWS_URL)
         except Exception as exc:
+            fetch_failure_details = _mako_failure_details(
+                exc, requested_url=mako_source.MAKO_MEN_NEWS_URL
+            )
             checks.append(
                 ProbeCheck(
                     name="section:men-men_news",
                     status=DiagnosticStatus.FAIL,
                     summary=f"Section fetch failed: {exc}",
-                    details={"requested_url": mako_source.MAKO_MEN_NEWS_URL},
+                    details=fetch_failure_details,
                 )
             )
         else:
@@ -839,35 +909,43 @@ async def _probe_mako(
             saw_section_parseable_results = bool(parsed_articles)
             saw_section_keyword_match = bool(keyword_matches)
 
+            section_failure_mode: MakoFailureMode | None
             if len(containers) == 0:
                 status = DiagnosticStatus.FAIL
                 summary = "Section page rendered but no candidate containers were found"
+                section_failure_mode = MakoFailureMode.SELECTOR_DRIFT
             elif len(parsed_articles) == 0:
                 status = DiagnosticStatus.WARN
                 summary = "Section page contains candidates but parsing returned zero articles"
+                section_failure_mode = MakoFailureMode.PARSE_ZERO
             elif len(keyword_matches) == 0:
                 status = DiagnosticStatus.WARN
                 summary = (
                     "Section page returned parsed articles but none match the sampled keywords"
                 )
+                section_failure_mode = MakoFailureMode.STALE_OR_KEYWORD_ZERO
             else:
                 status = DiagnosticStatus.OK
                 summary = "Section page returned parsed keyword-matching articles"
+                section_failure_mode = None
 
+            section_details: dict[str, Any] = {
+                "requested_url": mako_source.MAKO_MEN_NEWS_URL,
+                "final_url": session.page.url,
+                "payload_length": len(section_html),
+                "container_count": len(containers),
+                "parsed_article_count": len(parsed_articles),
+                "keyword_match_count": len(keyword_matches),
+                "article_urls": [str(article.url) for article in keyword_matches[:5]],
+            }
+            if section_failure_mode is not None:
+                section_details["failure_mode"] = section_failure_mode.value
             checks.append(
                 ProbeCheck(
                     name="section:men-men_news",
                     status=status,
                     summary=summary,
-                    details={
-                        "requested_url": mako_source.MAKO_MEN_NEWS_URL,
-                        "final_url": session.page.url,
-                        "payload_length": len(section_html),
-                        "container_count": len(containers),
-                        "parsed_article_count": len(parsed_articles),
-                        "keyword_match_count": len(keyword_matches),
-                        "article_urls": [str(article.url) for article in keyword_matches[:5]],
-                    },
+                    details=section_details,
                 )
             )
     finally:
@@ -875,6 +953,9 @@ async def _probe_mako(
             await scraper._close_browser_session(session)
 
     if unexpected_redirect:
+        for check in checks:
+            if _mako_check_redirected(check):
+                check.details["failure_mode"] = MakoFailureMode.REDIRECT_OR_ANTI_BOT.value
         return _live_result(
             source_name="mako",
             status=DiagnosticStatus.WARN,
@@ -1444,12 +1525,86 @@ def _select_bucket_by_status(
     return None
 
 
+def _build_source_zero_summary(
+    results: list[SourceDiagnosticResult],
+    *,
+    enabled_source_count: int,
+    threshold: int = 4,
+) -> SourceZeroSummary:
+    affected_sources = [
+        result.source_name
+        for result in results
+        if result.failure_bucket in SOURCE_ZERO_GUARDRAIL_BUCKETS
+    ]
+    selected_source_count = len(results)
+    full_coverage = selected_source_count == enabled_source_count
+    return SourceZeroSummary(
+        threshold=threshold,
+        enabled_source_count=enabled_source_count,
+        selected_source_count=selected_source_count,
+        affected_source_count=len(affected_sources),
+        affected_sources=affected_sources,
+        systemic_source_zero_suspected=full_coverage and len(affected_sources) >= threshold,
+    )
+
+
 def _derive_bucket_from_checks(checks: list[ProbeCheck]) -> FailureBucket | None:
     for check in checks:
         bucket_value = check.details.get("failure_bucket")
         if isinstance(bucket_value, str):
             return FailureBucket(bucket_value)
     return None
+
+
+def _classify_mako_exception(exc: Exception) -> MakoFailureMode:
+    message = str(exc).lower()
+    if (
+        "context destroyed" in message
+        or "execution context was destroyed" in message
+        or "target closed" in message
+        or "page closed" in message
+    ):
+        return MakoFailureMode.CONTEXT_DESTROYED
+    if (
+        "validate.perfdrive.com" in message
+        or "anti-bot" in message
+        or "antibot" in message
+        or "captcha" in message
+        or "challenge" in message
+        or "access denied" in message
+        or "forbidden" in message
+    ):
+        return MakoFailureMode.REDIRECT_OR_ANTI_BOT
+    if "selector" in message or "no candidate containers" in message:
+        return MakoFailureMode.SELECTOR_DRIFT
+    if "timed out" in message or "timeout" in message or "terminal state" in message:
+        return MakoFailureMode.NAVIGATION_TIMEOUT
+    if (
+        "playwright is not installed" in message
+        or "chromium could not be launched" in message
+        or "executable doesn't exist" in message
+        or "browser executable not found" in message
+    ):
+        return MakoFailureMode.BROWSER_RUNTIME_MISSING
+    return MakoFailureMode.UNKNOWN_EXCEPTION
+
+
+def _mako_failure_details(exc: Exception, *, requested_url: str) -> dict[str, str]:
+    failure_mode = _classify_mako_exception(exc)
+    return {
+        "requested_url": requested_url,
+        "failure_mode": failure_mode.value,
+    }
+
+
+def _mako_check_redirected(check: ProbeCheck) -> bool:
+    requested_url = check.details.get("requested_url")
+    final_url = check.details.get("final_url")
+    return (
+        isinstance(requested_url, str)
+        and isinstance(final_url, str)
+        and _is_unexpected_redirect(final_url, requested_url)
+    )
 
 
 def _live_result(
