@@ -184,6 +184,30 @@ def build_backfill_queries(
                 )
             )
             seen_keys.add(taxonomy_key)
+            if DiscoveryQueryKind.SOURCE_TARGETED in config.discovery.default_query_kinds:
+                for source_name, domain in source_domains:
+                    source_key = (
+                        DiscoveryQueryKind.SOURCE_TARGETED,
+                        term,
+                        source_name,
+                        domain,
+                        window.index,
+                    )
+                    if source_key in seen_keys:
+                        continue
+                    queries.append(
+                        DiscoveryQuery(
+                            query_text=term,
+                            language="he",
+                            date_from=window.date_from,
+                            date_to=window.date_to,
+                            preferred_domains=[domain],
+                            source_hint=source_name,
+                            query_kind=DiscoveryQueryKind.SOURCE_TARGETED,
+                            tags=["backfill", source_name, *tags, f"window:{window.index}"],
+                        )
+                    )
+                    seen_keys.add(source_key)
     return queries
 
 

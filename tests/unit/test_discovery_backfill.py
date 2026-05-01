@@ -201,12 +201,17 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     ]
 
     assert [query.query_text for query in broad_queries] == ["בית בושת", "סחר"]
-    assert len(source_queries) == 4
+    keyword_source_queries = [query for query in source_queries if "taxonomy" not in query.tags]
+    taxonomy_source_queries = [query for query in source_queries if "taxonomy" in query.tags]
+    assert len(keyword_source_queries) == 4
+    assert len(taxonomy_source_queries) == len(taxonomy_queries) * 2
     assert taxonomy_queries
     assert len(social_queries) == 2
-    assert {query.source_hint for query in source_queries} == {"ynet", "walla"}
-    assert all(query.preferred_domains for query in source_queries)
+    assert {query.source_hint for query in keyword_source_queries} == {"ynet", "walla"}
+    assert all(query.preferred_domains for query in keyword_source_queries)
     assert all(not query.preferred_domains for query in taxonomy_queries)
+    assert {query.source_hint for query in taxonomy_source_queries} == {"ynet", "walla"}
+    assert all("backfill" in query.tags and "window:0" in query.tags for query in source_queries)
     assert any(
         query.query_text == "צו הגבלת שימוש"
         and {
@@ -248,6 +253,43 @@ def test_build_backfill_queries_allows_taxonomy_only_generation() -> None:
 
     assert queries
     assert all(query.query_kind is DiscoveryQueryKind.TAXONOMY_TARGETED for query in queries)
+
+
+def test_build_backfill_queries_emits_source_targeted_taxonomy_terms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backfill taxonomy terms should also be constrained to configured source domains."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [("דירה דיסקרטית", ["taxonomy", "category:brothels"])],
+    )
+    config = Config(
+        keywords=["זנות"],
+        sources=[{"name": "mako", "type": "scraper", "enabled": True}],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    taxonomy_source_queries = [
+        query
+        for query in queries
+        if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
+        and query.query_text == "דירה דיסקרטית"
+    ]
+    assert len(taxonomy_source_queries) == 1
+    assert taxonomy_source_queries[0].preferred_domains == ["www.mako.co.il"]
+    assert taxonomy_source_queries[0].source_hint == "mako"
+    assert taxonomy_source_queries[0].date_from == window.date_from
+    assert taxonomy_source_queries[0].date_to == window.date_to
+    assert {"backfill", "mako", "taxonomy", "category:brothels", "window:0"}.issubset(
+        set(taxonomy_source_queries[0].tags)
+    )
 
 
 def test_build_backfill_queries_does_not_load_taxonomy_when_disabled(

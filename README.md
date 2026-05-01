@@ -47,6 +47,8 @@ Planned future datasets:
 - Runs Brave, Exa, and Google CSE as external discovery engines feeding the durable candidate layer
 - Adds taxonomy-targeted discovery queries from the packaged TFHT taxonomy for broader
   search-engine recall
+- Adds source-targeted taxonomy queries for each configured news domain so search-backed discovery
+  and historical backfill can compensate when source-native pages produce zero recent matches
 - Keeps Ynet RSS as the primary משפט ופלילים source while adding a non-browser category-page
   backstop for source-native recall
 - Emits Facebook-targeted `social_targeted` search queries and retains those results as non-scrapeable reference candidates
