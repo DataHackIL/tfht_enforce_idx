@@ -98,6 +98,7 @@ class SourceZeroSummary(BaseModel):
 
     threshold: int = 4
     enabled_source_count: int
+    selected_source_count: int
     affected_source_count: int
     affected_sources: list[str] = Field(default_factory=list)
     systemic_source_zero_suspected: bool
@@ -233,7 +234,10 @@ async def run_source_diagnostics_async(
             result.failure_bucket = _derive_bucket_from_checks(checks)
         report.results.append(result)
 
-    report.source_zero_summary = _build_source_zero_summary(report.results)
+    report.source_zero_summary = _build_source_zero_summary(
+        report.results,
+        enabled_source_count=len(enabled_source_configs),
+    )
     return report
 
 
@@ -260,8 +264,9 @@ def render_source_diagnostic_report(report: SourceDiagnosticReport) -> str:
         sources = ", ".join(summary.affected_sources) if summary.affected_sources else "-"
         lines.append(
             "Source-zero guardrail: "
-            f"{summary.affected_source_count}/{summary.enabled_source_count} affected "
+            f"{summary.affected_source_count}/{summary.enabled_source_count} enabled affected "
             f"(threshold={summary.threshold}; "
+            f"selected={summary.selected_source_count}; "
             f"systemic={str(summary.systemic_source_zero_suspected).lower()}; "
             f"sources={sources})"
         )
@@ -1511,17 +1516,17 @@ def _select_bucket_by_status(
 def _build_source_zero_summary(
     results: list[SourceDiagnosticResult],
     *,
+    enabled_source_count: int,
     threshold: int = 4,
 ) -> SourceZeroSummary:
-    affected_statuses = {DiagnosticStatus.FAIL, DiagnosticStatus.WARN, DiagnosticStatus.SKIP}
+    affected_statuses = {DiagnosticStatus.FAIL, DiagnosticStatus.WARN}
     affected_sources = [
-        result.source_name
-        for result in results
-        if result.live_status in affected_statuses or result.status in affected_statuses
+        result.source_name for result in results if result.status in affected_statuses
     ]
     return SourceZeroSummary(
         threshold=threshold,
-        enabled_source_count=len(results),
+        enabled_source_count=enabled_source_count,
+        selected_source_count=len(results),
         affected_source_count=len(affected_sources),
         affected_sources=affected_sources,
         systemic_source_zero_suspected=len(affected_sources) >= threshold,
@@ -1540,7 +1545,12 @@ def _classify_mako_exception(exc: Exception) -> MakoFailureMode:
     message = str(exc).lower()
     if "playwright" in message or "chromium" in message or "install chromium" in message:
         return MakoFailureMode.BROWSER_RUNTIME_MISSING
-    if "context destroyed" in message or "target closed" in message or "page closed" in message:
+    if (
+        "context destroyed" in message
+        or "execution context was destroyed" in message
+        or "target closed" in message
+        or "page closed" in message
+    ):
         return MakoFailureMode.CONTEXT_DESTROYED
     if (
         "validate.perfdrive.com" in message

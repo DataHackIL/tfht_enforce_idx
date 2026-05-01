@@ -310,6 +310,7 @@ def test_render_source_diagnostic_report_includes_findings_and_empty_case() -> N
         live_probe_enabled=True,
         source_zero_summary=source_health.SourceZeroSummary(
             enabled_source_count=2,
+            selected_source_count=2,
             affected_source_count=1,
             affected_sources=["ynet"],
             systemic_source_zero_suspected=False,
@@ -398,7 +399,7 @@ def test_merge_status_and_derive_bucket_and_live_result() -> None:
     assert result.checks[0].details["failure_bucket"] == FailureBucket.UNEXPECTED_REDIRECT.value
 
 
-def test_build_source_zero_summary_flags_systemic_source_zero() -> None:
+def test_build_source_zero_summary_flags_systemic_source_zero_for_warns_and_fails() -> None:
     summary = source_health._build_source_zero_summary(
         [
             SourceDiagnosticResult(
@@ -413,8 +414,8 @@ def test_build_source_zero_summary_flags_systemic_source_zero() -> None:
             ),
             SourceDiagnosticResult(
                 source_name="mako",
-                status=DiagnosticStatus.SKIP,
-                live_status=DiagnosticStatus.SKIP,
+                status=DiagnosticStatus.FAIL,
+                live_status=DiagnosticStatus.FAIL,
             ),
             SourceDiagnosticResult(
                 source_name="maariv",
@@ -426,12 +427,97 @@ def test_build_source_zero_summary_flags_systemic_source_zero() -> None:
                 status=DiagnosticStatus.OK,
                 live_status=DiagnosticStatus.OK,
             ),
-        ]
+        ],
+        enabled_source_count=6,
     )
 
     assert summary.systemic_source_zero_suspected is True
     assert summary.affected_source_count == 4
+    assert summary.enabled_source_count == 6
+    assert summary.selected_source_count == 5
     assert summary.affected_sources == ["ynet", "walla", "mako", "maariv"]
+
+
+def test_build_source_zero_summary_preserves_enabled_count_for_scoped_runs() -> None:
+    summary = source_health._build_source_zero_summary(
+        [
+            SourceDiagnosticResult(
+                source_name="mako",
+                status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.OK,
+            ),
+        ],
+        enabled_source_count=6,
+    )
+
+    assert summary.enabled_source_count == 6
+    assert summary.selected_source_count == 1
+    assert summary.affected_source_count == 0
+    assert summary.systemic_source_zero_suspected is False
+
+
+def test_build_source_zero_summary_ignores_skipped_probe_modes_when_merged_status_is_ok() -> None:
+    summary = source_health._build_source_zero_summary(
+        [
+            SourceDiagnosticResult(
+                source_name="ynet",
+                status=DiagnosticStatus.OK,
+                artifact_status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.SKIP,
+            ),
+            SourceDiagnosticResult(
+                source_name="walla",
+                status=DiagnosticStatus.OK,
+                artifact_status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.SKIP,
+            ),
+            SourceDiagnosticResult(
+                source_name="mako",
+                status=DiagnosticStatus.OK,
+                artifact_status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.SKIP,
+            ),
+            SourceDiagnosticResult(
+                source_name="maariv",
+                status=DiagnosticStatus.OK,
+                artifact_status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.SKIP,
+            ),
+        ],
+        enabled_source_count=6,
+    )
+
+    assert summary.affected_sources == []
+    assert summary.affected_source_count == 0
+    assert summary.systemic_source_zero_suspected is False
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "Execution context was destroyed, most likely because of a navigation",
+            source_health.MakoFailureMode.CONTEXT_DESTROYED,
+        ),
+        (
+            "redirected to validate.perfdrive.com challenge",
+            source_health.MakoFailureMode.REDIRECT_OR_ANTI_BOT,
+        ),
+        (
+            "selector .article did not match any candidate containers",
+            source_health.MakoFailureMode.SELECTOR_DRIFT,
+        ),
+        (
+            "Mako search did not reach a terminal state before timeout",
+            source_health.MakoFailureMode.NAVIGATION_TIMEOUT,
+        ),
+    ],
+)
+def test_classify_mako_exception_distinguishes_navigation_failure_modes(
+    message: str,
+    expected: source_health.MakoFailureMode,
+) -> None:
+    assert source_health._classify_mako_exception(RuntimeError(message)) is expected
 
 
 def test_is_unexpected_redirect() -> None:
@@ -1737,6 +1823,9 @@ store:
     )
 
     assert [result.source_name for result in report.results] == ["ice"]
+    assert report.source_zero_summary is not None
+    assert report.source_zero_summary.enabled_source_count == 3
+    assert report.source_zero_summary.selected_source_count == 1
 
 
 @pytest.mark.asyncio
