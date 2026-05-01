@@ -35,6 +35,9 @@ denbust run --dataset news_items --job backfill_scrape --config agents/news/loca
 Backfill jobs also read and write the shared `news_items/discover/` candidate-layer state.
 The search-engine side of `discover` and `backfill_discover` now emits `taxonomy_targeted` queries
 from the packaged TFHT taxonomy in addition to the coarse operator keyword list.
+When source-targeted taxonomy expansion is enabled for backfill, each window is capped by
+`backfill.max_source_targeted_taxonomy_queries_per_window` so historical recovery does not
+silently multiply search-engine quota use across every source and taxonomy term.
 
 Use `agents/news/local_search.yaml` only when intentionally exercising source-native discovery
 plus Brave, Exa, and Google CSE locally:

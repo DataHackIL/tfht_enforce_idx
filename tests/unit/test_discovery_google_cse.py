@@ -57,6 +57,7 @@ async def test_google_cse_search_engine_normalizes_results_and_renders_params() 
                 preferred_domains=["www.ynet.co.il"],
                 source_hint="ynet",
                 language="he",
+                tags=["ynet", "taxonomy", "category:brothels"],
             )
         ],
         DiscoveryContext(run_id="run-1", max_results_per_query=5),
@@ -83,6 +84,8 @@ async def test_google_cse_search_engine_normalizes_results_and_renders_params() 
     assert candidates[0].metadata == {
         "engine": "google_cse",
         "query_kind": "source_targeted",
+        "query_tags": ["ynet", "taxonomy", "category:brothels"],
+        "source_targeted_taxonomy": True,
         "preferred_domains": ["www.ynet.co.il"],
         "result_url": "https://www.ynet.co.il/news/article/abc?utm_source=google",
         "result_title": "פשיטה על בית בושת",

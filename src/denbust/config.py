@@ -348,6 +348,7 @@ class BackfillConfig(BaseModel):
     batch_window_days: int = Field(default=7, ge=1)
     max_candidates_per_run: int = Field(default=500, ge=1)
     max_scrape_attempts_per_run: int = Field(default=100, ge=1)
+    max_source_targeted_taxonomy_queries_per_window: int = Field(default=50, ge=0)
 
 
 # Default keywords for searching news articles (Hebrew)

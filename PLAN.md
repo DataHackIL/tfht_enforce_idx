@@ -32,9 +32,10 @@ PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's
 local validation data problems and Anthropic provider failures fail visibly before operators trust
 the resulting metrics. The first source-recall follow-up adds a Ynet משפט ופלילים category-page
 backstop while keeping the RSS feed as the primary Ynet source. The Phase C source-health
-follow-through now adds a report-level source-zero guardrail and explicit Mako browser/navigation
-failure-mode details, making the current #72 systemic source-zero evidence separable from #71/#74
-Mako runtime hygiene.
+follow-through added a report-level source-zero guardrail and explicit Mako browser/navigation
+failure-mode details. The current #72 follow-through reproduced systemic source-zero for Ynet,
+Walla, Maariv, and ICE, then expanded search-backed discovery/backfill so taxonomy recall terms are
+also queried against each configured news domain.
 
 ### What is already in place
 
@@ -51,13 +52,16 @@ Mako runtime hygiene.
   rendered state supports that classification.
 - Ynet source-health diagnostics now split RSS and category-page checks so RSS low coverage,
   category HTTP failure, category parse-zero, and category keyword-zero outcomes are visible.
+- Search-backed discovery and backfill now emit source-targeted taxonomy queries for every enabled
+  configured news domain, giving the durable candidate layer a domain-constrained fallback when
+  source-native probes zero out.
 - Validation evaluation already reports stage-wise relevance, enforcement, taxonomy, and index
   metrics.
 
 ### What comes next
 
-1. Prioritize search-backed discovery and backfill gaps from the Phase C source-health evidence,
-   especially the #72 systemic source-zero pattern.
+1. Add fixture-backed Ynet/search recall regression coverage for #66 now that the search-backed
+   source-domain query path exists for taxonomy recall terms.
 2. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
 3. Treat optional self-healing scaffolding as later work unless the hardened experiment data shows it

@@ -54,6 +54,7 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
                 preferred_domains=["www.ynet.co.il"],
                 source_hint="ynet",
                 language="he",
+                tags=["ynet", "taxonomy", "category:brothels"],
             )
         ],
         DiscoveryContext(run_id="run-1", max_results_per_query=5),
@@ -74,6 +75,8 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
     assert str(candidates[0].canonical_url) == "https://ynet.co.il/news/article/abc"
     assert candidates[0].publication_datetime_hint == datetime(2026, 4, 15, 8, 0, tzinfo=UTC)
     assert candidates[0].metadata["query_kind"] == "source_targeted"
+    assert candidates[0].metadata["query_tags"] == ["ynet", "taxonomy", "category:brothels"]
+    assert candidates[0].metadata["source_targeted_taxonomy"] is True
     assert candidates[0].metadata["result_url"] == "https://www.ynet.co.il/news/article/abc"
     assert candidates[0].metadata["result_title"] == "פשיטה על בית בושת"
     assert candidates[0].metadata["result_description"] == "המשטרה פשטה על המקום."

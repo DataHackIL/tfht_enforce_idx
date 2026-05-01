@@ -43,17 +43,25 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
     ]
 
     assert len(broad_queries) == 2
-    assert len(targeted_queries) == 4
+    keyword_targeted_queries = [query for query in targeted_queries if "taxonomy" not in query.tags]
+    taxonomy_targeted_source_queries = [
+        query for query in targeted_queries if "taxonomy" in query.tags
+    ]
+    assert len(keyword_targeted_queries) == 4
+    assert len(taxonomy_targeted_source_queries) == len(taxonomy_queries) * 2
     assert len(taxonomy_queries) == len(
         {term for _, _, term in default_taxonomy().discovery_terms()}
     )
     assert len(social_queries) == 2
     assert {query.query_text for query in broad_queries} == {"בית בושת", "זנות"}
-    assert {(query.source_hint, tuple(query.preferred_domains)) for query in targeted_queries} == {
-        ("ynet", ("www.ynet.co.il",)),
-        ("mako", ("www.mako.co.il",)),
-    }
+    assert {
+        (query.source_hint, tuple(query.preferred_domains)) for query in keyword_targeted_queries
+    } == {("ynet", ("www.ynet.co.il",)), ("mako", ("www.mako.co.il",))}
     assert all(not query.preferred_domains for query in taxonomy_queries)
+    assert {
+        (query.source_hint, tuple(query.preferred_domains))
+        for query in taxonomy_targeted_source_queries
+    } == {("ynet", ("www.ynet.co.il",)), ("mako", ("www.mako.co.il",))}
     assert any(
         query.query_text == "נישואין בכפייה"
         and {
@@ -92,6 +100,65 @@ def test_build_discovery_queries_respects_enabled_query_kinds() -> None:
     assert queries[0].source_hint == "mako"
 
 
+def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
+    monkeypatch,
+) -> None:
+    """Taxonomy recall terms should also be constrained to configured source domains."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [("דירה דיסקרטית", ["taxonomy", "category:brothels"])],
+    )
+    config = Config(
+        keywords=["זנות"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+    )
+
+    queries = build_discovery_queries(
+        config,
+        days=5,
+        now=datetime(2026, 4, 16, 12, 0, tzinfo=UTC),
+    )
+
+    taxonomy_source_queries = [
+        query
+        for query in queries
+        if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
+        and query.query_text == "דירה דיסקרטית"
+    ]
+    assert len(taxonomy_source_queries) == 1
+    assert taxonomy_source_queries[0].preferred_domains == ["www.mako.co.il"]
+    assert taxonomy_source_queries[0].source_hint == "mako"
+    assert taxonomy_source_queries[0].date_from == datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
+    assert taxonomy_source_queries[0].date_to == datetime(2026, 4, 16, 12, 0, tzinfo=UTC)
+    assert {"mako", "taxonomy", "category:brothels"}.issubset(set(taxonomy_source_queries[0].tags))
+
+
+def test_build_discovery_queries_keeps_taxonomy_source_provenance_for_keyword_overlap(
+    monkeypatch,
+) -> None:
+    """Keyword and taxonomy source queries with the same term should both be retained."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [("זנות", ["taxonomy", "category:brothels"])],
+    )
+    config = Config(
+        keywords=["זנות"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    source_queries = [
+        query
+        for query in queries
+        if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
+    ]
+    assert len(source_queries) == 2
+    assert sorted("taxonomy" in query.tags for query in source_queries) == [False, True]
+
+
 def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() -> None:
     """Blank/duplicate keywords and unusable sources should be skipped cleanly."""
     config = Config(
@@ -111,15 +178,16 @@ def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() 
     targeted_queries = [
         query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
     ]
+    keyword_targeted_queries = [query for query in targeted_queries if "taxonomy" not in query.tags]
 
     assert len(broad_queries) == 1
-    assert len(targeted_queries) == 1
+    assert len(keyword_targeted_queries) == 1
     assert broad_queries[0].query_text == "זנות"
-    assert targeted_queries[0].source_hint == "mako"
+    assert keyword_targeted_queries[0].source_hint == "mako"
 
 
-def test_build_discovery_queries_returns_empty_for_empty_keyword_set() -> None:
-    """If all keywords collapse away, only taxonomy-targeted queries should remain."""
+def test_build_discovery_queries_returns_taxonomy_queries_for_empty_keyword_set() -> None:
+    """If keywords collapse away, taxonomy terms should still drive broad and source queries."""
     config = Config(
         keywords=["", "   "],
         sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
@@ -129,7 +197,11 @@ def test_build_discovery_queries_returns_empty_for_empty_keyword_set() -> None:
     queries = build_discovery_queries(config, days=3)
 
     assert queries
-    assert all(query.query_kind is DiscoveryQueryKind.TAXONOMY_TARGETED for query in queries)
+    assert {query.query_kind for query in queries} == {
+        DiscoveryQueryKind.TAXONOMY_TARGETED,
+        DiscoveryQueryKind.SOURCE_TARGETED,
+    }
+    assert all("taxonomy" in query.tags for query in queries)
 
 
 def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> None:
@@ -151,9 +223,10 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
     targeted_queries = [
         query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
     ]
+    keyword_targeted_queries = [query for query in targeted_queries if "taxonomy" not in query.tags]
 
-    assert len(targeted_queries) == 1
-    assert targeted_queries[0].preferred_domains == ["www.ynet.co.il"]
+    assert len(keyword_targeted_queries) == 1
+    assert keyword_targeted_queries[0].preferred_domains == ["www.ynet.co.il"]
 
 
 def test_build_discovery_queries_can_disable_social_targeted_generation() -> None:
