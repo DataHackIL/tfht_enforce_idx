@@ -257,8 +257,19 @@ denbust diagnose-discovery \
 Optional if search keys are available:
 
 ```bash
-env | rg '^DENBUST_(BRAVE_SEARCH_API_KEY|EXA_API_KEY|GOOGLE_CSE_API_KEY|GOOGLE_CSE_ID)=' \
-  > "${EXPERIMENT_ROOT}/summaries/search_engine_env_present.txt"
+{
+  for var in \
+    DENBUST_BRAVE_SEARCH_API_KEY \
+    DENBUST_EXA_API_KEY \
+    DENBUST_GOOGLE_CSE_API_KEY \
+    DENBUST_GOOGLE_CSE_ID; do
+    if [ -n "${!var:-}" ]; then
+      printf '%s=true\n' "$var"
+    else
+      printf '%s=false\n' "$var"
+    fi
+  done
+} > "${EXPERIMENT_ROOT}/summaries/search_engine_env_present.txt"
 ```
 
 Record:
