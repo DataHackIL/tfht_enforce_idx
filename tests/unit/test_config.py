@@ -308,9 +308,13 @@ class TestConfig:
         assert config.batch_window_days == 7
         assert config.max_candidates_per_run == 500
         assert config.max_scrape_attempts_per_run == 100
+        assert config.max_source_targeted_taxonomy_queries_per_window == 50
 
         with pytest.raises(ValueError):
             BackfillConfig(batch_window_days=0)
+
+        with pytest.raises(ValueError):
+            BackfillConfig(max_source_targeted_taxonomy_queries_per_window=-1)
 
     def test_store_normalizer_passthrough_for_non_mapping(self) -> None:
         """The pre-validator should pass through non-mapping values unchanged."""

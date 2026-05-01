@@ -55,6 +55,7 @@ async def test_exa_search_engine_normalizes_results_and_renders_payload() -> Non
                 language="he",
                 date_from=datetime(2026, 4, 10, tzinfo=UTC),
                 date_to=datetime(2026, 4, 16, tzinfo=UTC),
+                tags=["ynet", "taxonomy", "category:brothels"],
             )
         ],
         DiscoveryContext(run_id="run-1", max_results_per_query=5),
@@ -85,6 +86,8 @@ async def test_exa_search_engine_normalizes_results_and_renders_payload() -> Non
     assert candidates[0].metadata == {
         "engine": "exa",
         "query_kind": "source_targeted",
+        "query_tags": ["ynet", "taxonomy", "category:brothels"],
+        "source_targeted_taxonomy": True,
         "preferred_domains": ["www.ynet.co.il"],
         "request_id": "request-123",
         "result_id": "result-1",

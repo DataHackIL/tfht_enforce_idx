@@ -134,6 +134,31 @@ def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
     assert {"mako", "taxonomy", "category:brothels"}.issubset(set(taxonomy_source_queries[0].tags))
 
 
+def test_build_discovery_queries_keeps_taxonomy_source_provenance_for_keyword_overlap(
+    monkeypatch,
+) -> None:
+    """Keyword and taxonomy source queries with the same term should both be retained."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [("זנות", ["taxonomy", "category:brothels"])],
+    )
+    config = Config(
+        keywords=["זנות"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    source_queries = [
+        query
+        for query in queries
+        if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
+    ]
+    assert len(source_queries) == 2
+    assert sorted("taxonomy" in query.tags for query in source_queries) == [False, True]
+
+
 def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() -> None:
     """Blank/duplicate keywords and unusable sources should be skipped cleanly."""
     config = Config(

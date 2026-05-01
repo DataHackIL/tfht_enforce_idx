@@ -292,6 +292,77 @@ def test_build_backfill_queries_emits_source_targeted_taxonomy_terms(
     )
 
 
+def test_build_backfill_queries_caps_source_targeted_taxonomy_terms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backfill should cap the taxonomy-derived source-targeted query fanout per window."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [
+            ("דירה דיסקרטית", ["taxonomy", "category:brothels"]),
+            ("צו הגבלת שימוש", ["taxonomy", "category:brothels"]),
+        ],
+    )
+    config = Config(
+        keywords=["זנות"],
+        sources=[
+            {"name": "mako", "type": "scraper", "enabled": True},
+            {"name": "maariv", "type": "scraper", "enabled": True},
+        ],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+        backfill={"max_source_targeted_taxonomy_queries_per_window": 2},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    taxonomy_source_queries = [
+        query
+        for query in queries
+        if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and "taxonomy" in query.tags
+    ]
+    assert len(taxonomy_source_queries) == 2
+    assert [query.query_text for query in taxonomy_source_queries] == [
+        "דירה דיסקרטית",
+        "דירה דיסקרטית",
+    ]
+    assert [query.source_hint for query in taxonomy_source_queries] == ["mako", "maariv"]
+
+
+def test_build_backfill_queries_keeps_taxonomy_source_provenance_for_keyword_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overlapping keyword/taxonomy terms should keep distinct source query provenance."""
+    monkeypatch.setattr(
+        "denbust.discovery.queries._taxonomy_query_specs",
+        lambda: [("זנות", ["taxonomy", "category:brothels"])],
+    )
+    config = Config(
+        keywords=["זנות"],
+        sources=[{"name": "mako", "type": "scraper", "enabled": True}],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 1, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    source_queries = [
+        query
+        for query in queries
+        if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
+    ]
+    assert len(source_queries) == 2
+    assert sorted("taxonomy" in query.tags for query in source_queries) == [False, True]
+
+
 def test_build_backfill_queries_does_not_load_taxonomy_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

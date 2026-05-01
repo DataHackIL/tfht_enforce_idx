@@ -152,8 +152,14 @@ def build_discovery_queries(
             seen_keys.add(taxonomy_key)
             if DiscoveryQueryKind.SOURCE_TARGETED in config.discovery.default_query_kinds:
                 for source_name, domain in source_domains:
-                    source_key = (DiscoveryQueryKind.SOURCE_TARGETED, term, source_name, domain)
-                    if source_key in seen_keys:
+                    taxonomy_source_key = (
+                        DiscoveryQueryKind.SOURCE_TARGETED,
+                        "taxonomy",
+                        term,
+                        source_name,
+                        domain,
+                    )
+                    if taxonomy_source_key in seen_keys:
                         continue
                     queries.append(
                         DiscoveryQuery(
@@ -167,6 +173,6 @@ def build_discovery_queries(
                             tags=[source_name, *tags],
                         )
                     )
-                    seen_keys.add(source_key)
+                    seen_keys.add(taxonomy_source_key)
 
     return queries

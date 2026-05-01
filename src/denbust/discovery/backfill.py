@@ -169,6 +169,10 @@ def build_backfill_queries(
 
     if taxonomy_enabled:
         taxonomy_specs = _taxonomy_query_specs()
+        source_targeted_taxonomy_query_count = 0
+        source_targeted_taxonomy_query_limit = (
+            config.backfill.max_source_targeted_taxonomy_queries_per_window
+        )
         for term, tags in taxonomy_specs:
             taxonomy_key = (DiscoveryQueryKind.TAXONOMY_TARGETED, term, window.index)
             if taxonomy_key in seen_keys:
@@ -186,14 +190,17 @@ def build_backfill_queries(
             seen_keys.add(taxonomy_key)
             if DiscoveryQueryKind.SOURCE_TARGETED in config.discovery.default_query_kinds:
                 for source_name, domain in source_domains:
-                    source_key = (
+                    if source_targeted_taxonomy_query_count >= source_targeted_taxonomy_query_limit:
+                        break
+                    taxonomy_source_key = (
                         DiscoveryQueryKind.SOURCE_TARGETED,
+                        "taxonomy",
                         term,
                         source_name,
                         domain,
                         window.index,
                     )
-                    if source_key in seen_keys:
+                    if taxonomy_source_key in seen_keys:
                         continue
                     queries.append(
                         DiscoveryQuery(
@@ -207,7 +214,8 @@ def build_backfill_queries(
                             tags=["backfill", source_name, *tags, f"window:{window.index}"],
                         )
                     )
-                    seen_keys.add(source_key)
+                    seen_keys.add(taxonomy_source_key)
+                    source_targeted_taxonomy_query_count += 1
     return queries
 
 

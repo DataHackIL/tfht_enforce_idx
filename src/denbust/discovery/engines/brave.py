@@ -119,6 +119,10 @@ class BraveSearchEngine:
                 metadata={
                     "engine": self.name,
                     "query_kind": query.query_kind.value,
+                    "query_tags": query.tags,
+                    "source_targeted_taxonomy": (
+                        query.query_kind.value == "source_targeted" and "taxonomy" in query.tags
+                    ),
                     "preferred_domains": query.preferred_domains,
                     "result_url": url,
                     "result_title": result.get("title"),

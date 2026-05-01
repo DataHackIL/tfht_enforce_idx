@@ -48,7 +48,7 @@ Planned future datasets:
 - Adds taxonomy-targeted discovery queries from the packaged TFHT taxonomy for broader
   search-engine recall
 - Adds source-targeted taxonomy queries for each configured news domain so search-backed discovery
-  and historical backfill can compensate when source-native pages produce zero recent matches
+  and capped historical backfill can compensate when source-native pages produce zero recent matches
 - Keeps Ynet RSS as the primary משפט ופלילים source while adding a non-browser category-page
   backstop for source-native recall
 - Emits Facebook-targeted `social_targeted` search queries and retains those results as non-scrapeable reference candidates
@@ -300,6 +300,8 @@ DL-PR-06 now builds on the earlier discovery milestones:
   plus Exa-discovered and Google CSE-discovered candidates into the same durable substrate
 - Brave query building for broad and source-targeted discovery searches
 - taxonomy-targeted query building from packaged TFHT discovery terms
+- capped source-targeted taxonomy query building for historical backfill via
+  `backfill.max_source_targeted_taxonomy_queries_per_window`
 - Exa query execution for the same broad and source-targeted discovery searches
 - Google CSE query execution for the same broad and source-targeted discovery searches
 - dedicated `DENBUST_BRAVE_SEARCH_API_KEY`, `DENBUST_EXA_API_KEY`, and
