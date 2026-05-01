@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 
 import anthropic
 from anthropic.types import TextBlock
@@ -19,6 +20,12 @@ from denbust.data_models import (
 from denbust.taxonomy import default_taxonomy
 
 logger = logging.getLogger(__name__)
+
+_SECRET_FRAGMENT_PATTERN = re.compile(
+    r"(?i)(sk-ant-[a-z0-9_-]+|bearer\s+[a-z0-9._~+/=-]+|api[_-]?key[=:]\s*[^,\s]+)"
+)
+_PROMPT_FIELD_PATTERN = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_SUPPORTED_PROMPT_FIELDS = frozenset({"title", "snippet"})
 
 # Legacy compatibility matrix kept for older parser paths and tests.
 ALLOWED_SUBCATEGORIES: dict[Category, set[SubCategory]] = {
@@ -109,22 +116,11 @@ class ClassifierProviderError(RuntimeError):
     """Raised when the configured classifier provider fails before returning usable text."""
 
 
-class _LiteralFormatValue:
-    """Preserve unknown format fields as literal brace-delimited text."""
-
-    def __init__(self, field_name: str) -> None:
-        self._field_name = field_name
-
-    def __format__(self, format_spec: str) -> str:
-        suffix = f":{format_spec}" if format_spec else ""
-        return "{" + self._field_name + suffix + "}"
-
-
-class _PromptFormatMap(dict[str, str]):
-    """Format map that substitutes article fields while preserving JSON examples."""
-
-    def __missing__(self, key: str) -> _LiteralFormatValue:
-        return _LiteralFormatValue(key)
+def sanitize_provider_error_message(error: BaseException | str) -> str:
+    """Return compact provider error text safe for logs and artifacts."""
+    raw_message = str(error) or type(error).__name__
+    redacted = _SECRET_FRAGMENT_PATTERN.sub("[redacted]", raw_message)
+    return " ".join(redacted.split())[:500]
 
 
 def _render_classification_prompt(
@@ -134,7 +130,17 @@ def _render_classification_prompt(
     snippet: str,
 ) -> str:
     """Render article fields without treating prompt JSON examples as placeholders."""
-    return template.format_map(_PromptFormatMap(title=title, snippet=snippet))
+    unknown_fields = sorted(
+        {
+            match.group(1)
+            for match in _PROMPT_FIELD_PATTERN.finditer(template)
+            if match.group(1) not in _SUPPORTED_PROMPT_FIELDS
+        }
+    )
+    if unknown_fields:
+        formatted = ", ".join(f"{{{field}}}" for field in unknown_fields)
+        raise ValueError(f"Unsupported classifier prompt field(s): {formatted}")
+    return template.replace("{title}", title).replace("{snippet}", snippet)
 
 
 class Classifier:
@@ -178,8 +184,9 @@ class Classifier:
             return self._parse_response(text)
 
         except anthropic.APIError as error:
-            logger.error("Error classifying article: %s", error)
-            raise ClassifierProviderError(str(error)) from error
+            sanitized_error = sanitize_provider_error_message(error)
+            logger.error("Error classifying article: %s", sanitized_error)
+            raise ClassifierProviderError(sanitized_error) from None
 
     async def classify_batch(self, articles: list[RawArticle]) -> list[ClassifiedArticle]:
         """Classify a batch of articles."""

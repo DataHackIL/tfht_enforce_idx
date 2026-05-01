@@ -16,6 +16,7 @@ from denbust.classifier.relevance import (
     Classifier,
     ClassifierProviderError,
     create_classifier,
+    sanitize_provider_error_message,
 )
 from denbust.config import Config, load_config
 from denbust.data_models import ClassificationResult, RawArticle
@@ -282,6 +283,7 @@ async def _execute_fixture_article_case(
     try:
         classification = await classifier.classify(article)
     except ClassifierProviderError as exc:
+        sanitized_error = sanitize_provider_error_message(exc)
         return CaseResult(
             case_id=case.id,
             case_type=case.type,
@@ -293,7 +295,7 @@ async def _execute_fixture_article_case(
             expected=expected,
             notes=notes,
             artifact_paths=artifact_paths,
-            error=f"classifier provider error: {exc}",
+            error=f"classifier provider error: {sanitized_error}",
         )
     actual = _to_actual_classification(classification)
     passed = True
@@ -411,6 +413,7 @@ async def _execute_live_source_article_case(
     try:
         classification = await classifier.classify(selected)
     except ClassifierProviderError as exc:
+        sanitized_error = sanitize_provider_error_message(exc)
         return CaseResult(
             case_id=case.id,
             case_type=case.type,
@@ -422,7 +425,7 @@ async def _execute_live_source_article_case(
             expected=case.expected,
             notes=notes,
             artifact_paths=artifact_paths,
-            error=f"classifier provider error: {exc}",
+            error=f"classifier provider error: {sanitized_error}",
         )
     actual = _to_actual_classification(classification)
     passed, compare_notes = _compare_expected(case.expected, actual)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from denbust.data_models import Category, SubCategory
-from denbust.taxonomy import default_taxonomy
+from denbust.taxonomy import TaxonomyDefinition, default_taxonomy
 from denbust.validation.common import (
     ALLOWED_SUBCATEGORIES_BY_CATEGORY,
     DEFAULT_VALIDATION_SET_PATH,
@@ -135,8 +135,8 @@ def _lint_taxonomy(
     row: dict[str, str],
     relevant: bool | None,
     index_relevant: bool | None,
+    taxonomy: TaxonomyDefinition,
 ) -> None:
-    taxonomy = default_taxonomy()
     taxonomy_version = row.get("taxonomy_version", "").strip()
     category_id = row.get("taxonomy_category_id", "").strip()
     subcategory_id = row.get("taxonomy_subcategory_id", "").strip()
@@ -208,6 +208,7 @@ def lint_validation_set(
     if not validation_set_path.exists():
         raise FileNotFoundError(f"Validation set not found: {validation_set_path}")
 
+    taxonomy = default_taxonomy()
     issues: list[ValidationLintIssue] = []
     row_count = 0
     with validation_set_path.open("r", encoding="utf-8", newline="") as handle:
@@ -272,6 +273,7 @@ def lint_validation_set(
                 row=row,
                 relevant=relevant,
                 index_relevant=index_relevant,
+                taxonomy=taxonomy,
             )
 
     if row_count == 0:

@@ -1,5 +1,6 @@
 """Unit tests for classifier module."""
 
+import logging
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,7 @@ from denbust.classifier.relevance import (
     ClassifierProviderError,
     _render_classification_prompt,
     create_classifier,
+    sanitize_provider_error_message,
 )
 from denbust.data_models import Category, RawArticle, SubCategory
 
@@ -61,6 +63,23 @@ class TestClassifierParsing:
         assert "Title: כותרת" in rendered
         assert '{"relevant": true, "confidence": "high"}' in rendered
         assert rendered.endswith("תקציר")
+
+    def test_render_classification_prompt_rejects_unknown_fields(self) -> None:
+        """Prompt typos should fail instead of being sent literally."""
+        with pytest.raises(ValueError, match=r"\{titel\}"):
+            _render_classification_prompt(
+                "Title: {titel}\nSnippet: {snippet}",
+                title="כותרת",
+                snippet="תקציר",
+            )
+
+    def test_sanitize_provider_error_message_redacts_secret_fragments(self) -> None:
+        assert (
+            sanitize_provider_error_message(
+                "bad key sk-ant-secret bearer token-value api_key=plain"
+            )
+            == "bad key [redacted] [redacted] [redacted]"
+        )
 
     def test_parse_missing_enforcement_related_defaults_false(self) -> None:
         """Older classifier JSON without the second axis should still parse safely."""
@@ -367,12 +386,14 @@ class TestClassifierRuntime:
         assert call_kwargs["system"] == CLASSIFICATION_SYSTEM_PROMPT
 
     @pytest.mark.asyncio
-    async def test_classify_raises_provider_error_on_api_error(self) -> None:
+    async def test_classify_raises_sanitized_provider_error_on_api_error(self) -> None:
         """Anthropic API failures should be visible to callers."""
         classifier = Classifier(api_key="test-key")
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         messages = MagicMock()
-        messages.create = MagicMock(side_effect=anthropic.APIError("boom", request, body=None))
+        messages.create = MagicMock(
+            side_effect=anthropic.APIError("boom sk-ant-secret", request, body=None)
+        )
         classifier._client.messages = messages
         article = RawArticle(
             url=HttpUrl("https://example.com/1"),
@@ -382,8 +403,38 @@ class TestClassifierRuntime:
             source_name="test",
         )
 
-        with pytest.raises(ClassifierProviderError, match="boom"):
+        with pytest.raises(ClassifierProviderError, match=r"boom \[redacted\]"):
             await classifier.classify(article)
+
+    @pytest.mark.asyncio
+    async def test_classify_logs_sanitized_provider_error_on_api_error(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Provider failures should not leak raw provider text into logs."""
+        classifier = Classifier(api_key="test-key")
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        messages = MagicMock()
+        messages.create = MagicMock(
+            side_effect=anthropic.APIError("boom bearer token-value", request, body=None)
+        )
+        classifier._client.messages = messages
+        article = RawArticle(
+            url=HttpUrl("https://example.com/1"),
+            title="Headline",
+            snippet="Snippet",
+            date=datetime(2026, 3, 1, tzinfo=UTC),
+            source_name="test",
+        )
+
+        with (
+            caplog.at_level(logging.ERROR, logger="denbust.classifier.relevance"),
+            pytest.raises(ClassifierProviderError, match=r"boom \[redacted\]"),
+        ):
+            await classifier.classify(article)
+
+        assert "bearer token-value" not in caplog.text
+        assert "boom [redacted]" in caplog.text
 
     @pytest.mark.asyncio
     async def test_classify_batch_wraps_each_article(self) -> None:

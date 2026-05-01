@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import sys
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -13,7 +12,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from denbust.classifier.relevance import Classifier, ClassifierProviderError, create_classifier
+from denbust.classifier.relevance import (
+    Classifier,
+    ClassifierProviderError,
+    create_classifier,
+    sanitize_provider_error_message,
+)
 from denbust.config import Config, OutputFormat, SourceType, load_config
 from denbust.data_models import ClassifiedArticle, RawArticle, SourceReference, UnifiedItem
 from denbust.datasets.jobs import ensure_default_jobs_registered
@@ -120,10 +124,6 @@ from denbust.store.seen import SeenStore, create_seen_store
 
 logger = logging.getLogger(__name__)
 
-_SECRET_FRAGMENT_PATTERN = re.compile(
-    r"(?i)(sk-ant-[a-z0-9_-]+|bearer\s+[a-z0-9._~+/=-]+|api[_-]?key[=:]\s*[^,\s]+)"
-)
-
 _OPERATIONAL_STORE_JOBS = {
     JobName.INGEST,
     JobName.SCRAPE_CANDIDATES,
@@ -136,9 +136,7 @@ _OPERATIONAL_STORE_JOBS = {
 
 def _sanitize_classifier_provider_error(error: ClassifierProviderError) -> str:
     """Return a compact provider error string safe for run artifacts."""
-    raw_message = str(error) or type(error).__name__
-    redacted = _SECRET_FRAGMENT_PATTERN.sub("[redacted]", raw_message)
-    return " ".join(redacted.split())[:500]
+    return sanitize_provider_error_message(error)
 
 
 def _mark_classifier_provider_error(
@@ -1143,8 +1141,8 @@ async def _process_ingest_articles(
     try:
         classified_articles = await classifier.classify_batch(unseen_articles)
     except ClassifierProviderError as exc:
-        logger.error("Classifier provider failed during ingest: %s", exc)
         sanitized_error = _mark_classifier_provider_error(result, exc)
+        logger.error("Classifier provider failed during ingest: %s", sanitized_error)
         result.seen_count_after = seen_store.count
         result.finish("fatal: classifier provider error")
         result.set_debug_payload(
@@ -1929,8 +1927,11 @@ async def run_news_scrape_candidates_job(
                 classifier=classifier,
             )
         except ClassifierProviderError as exc:
-            logger.error("Classifier provider failed during candidate fallback retention: %s", exc)
-            _mark_classifier_provider_error(result, exc)
+            sanitized_error = _mark_classifier_provider_error(result, exc)
+            logger.error(
+                "Classifier provider failed during candidate fallback retention: %s",
+                sanitized_error,
+            )
             result.seen_count_after = seen_store.count
             return result.finish("fatal: classifier provider error")
         if fallback_records and store is not None:
@@ -2217,8 +2218,11 @@ async def run_news_backfill_scrape_job(
                 classifier=classifier,
             )
         except ClassifierProviderError as exc:
-            logger.error("Classifier provider failed during backfill fallback retention: %s", exc)
-            _mark_classifier_provider_error(result, exc)
+            sanitized_error = _mark_classifier_provider_error(result, exc)
+            logger.error(
+                "Classifier provider failed during backfill fallback retention: %s",
+                sanitized_error,
+            )
             result.seen_count_after = seen_store.count
             return result.finish("fatal: classifier provider error")
         if fallback_records and store is not None:

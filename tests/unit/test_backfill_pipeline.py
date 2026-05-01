@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -648,13 +649,16 @@ async def test_run_news_backfill_scrape_job_finishes_when_queue_is_empty(
 @pytest.mark.asyncio
 async def test_run_news_backfill_scrape_job_marks_classifier_provider_error_fatal(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     tmp_path: Path,
 ) -> None:
     """Backfill scrape should fail visibly when the classifier provider is unavailable."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [FakeSource("ynet")])
     classifier = MagicMock()
-    classifier.classify_batch = AsyncMock(side_effect=ClassifierProviderError("api down"))
+    classifier.classify_batch = AsyncMock(
+        side_effect=ClassifierProviderError("api down api_key=plain")
+    )
     monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
     monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
     monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
@@ -680,16 +684,63 @@ async def test_run_news_backfill_scrape_job_marks_classifier_provider_error_fata
     )
     monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _store: articles)
 
-    result = await run_news_backfill_scrape_job(
-        Config(job_name=JobName.BACKFILL_SCRAPE, store={"state_root": tmp_path})
-    )
+    with caplog.at_level(logging.ERROR, logger="denbust.pipeline"):
+        result = await run_news_backfill_scrape_job(
+            Config(job_name=JobName.BACKFILL_SCRAPE, store={"state_root": tmp_path})
+        )
 
     assert result.fatal is True
     assert result.result_summary == "backfill batch batch-1: fatal: classifier provider error"
-    assert result.errors == ["classifier_provider_error=api down"]
+    assert result.errors == ["classifier_provider_error=api down [redacted]"]
     assert result.debug_payload is not None
     assert result.debug_payload["batch_id"] == "batch-1"
     assert result.debug_payload["classifier_summary"]["classification_failed"] is True
+    assert "api_key=plain" not in caplog.text
+    assert "api down [redacted]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_news_backfill_scrape_job_marks_fallback_provider_error_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Fallback-only backfill classification failures should be fatal and redacted."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [FakeSource("ynet")])
+    classifier = MagicMock()
+    classifier.classify_batch = AsyncMock(
+        side_effect=ClassifierProviderError("fallback down bearer token-value")
+    )
+    monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+    monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+    monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
+    store = build_store(tmp_path)
+    store.upsert_backfill_batches([build_batch(status=BackfillBatchStatus.DISCOVERED)])
+    store.upsert_candidates([build_candidate("batch-1")])
+    monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: store)
+    monkeypatch.setattr("denbust.pipeline.create_operational_store", lambda _config: MagicMock())
+    monkeypatch.setattr(
+        "denbust.pipeline._run_backfill_candidate_scrape_job",
+        AsyncMock(
+            return_value=build_scrape_batch(
+                fallback_candidates=[build_candidate("batch-1")],
+                raw_articles=[],
+            )
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="denbust.pipeline"):
+        result = await run_news_backfill_scrape_job(
+            Config(job_name=JobName.BACKFILL_SCRAPE, store={"state_root": tmp_path})
+        )
+
+    assert result.fatal is True
+    assert result.result_summary == "fatal: classifier provider error"
+    assert result.errors == ["classifier_provider_error=fallback down [redacted]"]
+    assert store.get_backfill_batch("batch-1").status is BackfillBatchStatus.PARTIAL
+    assert "bearer token-value" not in caplog.text
+    assert "fallback down [redacted]" in caplog.text
 
 
 @pytest.mark.asyncio

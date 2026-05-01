@@ -49,7 +49,7 @@ class FailingClassifier:
 
     async def classify(self, article: RawArticle) -> ClassificationResult:
         del article
-        raise ClassifierProviderError("provider unavailable")
+        raise ClassifierProviderError("provider unavailable sk-ant-secret")
 
 
 class FakeSource:
@@ -303,7 +303,9 @@ class TestLiveChecks:
 
         assert report.overall_status == "failed"
         assert report.case_results[0].actual is None
-        assert report.case_results[0].error == ("classifier provider error: provider unavailable")
+        assert report.case_results[0].error == (
+            "classifier provider error: provider unavailable [redacted]"
+        )
 
     def test_missing_api_key_writes_failed_report_bundle(
         self,
@@ -702,6 +704,46 @@ class TestLiveChecks:
         assert no_match.passed is False
         assert no_match.error == "No live source article matched the configured selector"
         assert len(no_match.artifact_paths) == 1
+
+    @pytest.mark.asyncio
+    async def test_live_source_case_records_sanitized_provider_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = __import__(
+            "denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"]
+        )
+        case = LiveSourceArticleCaseConfig(
+            id="provider-error",
+            type="live_source_article",
+            source_name="walla",
+            expected=ExpectedClassification(
+                relevant=True,
+                enforcement_related=True,
+                category="brothel",
+                sub_category="closure",
+            ),
+            match_title_contains="בית בושת",
+        )
+        article = RawArticle(
+            url=HttpUrl("https://example.com/provider"),
+            title="פשיטה על בית בושת",
+            snippet="תקציר",
+            date=datetime(2026, 4, 7, tzinfo=UTC),
+            source_name="walla",
+        )
+
+        result = await runner._execute_live_source_article_case(
+            case,
+            classifier=FailingClassifier(),
+            sources_by_name={"walla": FakeSource("walla", [article])},
+            artifacts_dir=tmp_path,
+            runtime_config=Config(keywords=["זנות"]),
+        )
+
+        assert result.passed is False
+        assert result.actual is None
+        assert result.error == "classifier provider error: provider unavailable [redacted]"
 
     def test_run_live_check_scenario_handles_runtime_config_load_failure(
         self,

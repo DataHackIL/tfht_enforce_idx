@@ -903,3 +903,46 @@ class TestCli:
             "output_root": Path("data/live"),
         }
         assert "Live check passed: data/live/output" in result.stdout
+
+    def test_live_check_surfaces_case_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Failed live checks should print per-case errors and exit non-zero."""
+
+        def fake_run_live_check_scenario_sync(
+            config: Path,
+            *,
+            output_root: Path | None = None,
+        ) -> object:
+            del config, output_root
+            return type(
+                "Report",
+                (),
+                {
+                    "overall_status": "failed",
+                    "output_dir": "data/live/output",
+                    "case_results": [
+                        type(
+                            "Case",
+                            (),
+                            {
+                                "case_id": "case-1",
+                                "passed": False,
+                                "error": "classifier provider error: [redacted]",
+                            },
+                        )()
+                    ],
+                },
+            )()
+
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.run_live_check_scenario_sync",
+            fake_run_live_check_scenario_sync,
+        )
+
+        result = runner.invoke(
+            app,
+            ["live-check", "--config", "agents/live_checks/classifier_issue_48.yaml"],
+        )
+
+        assert result.exit_code == 1
+        assert "Live check failed: data/live/output" in result.stdout
+        assert "case-1 error: classifier provider error: [redacted]" in result.stderr

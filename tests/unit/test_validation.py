@@ -1365,6 +1365,65 @@ class TestValidationEvaluate:
         assert "Invalid taxonomy pair" in rendered
         assert "Relevant rows must include taxonomy_version and taxonomy ids" in rendered
 
+    def test_validation_lint_reports_legacy_category_and_taxonomy_mismatches(
+        self, tmp_path: Path
+    ) -> None:
+        validation_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                build_validation_csv_row(
+                    sub_category="arrest",
+                ),
+                build_validation_csv_row(
+                    url="https://example.com/b",
+                    canonical_url="https://example.com/b",
+                    index_relevant="False",
+                ),
+                build_validation_csv_row(
+                    url="https://example.com/c",
+                    canonical_url="https://example.com/c",
+                    category="not_relevant",
+                    sub_category="",
+                ),
+            ],
+        )
+
+        result = lint_validation_set(validation_path)
+
+        rendered = "\n".join(issue.render() for issue in result.issues)
+        assert "Invalid sub_category 'arrest' for category 'brothel'" in rendered
+        assert "index_relevant does not match the packaged taxonomy" in rendered
+        assert "Relevant rows cannot use category 'not_relevant'" in rendered
+
+    def test_validation_lint_reports_missing_file_empty_file_and_bad_header(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(FileNotFoundError, match="Validation set not found"):
+            lint_validation_set(tmp_path / "missing.csv")
+
+        empty_path = tmp_path / "empty.csv"
+        write_csv_rows(empty_path, VALIDATION_SET_COLUMNS, [])
+        empty_result = lint_validation_set(empty_path)
+        assert empty_result.passed is False
+        assert empty_result.issues == [
+            type(empty_result.issues[0])(
+                row_number=1,
+                field="<file>",
+                message="Validation set is empty",
+            )
+        ]
+
+        bad_header_path = tmp_path / "bad-header.csv"
+        bad_header_path.write_text(
+            "source_name,url\nynet,https://example.com/a\n", encoding="utf-8"
+        )
+        bad_header_result = lint_validation_set(bad_header_path)
+        rendered = "\n".join(issue.render() for issue in bad_header_result.issues)
+        assert "Validation CSV header does not match the tracked schema" in rendered
+        assert "Missing validation CSV field" in rendered
+
     def test_validation_lint_passes_tracked_validation_set(self) -> None:
         result = run_validation_lint(
             validation_set_path=Path("validation/news_items/classifier_validation.csv")

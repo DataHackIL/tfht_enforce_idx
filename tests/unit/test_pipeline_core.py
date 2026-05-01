@@ -1234,7 +1234,9 @@ class TestRunPipelineAsync:
 
     @pytest.mark.asyncio
     async def test_run_news_ingest_job_marks_classifier_provider_errors_fatal(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Provider outages should be fatal and should not mark articles seen."""
 
@@ -1263,7 +1265,8 @@ class TestRunPipelineAsync:
         )
         monkeypatch.setattr("denbust.pipeline.filter_seen", lambda articles, _seen_store: articles)
 
-        result = await run_news_ingest_job(Config())
+        with caplog.at_level(logging.ERROR, logger="denbust.pipeline"):
+            result = await run_news_ingest_job(Config())
 
         assert result.fatal is True
         assert result.result_summary == "fatal: classifier provider error"
@@ -1275,6 +1278,8 @@ class TestRunPipelineAsync:
             "provider boom [redacted]"
         )
         assert "classifier_provider_error" in result.debug_payload["suspicions"]
+        assert "sk-ant-secret" not in caplog.text
+        assert "provider boom [redacted]" in caplog.text
         seen_store.mark_seen.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1813,7 +1818,9 @@ class TestRunPipelineAsync:
 
     @pytest.mark.asyncio
     async def test_run_news_scrape_candidates_job_marks_provider_error_fatal_without_seen(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Provider failures during candidate scraping should not look successful."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
@@ -1821,7 +1828,7 @@ class TestRunPipelineAsync:
         raw_article = build_raw_article("https://example.com/provider-failure")
         classifier = MagicMock()
         classifier.classify_batch = AsyncMock(
-            side_effect=ClassifierProviderError("anthropic overloaded")
+            side_effect=ClassifierProviderError("anthropic overloaded sk-ant-secret")
         )
         monkeypatch.setattr(
             "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
@@ -1846,11 +1853,70 @@ class TestRunPipelineAsync:
         mark_seen_mock = MagicMock()
         monkeypatch.setattr("denbust.pipeline.mark_seen", mark_seen_mock)
 
-        result = await run_news_scrape_candidates_job(Config(job_name=JobName.SCRAPE_CANDIDATES))
+        with caplog.at_level(logging.ERROR, logger="denbust.pipeline"):
+            result = await run_news_scrape_candidates_job(
+                Config(job_name=JobName.SCRAPE_CANDIDATES)
+            )
 
         assert result.fatal is True
         assert result.result_summary == "fatal: classifier provider error"
-        assert result.errors == ["classifier_provider_error=anthropic overloaded"]
+        assert result.errors == ["classifier_provider_error=anthropic overloaded [redacted]"]
+        assert "sk-ant-secret" not in caplog.text
+        assert "anthropic overloaded [redacted]" in caplog.text
+        mark_seen_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_news_scrape_candidates_job_marks_fallback_provider_error_fatal(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Provider failures during fallback retention should be fatal and redacted."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        seen_store = MagicMock(count=0)
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            side_effect=ClassifierProviderError("fallback failed bearer token-value")
+        )
+        fallback_candidate = build_persistent_candidate(
+            "candidate-fallback",
+            current_url="https://example.com/fallback",
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
+        )
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: seen_store)
+        monkeypatch.setattr(
+            "denbust.pipeline.create_operational_store", lambda _config: MagicMock()
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline._run_candidate_scrape_job",
+            AsyncMock(
+                return_value=CandidateScrapeBatch(
+                    selected_candidates=[fallback_candidate],
+                    updated_candidates=[],
+                    fallback_candidates=[fallback_candidate],
+                    attempts=[],
+                    raw_articles=[],
+                    errors=[],
+                )
+            ),
+        )
+        mark_seen_mock = MagicMock()
+        monkeypatch.setattr("denbust.pipeline.mark_seen", mark_seen_mock)
+
+        with caplog.at_level(logging.ERROR, logger="denbust.pipeline"):
+            result = await run_news_scrape_candidates_job(
+                Config(job_name=JobName.SCRAPE_CANDIDATES)
+            )
+
+        assert result.fatal is True
+        assert result.result_summary == "fatal: classifier provider error"
+        assert result.errors == ["classifier_provider_error=fallback failed [redacted]"]
+        assert "bearer token-value" not in caplog.text
+        assert "fallback failed [redacted]" in caplog.text
         mark_seen_mock.assert_not_called()
 
     @pytest.mark.asyncio
