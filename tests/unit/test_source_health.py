@@ -308,6 +308,12 @@ def test_render_source_diagnostic_report_includes_findings_and_empty_case() -> N
         sample_keywords=["זנות"],
         artifact_analysis_enabled=True,
         live_probe_enabled=True,
+        source_zero_summary=source_health.SourceZeroSummary(
+            enabled_source_count=2,
+            affected_source_count=1,
+            affected_sources=["ynet"],
+            systemic_source_zero_suspected=False,
+        ),
         results=[
             SourceDiagnosticResult(
                 source_name="ynet",
@@ -336,6 +342,7 @@ def test_render_source_diagnostic_report_includes_findings_and_empty_case() -> N
     rendered = source_health.render_source_diagnostic_report(report)
 
     assert "Source diagnostics" in rendered
+    assert "Source-zero guardrail:" in rendered
     assert "ynet: warn artifact=ok live=warn bucket=keyword_filter_zeroed_results" in rendered
     assert "warning branch" in rendered
 
@@ -389,6 +396,42 @@ def test_merge_status_and_derive_bucket_and_live_result() -> None:
     )
     assert result.probe_mode == "live_probe"
     assert result.checks[0].details["failure_bucket"] == FailureBucket.UNEXPECTED_REDIRECT.value
+
+
+def test_build_source_zero_summary_flags_systemic_source_zero() -> None:
+    summary = source_health._build_source_zero_summary(
+        [
+            SourceDiagnosticResult(
+                source_name="ynet",
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+            ),
+            SourceDiagnosticResult(
+                source_name="walla",
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+            ),
+            SourceDiagnosticResult(
+                source_name="mako",
+                status=DiagnosticStatus.SKIP,
+                live_status=DiagnosticStatus.SKIP,
+            ),
+            SourceDiagnosticResult(
+                source_name="maariv",
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+            ),
+            SourceDiagnosticResult(
+                source_name="haaretz",
+                status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.OK,
+            ),
+        ]
+    )
+
+    assert summary.systemic_source_zero_suspected is True
+    assert summary.affected_source_count == 4
+    assert summary.affected_sources == ["ynet", "walla", "mako", "maariv"]
 
 
 def test_is_unexpected_redirect() -> None:
@@ -2028,6 +2071,12 @@ async def test_probe_mako_reports_parse_zeroed_results(
         "search:בית בושת",
         "section:men-men_news",
     }
+    assert {
+        check.details["failure_mode"] for check in result.checks if "failure_mode" in check.details
+    } == {
+        source_health.MakoFailureMode.PARSE_ZERO.value,
+        source_health.MakoFailureMode.SELECTOR_DRIFT.value,
+    }
 
 
 @pytest.mark.asyncio
@@ -2127,6 +2176,10 @@ async def test_probe_mako_reports_not_found_search_terminal_state(
     search_check = next(check for check in result.checks if check.name == "search:בית בושת")
     assert search_check.summary == "Search reached Mako's not-found terminal state"
     assert search_check.details["terminal_state"] == "not_found"
+    assert (
+        search_check.details["failure_mode"]
+        == source_health.MakoFailureMode.STALE_OR_KEYWORD_ZERO.value
+    )
 
 
 @pytest.mark.asyncio
@@ -2147,6 +2200,10 @@ async def test_probe_mako_skips_when_browser_runtime_is_missing(
     assert result.live_status == DiagnosticStatus.SKIP
     assert result.failure_bucket is None
     assert result.checks[0].name == "browser_session"
+    assert (
+        result.checks[0].details["failure_mode"]
+        == source_health.MakoFailureMode.BROWSER_RUNTIME_MISSING.value
+    )
 
 
 @pytest.mark.asyncio
@@ -2204,6 +2261,10 @@ async def test_probe_mako_reports_http_fetch_failed_when_search_and_section_fail
         "search:בית בושת",
         "section:men-men_news",
     }
+    assert all(
+        check.details["failure_mode"] == source_health.MakoFailureMode.UNKNOWN_EXCEPTION.value
+        for check in result.checks
+    )
 
 
 @pytest.mark.asyncio
@@ -2261,6 +2322,11 @@ async def test_probe_mako_reports_unexpected_redirect_after_keyword_hit(
     assert result.failure_bucket == FailureBucket.UNEXPECTED_REDIRECT
     assert any(
         check.summary == "Search page returned parsed keyword-matching articles"
+        for check in result.checks
+    )
+    assert any(
+        check.details.get("failure_mode")
+        == source_health.MakoFailureMode.REDIRECT_OR_ANTI_BOT.value
         for check in result.checks
     )
 
@@ -2322,6 +2388,11 @@ async def test_probe_mako_reports_keyword_zeroing_with_search_hits_and_section_p
     assert summaries["section:men-men_news"] == (
         "Section page contains candidates but parsing returned zero articles"
     )
+    details = {check.name: check.details for check in result.checks}
+    assert (
+        details["section:men-men_news"]["failure_mode"]
+        == source_health.MakoFailureMode.PARSE_ZERO.value
+    )
 
 
 @pytest.mark.asyncio
@@ -2379,6 +2450,11 @@ async def test_probe_mako_reports_section_keyword_zeroing(
     summaries = {check.name: check.summary for check in result.checks}
     assert summaries["section:men-men_news"] == (
         "Section page returned parsed articles but none match the sampled keywords"
+    )
+    details = {check.name: check.details for check in result.checks}
+    assert (
+        details["section:men-men_news"]["failure_mode"]
+        == source_health.MakoFailureMode.STALE_OR_KEYWORD_ZERO.value
     )
 
 

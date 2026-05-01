@@ -226,6 +226,8 @@ Record per source:
   PR #96 helper work
 - whether Mako failures look like missing Chromium, timeout, anti-bot, selector drift, or navigation instability
 - whether Ynet RSS plus the category-page backstop still leaves source-recall gaps
+- whether `source_zero_summary.systemic_source_zero_suspected` is true, which means the 4+ source
+  guardrail has fired and #72 should take priority over a source-specific fix
 
 Decision rules:
 
@@ -557,14 +559,15 @@ Create `reports/final_experiment_summary.md` with these sections:
 
 The experiment should not assume these are true, but these are the current hypotheses:
 
-1. `DL-PR-12` is not the only plausible next step. If source failures are still widespread, a
-   source-health correctness PR should come before optional self-healing scaffolding.
+1. `DL-PR-12` is not the only plausible next step. The fresh Phase C source-health run shows the
+   4+ affected-source guardrail firing, so #72 remains the active systemic source-zero follow-up.
 2. `PLAN.md` and `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` likely need status updates after the
    experiment, regardless of what implementation work comes next.
-3. Mako issues #71 and #74 are probably duplicates or near-duplicates and can be consolidated after
-   a fresh Mako probe.
-4. #72 is the central open reliability question: either the source-zero problem still exists, or the
-   open issue can be closed with evidence.
+3. Mako issues #71 and #74 are duplicates or near-duplicates unless a future Mako live probe fails
+   after `python -m playwright install chromium`; the current Mako diagnostics are healthy with the
+   browser runtime installed.
+4. #72 is the central open reliability question: the current evidence shows Ynet, Walla, Maariv, and
+   ICE remain affected by source-native zero/stale/keyword-zero patterns while Mako and Haaretz pass.
 5. #65 is treated by the Ynet category-page backstop; future Ynet work should focus on fixture-based
    end-to-end coverage or search-backed recall.
 6. #52 and #53 appear treated by PR #96's public Maariv/ICE diagnostic helpers; close or update the

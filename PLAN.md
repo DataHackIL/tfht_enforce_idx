@@ -31,7 +31,10 @@ This repo currently has one main plan and two important sub-plans.
 PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
 local validation data problems and Anthropic provider failures fail visibly before operators trust
 the resulting metrics. The first source-recall follow-up adds a Ynet משפט ופלילים category-page
-backstop while keeping the RSS feed as the primary Ynet source.
+backstop while keeping the RSS feed as the primary Ynet source. The Phase C source-health
+follow-through now adds a report-level source-zero guardrail and explicit Mako browser/navigation
+failure-mode details, making the current #72 systemic source-zero evidence separable from #71/#74
+Mako runtime hygiene.
 
 ### What is already in place
 
@@ -41,6 +44,11 @@ backstop while keeping the RSS feed as the primary Ynet source.
   `denbust diagnose-discovery`.
 - Source-health diagnostics already cover selector drift, parse-zero, stale-result, and keyword-zero
   cases.
+- Source-health diagnostics include a `source_zero_summary` that flags the 4+ affected-source
+  guardrail used to decide whether a run is systemic rather than source-specific.
+- Mako live diagnostics distinguish missing browser runtime, navigation timeout, context destroyed,
+  redirect/anti-bot, selector drift, parse-zero, and stale/keyword-zero failure modes where the
+  rendered state supports that classification.
 - Ynet source-health diagnostics now split RSS and category-page checks so RSS low coverage,
   category HTTP failure, category parse-zero, and category keyword-zero outcomes are visible.
 - Validation evaluation already reports stage-wise relevance, enforcement, taxonomy, and index
@@ -48,8 +56,10 @@ backstop while keeping the RSS feed as the primary Ynet source.
 
 ### What comes next
 
-1. Use the hardened May experiment path to rerun validation and live checks locally.
-2. Prioritize search-backed discovery and backfill gaps from those outputs.
+1. Prioritize search-backed discovery and backfill gaps from the Phase C source-health evidence,
+   especially the #72 systemic source-zero pattern.
+2. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
+   future live Mako run fails after Chromium is installed.
 3. Treat optional self-healing scaffolding as later work unless the hardened experiment data shows it
    is the highest-leverage next step.
 
