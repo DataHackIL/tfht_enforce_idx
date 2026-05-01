@@ -399,31 +399,40 @@ def test_merge_status_and_derive_bucket_and_live_result() -> None:
     assert result.checks[0].details["failure_bucket"] == FailureBucket.UNEXPECTED_REDIRECT.value
 
 
-def test_build_source_zero_summary_flags_systemic_source_zero_for_warns_and_fails() -> None:
+def test_build_source_zero_summary_flags_systemic_source_zero_for_relevant_buckets() -> None:
     summary = source_health._build_source_zero_summary(
         [
             SourceDiagnosticResult(
                 source_name="ynet",
                 status=DiagnosticStatus.WARN,
                 live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
             ),
             SourceDiagnosticResult(
                 source_name="walla",
                 status=DiagnosticStatus.WARN,
                 live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.HTTP_FETCH_FAILED,
             ),
             SourceDiagnosticResult(
                 source_name="mako",
                 status=DiagnosticStatus.FAIL,
                 live_status=DiagnosticStatus.FAIL,
+                failure_bucket=FailureBucket.PARSE_ZEROED_RESULTS,
             ),
             SourceDiagnosticResult(
                 source_name="maariv",
                 status=DiagnosticStatus.WARN,
                 live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.SELECTOR_DRIFT_SUSPECTED,
             ),
             SourceDiagnosticResult(
                 source_name="haaretz",
+                status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.OK,
+            ),
+            SourceDiagnosticResult(
+                source_name="ice",
                 status=DiagnosticStatus.OK,
                 live_status=DiagnosticStatus.OK,
             ),
@@ -434,8 +443,34 @@ def test_build_source_zero_summary_flags_systemic_source_zero_for_warns_and_fail
     assert summary.systemic_source_zero_suspected is True
     assert summary.affected_source_count == 4
     assert summary.enabled_source_count == 6
-    assert summary.selected_source_count == 5
+    assert summary.selected_source_count == 6
     assert summary.affected_sources == ["ynet", "walla", "mako", "maariv"]
+
+
+def test_build_source_zero_summary_ignores_generic_warns_without_source_zero_bucket() -> None:
+    summary = source_health._build_source_zero_summary(
+        [
+            SourceDiagnosticResult(
+                source_name="ynet",
+                status=DiagnosticStatus.WARN,
+                artifact_status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.SKIP,
+                failure_bucket=None,
+            ),
+            SourceDiagnosticResult(
+                source_name="walla",
+                status=DiagnosticStatus.FAIL,
+                artifact_status=DiagnosticStatus.SKIP,
+                live_status=DiagnosticStatus.FAIL,
+                failure_bucket=FailureBucket.LIVE_PROBE_EXCEPTION,
+            ),
+        ],
+        enabled_source_count=2,
+    )
+
+    assert summary.affected_sources == []
+    assert summary.affected_source_count == 0
+    assert summary.systemic_source_zero_suspected is False
 
 
 def test_build_source_zero_summary_preserves_enabled_count_for_scoped_runs() -> None:
@@ -443,8 +478,9 @@ def test_build_source_zero_summary_preserves_enabled_count_for_scoped_runs() -> 
         [
             SourceDiagnosticResult(
                 source_name="mako",
-                status=DiagnosticStatus.OK,
-                live_status=DiagnosticStatus.OK,
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
             ),
         ],
         enabled_source_count=6,
@@ -452,7 +488,7 @@ def test_build_source_zero_summary_preserves_enabled_count_for_scoped_runs() -> 
 
     assert summary.enabled_source_count == 6
     assert summary.selected_source_count == 1
-    assert summary.affected_source_count == 0
+    assert summary.affected_source_count == 1
     assert summary.systemic_source_zero_suspected is False
 
 
@@ -511,6 +547,10 @@ def test_build_source_zero_summary_ignores_skipped_probe_modes_when_merged_statu
             "Mako search did not reach a terminal state before timeout",
             source_health.MakoFailureMode.NAVIGATION_TIMEOUT,
         ),
+        (
+            "Mako page never became parseable before timeout; install chromium",
+            source_health.MakoFailureMode.NAVIGATION_TIMEOUT,
+        ),
     ],
 )
 def test_classify_mako_exception_distinguishes_navigation_failure_modes(
@@ -518,6 +558,23 @@ def test_classify_mako_exception_distinguishes_navigation_failure_modes(
     expected: source_health.MakoFailureMode,
 ) -> None:
     assert source_health._classify_mako_exception(RuntimeError(message)) is expected
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Playwright is not installed. Install it and Chromium.",
+        "Chromium could not be launched for Mako scraping.",
+        "browser executable not found",
+    ],
+)
+def test_classify_mako_exception_reports_explicit_missing_browser_runtime(
+    message: str,
+) -> None:
+    assert (
+        source_health._classify_mako_exception(RuntimeError(message))
+        is source_health.MakoFailureMode.BROWSER_RUNTIME_MISSING
+    )
 
 
 def test_is_unexpected_redirect() -> None:
@@ -2280,7 +2337,7 @@ async def test_probe_mako_skips_when_browser_runtime_is_missing(
             del rate_limit_delay_seconds
 
         async def _open_browser_session(self) -> SimpleNamespace:
-            raise RuntimeError("Chromium is not installed")
+            raise RuntimeError("Chromium could not be launched for Mako scraping.")
 
     monkeypatch.setattr(source_health.mako_source, "MakoScraper", FakeScraper)
 

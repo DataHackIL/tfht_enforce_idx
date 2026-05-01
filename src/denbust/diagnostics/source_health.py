@@ -59,6 +59,18 @@ class FailureBucket(StrEnum):
     LIVE_PROBE_EXCEPTION = "live_probe_exception"
 
 
+SOURCE_ZERO_GUARDRAIL_BUCKETS = {
+    FailureBucket.FEED_FETCH_FAILED,
+    FailureBucket.FEED_EMPTY_OR_STALE,
+    FailureBucket.STALE_RESULTS,
+    FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+    FailureBucket.HTTP_FETCH_FAILED,
+    FailureBucket.UNEXPECTED_REDIRECT,
+    FailureBucket.SELECTOR_DRIFT_SUSPECTED,
+    FailureBucket.PARSE_ZEROED_RESULTS,
+}
+
+
 class MakoFailureMode(StrEnum):
     """Mako-specific live-probe failure modes."""
 
@@ -1519,17 +1531,20 @@ def _build_source_zero_summary(
     enabled_source_count: int,
     threshold: int = 4,
 ) -> SourceZeroSummary:
-    affected_statuses = {DiagnosticStatus.FAIL, DiagnosticStatus.WARN}
     affected_sources = [
-        result.source_name for result in results if result.status in affected_statuses
+        result.source_name
+        for result in results
+        if result.failure_bucket in SOURCE_ZERO_GUARDRAIL_BUCKETS
     ]
+    selected_source_count = len(results)
+    full_coverage = selected_source_count == enabled_source_count
     return SourceZeroSummary(
         threshold=threshold,
         enabled_source_count=enabled_source_count,
-        selected_source_count=len(results),
+        selected_source_count=selected_source_count,
         affected_source_count=len(affected_sources),
         affected_sources=affected_sources,
-        systemic_source_zero_suspected=len(affected_sources) >= threshold,
+        systemic_source_zero_suspected=full_coverage and len(affected_sources) >= threshold,
     )
 
 
@@ -1543,8 +1558,6 @@ def _derive_bucket_from_checks(checks: list[ProbeCheck]) -> FailureBucket | None
 
 def _classify_mako_exception(exc: Exception) -> MakoFailureMode:
     message = str(exc).lower()
-    if "playwright" in message or "chromium" in message or "install chromium" in message:
-        return MakoFailureMode.BROWSER_RUNTIME_MISSING
     if (
         "context destroyed" in message
         or "execution context was destroyed" in message
@@ -1566,6 +1579,13 @@ def _classify_mako_exception(exc: Exception) -> MakoFailureMode:
         return MakoFailureMode.SELECTOR_DRIFT
     if "timed out" in message or "timeout" in message or "terminal state" in message:
         return MakoFailureMode.NAVIGATION_TIMEOUT
+    if (
+        "playwright is not installed" in message
+        or "chromium could not be launched" in message
+        or "executable doesn't exist" in message
+        or "browser executable not found" in message
+    ):
+        return MakoFailureMode.BROWSER_RUNTIME_MISSING
     return MakoFailureMode.UNKNOWN_EXCEPTION
 
 
