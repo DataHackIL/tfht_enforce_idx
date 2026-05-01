@@ -499,7 +499,6 @@ async def _probe_maariv(
     sample_keywords: list[str],
 ) -> SourceDiagnosticResult:
     cutoff = datetime.now(UTC) - timedelta(days=days)
-    scraper = maariv_source.MaarivScraper()
     try:
         fetch_result = await _fetch_text(
             maariv_source.MAARIV_LAW_URL,
@@ -520,29 +519,21 @@ async def _probe_maariv(
             ],
         )
 
-    soup = BeautifulSoup(fetch_result.text, "lxml")
-    selector = "article.category-article, article, .article"
-    containers = soup.select(selector)
-    parsed_articles = [
-        article
-        for article in (scraper._parse_article_item(item, cutoff) for item in containers)
-        if article is not None
-    ]
-    keyword_matches = [
-        article
-        for article in parsed_articles
-        if maariv_source.matches_maariv_keywords(article, sample_keywords)
-    ]
+    parsed = maariv_source.diagnose_maariv_section_html(
+        fetch_result.text,
+        cutoff=cutoff,
+        keywords=sample_keywords,
+    )
     details = {
         "requested_url": maariv_source.MAARIV_LAW_URL,
         "final_url": fetch_result.final_url,
         "status_code": fetch_result.status_code,
         "content_type": fetch_result.content_type,
         "payload_length": len(fetch_result.text),
-        "container_selector": selector,
-        "container_count": len(containers),
-        "parsed_article_count": len(parsed_articles),
-        "keyword_match_count": len(keyword_matches),
+        "container_selector": parsed.container_selector,
+        "container_count": parsed.container_count,
+        "parsed_article_count": parsed.parsed_article_count,
+        "keyword_match_count": parsed.keyword_match_count,
     }
 
     if _is_unexpected_redirect(fetch_result.final_url, maariv_source.MAARIV_LAW_URL):
@@ -559,7 +550,7 @@ async def _probe_maariv(
                 )
             ],
         )
-    if len(containers) == 0:
+    if parsed.container_count == 0:
         return _live_result(
             source_name="maariv",
             status=DiagnosticStatus.FAIL,
@@ -573,7 +564,7 @@ async def _probe_maariv(
                 )
             ],
         )
-    if len(parsed_articles) == 0:
+    if parsed.parsed_article_count == 0:
         return _live_result(
             source_name="maariv",
             status=DiagnosticStatus.FAIL,
@@ -587,7 +578,7 @@ async def _probe_maariv(
                 )
             ],
         )
-    if len(keyword_matches) == 0:
+    if parsed.keyword_match_count == 0:
         return _live_result(
             source_name="maariv",
             status=DiagnosticStatus.WARN,
@@ -832,7 +823,6 @@ async def _probe_ice(
     sample_keywords: list[str],
 ) -> SourceDiagnosticResult:
     cutoff = datetime.now(UTC) - timedelta(days=days)
-    scraper = ice_source.IceScraper(rate_limit_delay_seconds=0.0)
     checks: list[ProbeCheck] = []
     saw_successful_page = False
     saw_results_container = False
@@ -846,7 +836,7 @@ async def _probe_ice(
         follow_redirects=True,
     ) as client:
         for keyword in sample_keywords:
-            page_url = scraper._build_search_url(keyword, page_number=1)
+            page_url = ice_source.build_ice_search_url(keyword, page_number=1)
             try:
                 fetch_result = await _fetch_text(
                     page_url,
@@ -868,38 +858,23 @@ async def _probe_ice(
             if _is_unexpected_redirect(fetch_result.final_url, page_url):
                 unexpected_redirect = True
 
-            soup = BeautifulSoup(fetch_result.text, "lxml")
-            results_article = scraper._find_results_article(soup)
-            candidates = results_article.select("ul > li") if results_article is not None else []
-            if results_article is not None:
+            parsed = ice_source.diagnose_ice_search_html(fetch_result.text, cutoff=cutoff)
+            if parsed.has_results_container:
                 saw_results_container = True
 
-            unparseable_date_count = 0
-            parsed_article_count = 0
-            stale_candidate_count = 0
-            for candidate in candidates:
-                candidate_text = candidate.get_text(" ", strip=True)
-                parsed_date = scraper._parse_date(candidate_text)
-                if parsed_date is None:
-                    unparseable_date_count += 1
-                elif parsed_date < cutoff:
-                    stale_candidate_count += 1
-                if scraper._parse_article_item(candidate, cutoff) is not None:
-                    parsed_article_count += 1
-
-            parsed_article_total += parsed_article_count
-            stale_candidate_total += stale_candidate_count
-            if results_article is None:
+            parsed_article_total += parsed.parsed_article_count
+            stale_candidate_total += parsed.stale_candidate_count
+            if not parsed.has_results_container:
                 status = DiagnosticStatus.FAIL
                 summary = "Search page did not expose the expected ICE results container"
             elif (
-                parsed_article_count == 0
-                and stale_candidate_count == len(candidates)
-                and candidates
+                parsed.parsed_article_count == 0
+                and parsed.stale_candidate_count == parsed.candidate_count
+                and parsed.candidate_count
             ):
                 status = DiagnosticStatus.WARN
                 summary = "Search page returned only stale candidates outside the cutoff window"
-            elif parsed_article_count == 0:
+            elif parsed.parsed_article_count == 0:
                 status = DiagnosticStatus.WARN
                 summary = "Search page contains candidates but parsing returned zero articles"
             else:
@@ -917,11 +892,11 @@ async def _probe_ice(
                         "status_code": fetch_result.status_code,
                         "content_type": fetch_result.content_type,
                         "payload_length": len(fetch_result.text),
-                        "candidate_count": len(candidates),
-                        "parsed_article_count": parsed_article_count,
-                        "stale_candidate_count": stale_candidate_count,
-                        "unparseable_date_count": unparseable_date_count,
-                        "has_results_container": results_article is not None,
+                        "candidate_count": parsed.candidate_count,
+                        "parsed_article_count": parsed.parsed_article_count,
+                        "stale_candidate_count": parsed.stale_candidate_count,
+                        "unparseable_date_count": parsed.unparseable_date_count,
+                        "has_results_container": parsed.has_results_container,
                     },
                 )
             )

@@ -5,7 +5,20 @@ Actions after `DL-PR-11`.
 
 ## Local Run Path
 
-Use the tracked local config for operator runs:
+Load local secrets through `direnv` before Anthropic-backed validation or search-enabled runs:
+
+```bash
+eval "$(direnv export bash)"
+```
+
+For isolated experiments, clear any personal state overrides before choosing a fresh output root:
+
+```bash
+unset DENBUST_RUNS_DIR
+unset DENBUST_STORE_PATH
+```
+
+Use the tracked safe local config for default operator runs:
 
 ```bash
 denbust run --dataset news_items --job discover --config agents/news/local.yaml
@@ -22,6 +35,47 @@ denbust run --dataset news_items --job backfill_scrape --config agents/news/loca
 Backfill jobs also read and write the shared `news_items/discover/` candidate-layer state.
 The search-engine side of `discover` and `backfill_discover` now emits `taxonomy_targeted` queries
 from the packaged TFHT taxonomy in addition to the coarse operator keyword list.
+
+Use `agents/news/local_search.yaml` only when intentionally exercising source-native discovery
+plus Brave, Exa, and Google CSE locally:
+
+```bash
+denbust run --dataset news_items --job discover --config agents/news/local_search.yaml
+DENBUST_BACKFILL_DATE_FROM=2026-01-01T00:00:00+00:00 \
+DENBUST_BACKFILL_DATE_TO=2026-01-31T23:59:59+00:00 \
+denbust run --dataset news_items --job backfill_discover --config agents/news/local_search.yaml
+```
+
+`local_search.yaml` requires:
+
+- `DENBUST_BRAVE_SEARCH_API_KEY`
+- `DENBUST_EXA_API_KEY`
+- `DENBUST_GOOGLE_CSE_API_KEY`
+- `DENBUST_GOOGLE_CSE_ID`
+
+Missing search keys are surfaced by the discovery run errors. They are not hidden by the config.
+
+Before model-backed validation, lint the tracked validation CSV without credentials:
+
+```bash
+denbust validation-lint --validation-set validation/news_items/classifier_validation.csv
+```
+
+Then run evaluation and live checks:
+
+```bash
+denbust validation-evaluate \
+  --validation-set validation/news_items/classifier_validation.csv \
+  --variants agents/validation/classifier_variants.yaml \
+  --output data/may_26_followup/<timestamp>/validation_evaluate.json
+
+denbust live-check \
+  --config agents/live_checks/classifier_issue_48.yaml \
+  --output-root data/may_26_followup/<timestamp>/live_checks
+```
+
+Generated `data/may_26_followup/` bundles are local experiment artifacts and should remain
+untracked.
 
 ## GitHub Actions Run Path
 
@@ -129,6 +183,12 @@ state_repo/news_items/backfill_scrape/
 `backfill_scrape` remains manual in this phase because historical drain rates and retry backlog are
 operationally sensitive. Operators should choose when to spend scrape budget on historical work
 instead of scheduling it blindly.
+
+Classifier provider/API failures are fatal for `ingest`, `scrape_candidates`, and
+`backfill_scrape`. A run that cannot reach Anthropic records a sanitized
+`classifier_provider_error=...`, sets `fatal=true`, returns `fatal: classifier provider error`, and
+does not mark articles as seen. Live checks record the same condition as a per-case `error` rather
+than fabricating `actual=not_relevant`.
 
 ## One-Time 90-Day Re-Scan
 

@@ -503,6 +503,9 @@ class TestCli:
         validation_evaluate_command = next(
             command for command in app.registered_commands if command.name == "validation-evaluate"
         )
+        validation_lint_command = next(
+            command for command in app.registered_commands if command.name == "validation-lint"
+        )
 
         assert validation_finalize_command.callback.__defaults__ == (
             validation_common.DEFAULT_VALIDATION_SET_PATH,
@@ -511,6 +514,9 @@ class TestCli:
             validation_common.DEFAULT_VALIDATION_SET_PATH,
             validation_common.DEFAULT_VARIANT_MATRIX_PATH,
             None,
+        )
+        assert validation_lint_command.callback.__defaults__ == (
+            validation_common.DEFAULT_VALIDATION_SET_PATH,
         )
 
     def test_diagnose_sources_forwards_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -799,3 +805,144 @@ class TestCli:
         assert captured["output_path"] is None
         assert "Saved JSON report to report.json" in result.stdout
         assert "Saved Markdown report to report.md" in result.stdout
+
+    def test_validation_lint_reports_success_and_failures(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """validation-lint should run without credentials and return non-zero on issues."""
+
+        class Issue:
+            def render(self) -> str:
+                return "row 2, field relevant: bad bool"
+
+        calls: list[Path] = []
+        results = iter(
+            [
+                type(
+                    "LintResult",
+                    (),
+                    {
+                        "passed": True,
+                        "row_count": 5,
+                        "validation_set_path": Path("validation.csv"),
+                        "issues": [],
+                    },
+                )(),
+                type(
+                    "LintResult",
+                    (),
+                    {
+                        "passed": False,
+                        "row_count": 1,
+                        "validation_set_path": Path("bad.csv"),
+                        "issues": [Issue()],
+                    },
+                )(),
+            ]
+        )
+
+        def fake_run_validation_lint(*, validation_set_path: Path) -> object:
+            calls.append(validation_set_path)
+            return next(results)
+
+        monkeypatch.setattr("denbust.validation.run_validation_lint", fake_run_validation_lint)
+
+        ok = runner.invoke(app, ["validation-lint", "--validation-set", "validation.csv"])
+        bad = runner.invoke(app, ["validation-lint", "--validation-set", "bad.csv"])
+
+        assert ok.exit_code == 0
+        assert "Validation set OK: 5 row(s) in validation.csv" in ok.stdout
+        assert bad.exit_code == 1
+        assert "row 2, field relevant: bad bool" in bad.stderr
+        assert calls == [Path("validation.csv"), Path("bad.csv")]
+
+    def test_live_check_forwards_config_and_output_root(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """live-check should expose the tracked runner through the main CLI."""
+        captured: dict[str, Path | None] = {}
+
+        def fake_run_live_check_scenario_sync(
+            config: Path,
+            *,
+            output_root: Path | None = None,
+        ) -> object:
+            captured["config"] = config
+            captured["output_root"] = output_root
+            return type(
+                "Report",
+                (),
+                {
+                    "overall_status": "passed",
+                    "output_dir": "data/live/output",
+                    "case_results": [
+                        type("Case", (), {"case_id": "case-1", "passed": True, "error": None})()
+                    ],
+                },
+            )()
+
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.run_live_check_scenario_sync",
+            fake_run_live_check_scenario_sync,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "live-check",
+                "--config",
+                "agents/live_checks/classifier_issue_48.yaml",
+                "--output-root",
+                "data/live",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured == {
+            "config": Path("agents/live_checks/classifier_issue_48.yaml"),
+            "output_root": Path("data/live"),
+        }
+        assert "Live check passed: data/live/output" in result.stdout
+
+    def test_live_check_surfaces_case_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Failed live checks should print per-case errors and exit non-zero."""
+
+        def fake_run_live_check_scenario_sync(
+            config: Path,
+            *,
+            output_root: Path | None = None,
+        ) -> object:
+            del config, output_root
+            return type(
+                "Report",
+                (),
+                {
+                    "overall_status": "failed",
+                    "output_dir": "data/live/output",
+                    "case_results": [
+                        type(
+                            "Case",
+                            (),
+                            {
+                                "case_id": "case-1",
+                                "passed": False,
+                                "error": "classifier provider error: [redacted]",
+                            },
+                        )()
+                    ],
+                },
+            )()
+
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.run_live_check_scenario_sync",
+            fake_run_live_check_scenario_sync,
+        )
+
+        result = runner.invoke(
+            app,
+            ["live-check", "--config", "agents/live_checks/classifier_issue_48.yaml"],
+        )
+
+        assert result.exit_code == 1
+        assert "Live check failed: data/live/output" in result.stdout
+        assert "case-1 error: classifier provider error: [redacted]" in result.stderr

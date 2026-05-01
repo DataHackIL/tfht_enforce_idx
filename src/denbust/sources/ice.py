@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
@@ -22,6 +23,60 @@ ICE_BASE_URL = "https://www.ice.co.il"
 ICE_SEARCH_URL_PREFIX = f"{ICE_BASE_URL}/list/searchresult"
 MAX_SEARCH_PAGES = 5
 DEFAULT_RATE_LIMIT_DELAY_SECONDS = 1.5
+
+
+@dataclass(frozen=True)
+class IceDiagnosticParseResult:
+    """Public parse counters for source-health diagnostics."""
+
+    candidate_count: int
+    parsed_article_count: int
+    stale_candidate_count: int
+    unparseable_date_count: int
+    has_results_container: bool
+    article_urls: list[str]
+
+
+def build_ice_search_url(keyword: str, page_number: int = 1) -> str:
+    """Build the canonical ICE search URL for diagnostics and scraping."""
+    quoted_keyword = quote(keyword, safe="")
+    url = f"{ICE_SEARCH_URL_PREFIX}/{quoted_keyword}"
+    if page_number > 1:
+        url = f"{url}/page-{page_number}"
+    return url
+
+
+def diagnose_ice_search_html(
+    html: str,
+    *,
+    cutoff: datetime,
+) -> IceDiagnosticParseResult:
+    """Return public parse counters for an ICE search-results HTML payload."""
+    scraper = IceScraper(rate_limit_delay_seconds=0.0)
+    soup = BeautifulSoup(html, "lxml")
+    results_article = scraper._find_results_article(soup)
+    candidates = results_article.select("ul > li") if results_article is not None else []
+    unparseable_date_count = 0
+    parsed_articles: list[RawArticle] = []
+    stale_candidate_count = 0
+    for candidate in candidates:
+        candidate_text = candidate.get_text(" ", strip=True)
+        parsed_date = scraper._parse_date(candidate_text)
+        if parsed_date is None:
+            unparseable_date_count += 1
+        elif parsed_date < cutoff:
+            stale_candidate_count += 1
+        article = scraper._parse_article_item(candidate, cutoff)
+        if article is not None:
+            parsed_articles.append(article)
+    return IceDiagnosticParseResult(
+        candidate_count=len(candidates),
+        parsed_article_count=len(parsed_articles),
+        stale_candidate_count=stale_candidate_count,
+        unparseable_date_count=unparseable_date_count,
+        has_results_container=results_article is not None,
+        article_urls=[str(article.url) for article in parsed_articles[:5]],
+    )
 
 
 class IceScraper(Source):
@@ -118,11 +173,7 @@ class IceScraper(Source):
 
     def _build_search_url(self, keyword: str, page_number: int = 1) -> str:
         """Build the canonical ICE search URL for a keyword and page."""
-        quoted_keyword = quote(keyword, safe="")
-        url = f"{ICE_SEARCH_URL_PREFIX}/{quoted_keyword}"
-        if page_number > 1:
-            url = f"{url}/page-{page_number}"
-        return url
+        return build_ice_search_url(keyword, page_number)
 
     def _parse_search_results(self, html: str, cutoff: datetime) -> list[RawArticle]:
         """Parse ICE search results HTML into articles."""

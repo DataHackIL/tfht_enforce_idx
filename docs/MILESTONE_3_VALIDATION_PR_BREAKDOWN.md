@@ -31,7 +31,19 @@ This note breaks Milestone 3 from [CHATGPT_26_04_PLAN.md](/Users/shaypalachy/clo
 - Add richer validation outputs for humans, built on top of PR 3.3 metrics.
 - Include category/subcategory breakdowns and explicit handling of legacy versus taxonomy-labeled examples.
 - Keep this as a reporting/output PR rather than another schema or import PR.
-- Status: current next PR.
+- Status: merged.
+
+## Follow-up — validation integrity and live validation hardening
+
+- Lint the tracked validation CSV before any model-backed evaluation so malformed rows, invalid
+  booleans/datetimes/categories, invalid taxonomy pairs, and relevant rows missing taxonomy labels
+  fail locally before API calls.
+- Keep `denbust validation-lint --validation-set ...` available for credential-free checks.
+- Treat Anthropic provider/API failures as fatal run errors instead of synthetic `not_relevant`
+  predictions.
+- Keep local validation and live-check outputs untracked; summarize the results in PRs or operator
+  notes.
+- Status: current hardening follow-up.
 
 ## Sequencing
 
@@ -41,9 +53,12 @@ The intended order is:
 2. PR 3.2: import
 3. PR 3.3: metrics
 4. PR 3.4: reporting
+5. Follow-up: integrity linting and live-validation hardening
 
 That split keeps each PR narrow:
 
 - schema changes land before new import shapes depend on them
 - import lands before metrics start relying on the richer permanent set
 - reports land last, once the underlying metrics are stable
+- hardening follows once local experiment runs expose validation-data and provider-failure failure
+  modes that need to be enforced by the repo

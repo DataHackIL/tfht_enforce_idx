@@ -138,6 +138,8 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv-codex/
+.codex-bin/
 env/
 venv/
 ENV/
@@ -216,9 +218,16 @@ LOCAL_AGENTS.md
 
 data/local/
 data/*/ingest/
+data/*/scrape_candidates/
+data/*/discover/
+data/*/backfill_discover/
+data/*/backfill_scrape/
 data/*/release/
 data/*/backup/
 data/*/operational/
+data/*/monthly_report/
+data/may_26_*/
+your-runs-dir/
 agents/local/
 .env.local
 

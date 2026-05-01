@@ -11,6 +11,7 @@ import pytest
 import yaml
 from pydantic import HttpUrl
 
+from denbust.classifier.relevance import ClassifierProviderError
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.data_models import Category, ClassificationResult, RawArticle, SubCategory
 from denbust.live_checks.runner import (
@@ -41,6 +42,14 @@ class FakeClassifier:
     async def classify(self, article: RawArticle) -> ClassificationResult:
         del article
         return self._result
+
+
+class FailingClassifier:
+    """Classifier stub that simulates a provider outage."""
+
+    async def classify(self, article: RawArticle) -> ClassificationResult:
+        del article
+        raise ClassifierProviderError("provider unavailable sk-ant-secret")
 
 
 class FakeSource:
@@ -240,6 +249,63 @@ class TestLiveChecks:
         assert len(report.case_results) == 2
         assert report.case_results[0].passed is False
         assert report.case_results[1].passed is True
+
+    def test_runner_records_classifier_provider_error_as_case_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        repo_root = _init_repo(tmp_path)
+        fixture_path = repo_root / "tests" / "fixtures" / "articles" / "case.json"
+        _write_fixture(
+            fixture_path,
+            {
+                "url": "https://example.com/case",
+                "title": "פשיטה על בית בושת",
+                "snippet": "המשטרה פשטה על בית בושת",
+                "date": "2026-04-07T12:00:00+00:00",
+                "source_name": "test",
+                "expected_classification": {
+                    "relevant": True,
+                    "enforcement_related": True,
+                    "category": "brothel",
+                    "sub_category": "closure",
+                },
+            },
+        )
+        scenario_path = repo_root / "agents" / "live_checks" / "provider-error.yaml"
+        _write_scenario(
+            scenario_path,
+            {
+                "name": "provider-error",
+                "runtime_config": "agents/news/local.yaml",
+                "cases": [
+                    {
+                        "id": "fixture-case",
+                        "type": "fixture_article",
+                        "fixture": "tests/fixtures/articles/case.json",
+                    }
+                ],
+            },
+        )
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.load_config",
+            lambda _path: Config(classifier={"model": "mock-model"}),
+        )
+        monkeypatch.setattr(
+            "denbust.live_checks.runner.create_classifier",
+            lambda **_kwargs: FailingClassifier(),
+        )
+
+        report = run_live_check_scenario_sync(scenario_path)
+
+        assert report.overall_status == "failed"
+        assert report.case_results[0].actual is None
+        assert report.case_results[0].error == (
+            "classifier provider error: provider unavailable [redacted]"
+        )
 
     def test_missing_api_key_writes_failed_report_bundle(
         self,
@@ -638,6 +704,46 @@ class TestLiveChecks:
         assert no_match.passed is False
         assert no_match.error == "No live source article matched the configured selector"
         assert len(no_match.artifact_paths) == 1
+
+    @pytest.mark.asyncio
+    async def test_live_source_case_records_sanitized_provider_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = __import__(
+            "denbust.live_checks.runner", fromlist=["_execute_live_source_article_case"]
+        )
+        case = LiveSourceArticleCaseConfig(
+            id="provider-error",
+            type="live_source_article",
+            source_name="walla",
+            expected=ExpectedClassification(
+                relevant=True,
+                enforcement_related=True,
+                category="brothel",
+                sub_category="closure",
+            ),
+            match_title_contains="בית בושת",
+        )
+        article = RawArticle(
+            url=HttpUrl("https://example.com/provider"),
+            title="פשיטה על בית בושת",
+            snippet="תקציר",
+            date=datetime(2026, 4, 7, tzinfo=UTC),
+            source_name="walla",
+        )
+
+        result = await runner._execute_live_source_article_case(
+            case,
+            classifier=FailingClassifier(),
+            sources_by_name={"walla": FakeSource("walla", [article])},
+            artifacts_dir=tmp_path,
+            runtime_config=Config(keywords=["זנות"]),
+        )
+
+        assert result.passed is False
+        assert result.actual is None
+        assert result.error == "classifier provider error: provider unavailable [redacted]"
 
     def test_run_live_check_scenario_handles_runtime_config_load_failure(
         self,

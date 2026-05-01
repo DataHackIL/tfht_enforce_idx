@@ -12,7 +12,12 @@ import httpx
 import yaml
 from pydantic import BaseModel, Field, HttpUrl, TypeAdapter
 
-from denbust.classifier.relevance import Classifier, create_classifier
+from denbust.classifier.relevance import (
+    Classifier,
+    ClassifierProviderError,
+    create_classifier,
+    sanitize_provider_error_message,
+)
 from denbust.config import Config, load_config
 from denbust.data_models import ClassificationResult, RawArticle
 from denbust.news_items.normalize import canonicalize_news_url
@@ -274,9 +279,25 @@ async def _execute_fixture_article_case(
         )
         artifact_paths.append(str(artifact_path))
 
-    classification = await classifier.classify(article)
-    actual = _to_actual_classification(classification)
     notes = [case.notes] if case.notes else []
+    try:
+        classification = await classifier.classify(article)
+    except ClassifierProviderError as exc:
+        sanitized_error = sanitize_provider_error_message(exc)
+        return CaseResult(
+            case_id=case.id,
+            case_type=case.type,
+            passed=False,
+            source_name=article.source_name,
+            url=str(article.url),
+            title=article.title,
+            snippet=article.snippet,
+            expected=expected,
+            notes=notes,
+            artifact_paths=artifact_paths,
+            error=f"classifier provider error: {sanitized_error}",
+        )
+    actual = _to_actual_classification(classification)
     passed = True
     if expected is not None:
         passed, compare_notes = _compare_expected(expected, actual)
@@ -389,7 +410,23 @@ async def _execute_live_source_article_case(
         )
         artifact_paths.append(captured_path)
 
-    classification = await classifier.classify(selected)
+    try:
+        classification = await classifier.classify(selected)
+    except ClassifierProviderError as exc:
+        sanitized_error = sanitize_provider_error_message(exc)
+        return CaseResult(
+            case_id=case.id,
+            case_type=case.type,
+            passed=False,
+            source_name=selected.source_name,
+            url=str(selected.url),
+            title=selected.title,
+            snippet=selected.snippet,
+            expected=case.expected,
+            notes=notes,
+            artifact_paths=artifact_paths,
+            error=f"classifier provider error: {sanitized_error}",
+        )
     actual = _to_actual_classification(classification)
     passed, compare_notes = _compare_expected(case.expected, actual)
     notes.extend(compare_notes)

@@ -468,6 +468,50 @@ def validation_evaluate(
     typer.echo(f"Saved Markdown report to {result.markdown_path}")
 
 
+@app.command("validation-lint")
+def validation_lint(
+    validation_set: Annotated[
+        Path,
+        typer.Option("--validation-set", help="Path to the tracked validation CSV"),
+    ] = DEFAULT_VALIDATION_SET_PATH,
+) -> None:
+    """Lint the permanent validation set without model credentials."""
+    from denbust.validation import run_validation_lint
+
+    result = run_validation_lint(validation_set_path=validation_set)
+    if result.passed:
+        typer.echo(f"Validation set OK: {result.row_count} row(s) in {result.validation_set_path}")
+        return
+    for issue in result.issues:
+        typer.echo(issue.render(), err=True)
+    raise typer.Exit(code=1)
+
+
+@app.command("live-check")
+def live_check(
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", help="Path to the live-check scenario YAML"),
+    ],
+    output_root: Annotated[
+        Path | None,
+        typer.Option("--output-root", help="Directory for live-check output bundles"),
+    ] = None,
+) -> None:
+    """Run a tracked live-check scenario."""
+    from denbust.live_checks.runner import run_live_check_scenario_sync
+
+    report = run_live_check_scenario_sync(config, output_root=output_root)
+    typer.echo(f"Live check {report.overall_status}: {report.output_dir}")
+    for case in report.case_results:
+        status = "passed" if case.passed else "failed"
+        typer.echo(f"{case.case_id}: {status}")
+        if case.error:
+            typer.echo(f"{case.case_id} error: {case.error}", err=True)
+    if report.overall_status != "passed":
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def version() -> None:
     """Show version information."""
