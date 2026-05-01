@@ -28,9 +28,10 @@ This repo currently has one main plan and two important sub-plans.
 
 ## Current Next Focus: May 2026 Experiment Follow-Through
 
-PR `#95` added the May 2026 local experiment plan. The immediate follow-up hardens that plan's
-execution path so local validation data problems and Anthropic provider failures fail visibly before
-operators trust the resulting metrics.
+PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
+local validation data problems and Anthropic provider failures fail visibly before operators trust
+the resulting metrics. The first source-recall follow-up adds a Ynet משפט ופלילים category-page
+backstop while keeping the RSS feed as the primary Ynet source.
 
 ### What is already in place
 
@@ -40,13 +41,15 @@ operators trust the resulting metrics.
   `denbust diagnose-discovery`.
 - Source-health diagnostics already cover selector drift, parse-zero, stale-result, and keyword-zero
   cases.
+- Ynet source-health diagnostics now split RSS and category-page checks so RSS low coverage,
+  category HTTP failure, category parse-zero, and category keyword-zero outcomes are visible.
 - Validation evaluation already reports stage-wise relevance, enforcement, taxonomy, and index
   metrics.
 
 ### What comes next
 
 1. Use the hardened May experiment path to rerun validation and live checks locally.
-2. Prioritize source recall, search-backed discovery, and backfill gaps from those outputs.
+2. Prioritize search-backed discovery and backfill gaps from those outputs.
 3. Treat optional self-healing scaffolding as later work unless the hardened experiment data shows it
    is the highest-leverage next step.
 

@@ -452,6 +452,25 @@ async def test_probe_ynet_distinguishes_keyword_zeroing(
         url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
     ) -> _FetchResult:
         del user_agent, client
+        if url == source_health.rss_source.YNET_CATEGORY_URL:
+            return _FetchResult(
+                requested_url=url,
+                final_url=url,
+                status_code=200,
+                content_type="text/html",
+                text="""
+                <div class="slotView">
+                  <a href="https://www.ynet.co.il/news/article/category1"></a>
+                  <div class="slotTitle">
+                    <a href="https://www.ynet.co.il/news/article/category1">חשד לבית בושת</a>
+                  </div>
+                  <div class="slotSubTitle">
+                    <a href="https://www.ynet.co.il/news/article/category1">המשטרה עצרה חשודים</a>
+                  </div>
+                  <span class="dateView">01.05.26</span>
+                </div>
+                """,
+            )
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -500,6 +519,25 @@ async def test_probe_ynet_distinguishes_unexpected_redirect(
         url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
     ) -> _FetchResult:
         del user_agent, client
+        if url == source_health.rss_source.YNET_CATEGORY_URL:
+            return _FetchResult(
+                requested_url=url,
+                final_url=url,
+                status_code=200,
+                content_type="text/html",
+                text="""
+                <div class="slotView">
+                  <a href="https://www.ynet.co.il/news/article/category1"></a>
+                  <div class="slotTitle">
+                    <a href="https://www.ynet.co.il/news/article/category1">חשד לבית בושת</a>
+                  </div>
+                  <div class="slotSubTitle">
+                    <a href="https://www.ynet.co.il/news/article/category1">המשטרה עצרה חשודים</a>
+                  </div>
+                  <span class="dateView">01.05.26</span>
+                </div>
+                """,
+            )
         return _FetchResult(
             requested_url=url,
             final_url="https://example.com/redirected",
@@ -545,6 +583,25 @@ async def test_probe_ynet_reports_success(monkeypatch: pytest.MonkeyPatch) -> No
         url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
     ) -> _FetchResult:
         del user_agent, client
+        if url == source_health.rss_source.YNET_CATEGORY_URL:
+            return _FetchResult(
+                requested_url=url,
+                final_url=url,
+                status_code=200,
+                content_type="text/html",
+                text="""
+                <div class="slotView">
+                  <a href="https://www.ynet.co.il/news/article/category1"></a>
+                  <div class="slotTitle">
+                    <a href="https://www.ynet.co.il/news/article/category1">חשד לבית בושת</a>
+                  </div>
+                  <div class="slotSubTitle">
+                    <a href="https://www.ynet.co.il/news/article/category1">המשטרה עצרה חשודים</a>
+                  </div>
+                  <span class="dateView">01.05.26</span>
+                </div>
+                """,
+            )
         return _FetchResult(
             requested_url=url,
             final_url=url,
@@ -579,6 +636,109 @@ async def test_probe_ynet_reports_success(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert result.live_status == DiagnosticStatus.OK
     assert result.failure_bucket is None
+    assert [check.name for check in result.checks] == ["rss_feed", "category_page"]
+
+
+@pytest.mark.asyncio
+async def test_probe_ynet_distinguishes_category_http_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        if url == source_health.rss_source.YNET_CATEGORY_URL:
+            raise httpx.ConnectError("category boom")
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="application/rss+xml",
+            text="<rss />",
+        )
+
+    def fake_parse(text: str) -> object:
+        del text
+        return SimpleNamespace(
+            entries=[
+                {
+                    "link": "https://example.com/1",
+                    "title": "זנות",
+                    "summary": "זנות",
+                    "published": recent,
+                }
+            ],
+            bozo=False,
+            bozo_exception=None,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+    monkeypatch.setattr(source_health.feedparser, "parse", fake_parse)
+
+    result = await source_health._probe_ynet(
+        source_cfg=SimpleNamespace(url="https://example.com/rss"),
+        days=21,
+        sample_keywords=["זנות"],
+    )
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.HTTP_FETCH_FAILED
+    category_check = next(check for check in result.checks if check.name == "category_page")
+    assert category_check.details["failure_bucket"] == FailureBucket.HTTP_FETCH_FAILED.value
+
+
+@pytest.mark.asyncio
+async def test_probe_ynet_distinguishes_category_parse_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recent = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html"
+            if url == source_health.rss_source.YNET_CATEGORY_URL
+            else "rss",
+            text="<html><body>empty category</body></html>"
+            if url == source_health.rss_source.YNET_CATEGORY_URL
+            else "<rss />",
+        )
+
+    def fake_parse(text: str) -> object:
+        del text
+        return SimpleNamespace(
+            entries=[
+                {
+                    "link": "https://example.com/1",
+                    "title": "זנות",
+                    "summary": "זנות",
+                    "published": recent,
+                }
+            ],
+            bozo=False,
+            bozo_exception=None,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+    monkeypatch.setattr(source_health.feedparser, "parse", fake_parse)
+
+    result = await source_health._probe_ynet(
+        source_cfg=SimpleNamespace(url="https://example.com/rss"),
+        days=21,
+        sample_keywords=["זנות"],
+    )
+
+    assert result.live_status == DiagnosticStatus.FAIL
+    assert result.failure_bucket == FailureBucket.PARSE_ZEROED_RESULTS
+    category_check = next(check for check in result.checks if check.name == "category_page")
+    assert category_check.details["parsed_article_count"] == 0
 
 
 @pytest.mark.asyncio

@@ -205,6 +205,9 @@ class TestPipelineIntegration:
         # Mock RSS feed
         rss_content = load_fixture("rss/ynet_sample.xml")
         respx.get("https://ynet.co.il/feed.xml").mock(return_value=Response(200, text=rss_content))
+        respx.get("https://www.ynet.co.il/news/category/190").mock(
+            return_value=Response(200, text="<html><body>no category matches</body></html>")
+        )
 
         # Create config
         config = Config(

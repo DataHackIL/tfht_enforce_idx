@@ -385,111 +385,189 @@ async def _probe_ynet(
 ) -> SourceDiagnosticResult:
     cutoff = datetime.now(UTC) - timedelta(days=days)
     feed_url = source_cfg.url or ""
+    checks: list[ProbeCheck] = []
+    buckets: list[FailureBucket] = []
 
     try:
         fetch_result = await _fetch_text(feed_url, user_agent=rss_source.USER_AGENT)
     except Exception as exc:
-        return _live_result(
-            source_name="ynet",
-            status=DiagnosticStatus.FAIL,
-            bucket=FailureBucket.FEED_FETCH_FAILED,
-            checks=[
-                ProbeCheck(
-                    name="live_probe",
-                    status=DiagnosticStatus.FAIL,
-                    summary=f"RSS fetch failed: {exc}",
-                    details={"url": feed_url},
-                )
-            ],
-        )
-
-    parsed = feedparser.parse(fetch_result.text)
-    parse_warning = None
-    if getattr(parsed, "bozo", 0) and getattr(parsed, "bozo_exception", None) is not None:
-        parse_warning = str(parsed.bozo_exception)
-
-    entries = list(getattr(parsed, "entries", []))
-    parseable_date_count = 0
-    recent_entry_count = 0
-    keyword_match_count = 0
-    for entry in entries:
-        date = _probe_rss_entry_date(entry)
-        if date is not None:
-            parseable_date_count += 1
-            if date >= cutoff:
-                recent_entry_count += 1
-        if _probe_rss_entry_matches(entry, cutoff, sample_keywords, source_name="ynet"):
-            keyword_match_count += 1
-
-    unexpected_redirect = _is_unexpected_redirect(fetch_result.final_url, feed_url)
-    details = {
-        "requested_url": feed_url,
-        "final_url": fetch_result.final_url,
-        "status_code": fetch_result.status_code,
-        "content_type": fetch_result.content_type,
-        "payload_length": len(fetch_result.text),
-        "bozo": bool(getattr(parsed, "bozo", 0)),
-        "bozo_exception": parse_warning,
-        "total_entry_count": len(entries),
-        "parseable_date_count": parseable_date_count,
-        "recent_entry_count": recent_entry_count,
-        "keyword_match_count": keyword_match_count,
-    }
-
-    if unexpected_redirect:
-        return _live_result(
-            source_name="ynet",
-            status=DiagnosticStatus.WARN,
-            bucket=FailureBucket.UNEXPECTED_REDIRECT,
-            checks=[
-                ProbeCheck(
-                    name="live_probe",
-                    status=DiagnosticStatus.WARN,
-                    summary="Feed request redirected to an unexpected URL",
-                    details=details,
-                )
-            ],
-        )
-    if len(entries) == 0 or recent_entry_count == 0:
-        return _live_result(
-            source_name="ynet",
-            status=DiagnosticStatus.FAIL,
-            bucket=FailureBucket.FEED_EMPTY_OR_STALE,
-            checks=[
-                ProbeCheck(
-                    name="live_probe",
-                    status=DiagnosticStatus.FAIL,
-                    summary="Feed is empty or contains no recent entries inside the cutoff window",
-                    details=details,
-                )
-            ],
-        )
-    if keyword_match_count == 0:
-        return _live_result(
-            source_name="ynet",
-            status=DiagnosticStatus.WARN,
-            bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
-            checks=[
-                ProbeCheck(
-                    name="live_probe",
-                    status=DiagnosticStatus.WARN,
-                    summary="Feed has recent items but none match the sampled keywords",
-                    details=details,
-                )
-            ],
-        )
-
-    return _live_result(
-        source_name="ynet",
-        status=DiagnosticStatus.OK,
-        checks=[
+        buckets.append(FailureBucket.FEED_FETCH_FAILED)
+        checks.append(
             ProbeCheck(
-                name="live_probe",
-                status=DiagnosticStatus.OK,
-                summary="Feed returned recent keyword-matching entries",
-                details=details,
+                name="rss_feed",
+                status=DiagnosticStatus.FAIL,
+                summary=f"RSS fetch failed: {exc}",
+                details={
+                    "url": feed_url,
+                    "failure_bucket": FailureBucket.FEED_FETCH_FAILED.value,
+                },
             )
-        ],
+        )
+    else:
+        parsed = feedparser.parse(fetch_result.text)
+        parse_warning = None
+        if getattr(parsed, "bozo", 0) and getattr(parsed, "bozo_exception", None) is not None:
+            parse_warning = str(parsed.bozo_exception)
+
+        entries = list(getattr(parsed, "entries", []))
+        parseable_date_count = 0
+        recent_entry_count = 0
+        keyword_match_count = 0
+        for entry in entries:
+            date = _probe_rss_entry_date(entry)
+            if date is not None:
+                parseable_date_count += 1
+                if date >= cutoff:
+                    recent_entry_count += 1
+            if _probe_rss_entry_matches(entry, cutoff, sample_keywords, source_name="ynet"):
+                keyword_match_count += 1
+
+        details = {
+            "requested_url": feed_url,
+            "final_url": fetch_result.final_url,
+            "status_code": fetch_result.status_code,
+            "content_type": fetch_result.content_type,
+            "payload_length": len(fetch_result.text),
+            "bozo": bool(getattr(parsed, "bozo", 0)),
+            "bozo_exception": parse_warning,
+            "total_entry_count": len(entries),
+            "parseable_date_count": parseable_date_count,
+            "recent_entry_count": recent_entry_count,
+            "keyword_match_count": keyword_match_count,
+        }
+
+        if _is_unexpected_redirect(fetch_result.final_url, feed_url):
+            details["failure_bucket"] = FailureBucket.UNEXPECTED_REDIRECT.value
+            buckets.append(FailureBucket.UNEXPECTED_REDIRECT)
+            checks.append(
+                ProbeCheck(
+                    name="rss_feed",
+                    status=DiagnosticStatus.WARN,
+                    summary="RSS request redirected to an unexpected URL",
+                    details=details,
+                )
+            )
+        elif len(entries) == 0 or recent_entry_count == 0:
+            details["failure_bucket"] = FailureBucket.FEED_EMPTY_OR_STALE.value
+            buckets.append(FailureBucket.FEED_EMPTY_OR_STALE)
+            checks.append(
+                ProbeCheck(
+                    name="rss_feed",
+                    status=DiagnosticStatus.FAIL,
+                    summary="RSS feed is empty or contains no recent entries",
+                    details=details,
+                )
+            )
+        elif keyword_match_count == 0:
+            details["failure_bucket"] = FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS.value
+            buckets.append(FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS)
+            checks.append(
+                ProbeCheck(
+                    name="rss_feed",
+                    status=DiagnosticStatus.WARN,
+                    summary="RSS feed is healthy but low coverage for sampled keywords",
+                    details=details,
+                )
+            )
+        else:
+            checks.append(
+                ProbeCheck(
+                    name="rss_feed",
+                    status=DiagnosticStatus.OK,
+                    summary="RSS feed returned recent keyword-matching entries",
+                    details=details,
+                )
+            )
+
+    try:
+        category_fetch = await _fetch_text(
+            rss_source.YNET_CATEGORY_URL,
+            user_agent=rss_source.USER_AGENT,
+        )
+    except Exception as exc:
+        buckets.append(FailureBucket.HTTP_FETCH_FAILED)
+        checks.append(
+            ProbeCheck(
+                name="category_page",
+                status=DiagnosticStatus.FAIL,
+                summary=f"Category page fetch failed: {exc}",
+                details={
+                    "requested_url": rss_source.YNET_CATEGORY_URL,
+                    "failure_bucket": FailureBucket.HTTP_FETCH_FAILED.value,
+                },
+            )
+        )
+    else:
+        parsed_category = rss_source.diagnose_ynet_category_html(
+            category_fetch.text,
+            cutoff=cutoff,
+            keywords=sample_keywords,
+            category_url=rss_source.YNET_CATEGORY_URL,
+        )
+        category_details = {
+            "requested_url": rss_source.YNET_CATEGORY_URL,
+            "final_url": category_fetch.final_url,
+            "status_code": category_fetch.status_code,
+            "content_type": category_fetch.content_type,
+            "payload_length": len(category_fetch.text),
+            "container_count": parsed_category.container_count,
+            "parsed_article_count": parsed_category.parsed_article_count,
+            "keyword_match_count": parsed_category.keyword_match_count,
+            "stale_article_count": parsed_category.stale_article_count,
+            "article_urls": parsed_category.article_urls[:5],
+        }
+        if _is_unexpected_redirect(category_fetch.final_url, rss_source.YNET_CATEGORY_URL):
+            category_details["failure_bucket"] = FailureBucket.UNEXPECTED_REDIRECT.value
+            buckets.append(FailureBucket.UNEXPECTED_REDIRECT)
+            checks.append(
+                ProbeCheck(
+                    name="category_page",
+                    status=DiagnosticStatus.WARN,
+                    summary="Category page request redirected to an unexpected URL",
+                    details=category_details,
+                )
+            )
+        elif parsed_category.container_count == 0 or parsed_category.parsed_article_count == 0:
+            category_details["failure_bucket"] = FailureBucket.PARSE_ZEROED_RESULTS.value
+            buckets.append(FailureBucket.PARSE_ZEROED_RESULTS)
+            checks.append(
+                ProbeCheck(
+                    name="category_page",
+                    status=DiagnosticStatus.FAIL,
+                    summary="Category page fetched but parsing returned zero articles",
+                    details=category_details,
+                )
+            )
+        elif parsed_category.keyword_match_count == 0:
+            category_details["failure_bucket"] = FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS.value
+            buckets.append(FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS)
+            checks.append(
+                ProbeCheck(
+                    name="category_page",
+                    status=DiagnosticStatus.WARN,
+                    summary="Category page parsed articles but none matched sampled keywords",
+                    details=category_details,
+                )
+            )
+        else:
+            checks.append(
+                ProbeCheck(
+                    name="category_page",
+                    status=DiagnosticStatus.OK,
+                    summary="Category page returned parsed keyword-matching articles",
+                    details=category_details,
+                )
+            )
+
+    status = _merge_status(*(check.status for check in checks))
+    bucket = buckets[0] if buckets else None
+    return SourceDiagnosticResult(
+        source_name="ynet",
+        status=status,
+        live_status=status,
+        failure_bucket=bucket,
+        probe_mode="live_probe",
+        checks=checks,
     )
 
 

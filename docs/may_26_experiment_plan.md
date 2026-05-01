@@ -59,9 +59,9 @@ The repo currently has 21 issues returned by the repo-specific GitHub MCP. Seven
 | #46 Pre-classifier filter silently dropping relevant articles | Closed | Important acceptance criterion. The experiment must prove skip/drop reasons are visible in debug artifacts. |
 | #47 Source scrapers returning zero articles | Closed | Historical symptom. Re-test source health and zero-result visibility. |
 | #48 LLM classifier miscalibrated | Closed | Main classifier regression cluster. Run validation evaluation and live-check scenario. |
-| #52 Expose diagnostic-safe public probe helpers for Maariv scraper | Open | Active design debt. The experiment should detect whether diagnostics still depend on private Maariv helpers and whether that blocks source-health trust. |
-| #53 Expose diagnostic-safe public probe helpers for ICE scraper | Open | Active design debt. Same treatment as #52 for ICE. |
-| #65 Add Ynet category-page backstop for משפט ופלילים discovery | Open | Active source recall issue. Test whether Ynet RSS alone is still shallow and whether category-page probing is needed now. |
+| #52 Expose diagnostic-safe public probe helpers for Maariv scraper | Treated | PR #96 added public Maariv diagnostic helpers; close or update the issue with that evidence if it remains open. |
+| #53 Expose diagnostic-safe public probe helpers for ICE scraper | Treated | PR #96 added public ICE diagnostic helpers; close or update the issue with that evidence if it remains open. |
+| #65 Add Ynet category-page backstop for משפט ופלילים discovery | Treated | The source-recall follow-up keeps Ynet RSS primary and adds the non-browser category-page backstop with separate source-health signals. |
 | #66 Add fixture-based Ynet end-to-end regression test after web-search source exists | Open | Active but dependent. Decide whether web-search source exists enough now or remains blocked by #65/search path work. |
 | #71 Mako source completely failing due to browser navigation issues | Open | Active high-priority source-health issue. Live Mako diagnostics must be run with browser runtime installed. |
 | #72 Major Israeli news sources returning zero results | Open | Active system-level health issue. This is the central local experiment target. |
@@ -222,15 +222,17 @@ Record per source:
 - HTTP/browser success or failure
 - zero raw results vs parse failure vs keyword miss
 - whether debug state includes enough detail to explain the failure
-- whether diagnostics rely on private helper methods, especially for #52 and #53
+- whether diagnostics rely on private helper methods, especially if #52/#53 remain open despite the
+  PR #96 helper work
 - whether Mako failures look like missing Chromium, timeout, anti-bot, selector drift, or navigation instability
-- whether Ynet RSS looks too shallow and needs the category-page backstop from #65
+- whether Ynet RSS plus the category-page backstop still leaves source-recall gaps
 
 Decision rules:
 
 - If 4+ configured sources return zero or hard failures, #72 remains active and should become the next correctness PR.
 - If Mako alone fails with browser/navigation errors, merge #71 and #74 conceptually and fix Mako first.
-- If Ynet returns recent RSS items but not known relevant category items, #65 remains active.
+- If Ynet returns recent RSS/category items but still misses known relevant URLs, prioritize
+  search-backed recall or #66 fixture-based end-to-end coverage.
 - If diagnostics cannot explain why a source returned zero, `DL-PR-12`-style structured failure diagnostics become more urgent.
 
 ## Phase 4 - Fresh Discovery Run
@@ -563,10 +565,10 @@ The experiment should not assume these are true, but these are the current hypot
    a fresh Mako probe.
 4. #72 is the central open reliability question: either the source-zero problem still exists, or the
    open issue can be closed with evidence.
-5. #65 remains likely relevant because Ynet RSS is intentionally shallow even after moving to the
-   better crime feed.
-6. #52 and #53 are not user-facing bugs, but they matter if source diagnostics are going to become
-   the basis for self-healing.
+5. #65 is treated by the Ynet category-page backstop; future Ynet work should focus on fixture-based
+   end-to-end coverage or search-backed recall.
+6. #52 and #53 appear treated by PR #96's public Maariv/ICE diagnostic helpers; close or update the
+   issues with that evidence if they remain open.
 7. #88 should stay lower priority unless bounded backfill demonstrates real local slowness.
 8. The repo needs a first-class experiment or live-check CLI if these checks are going to be run more
    than once.
