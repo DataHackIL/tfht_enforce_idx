@@ -9,7 +9,12 @@ import httpx
 from pydantic import HttpUrl
 
 from denbust.discovery.base import DiscoveryContext
-from denbust.discovery.models import DiscoveredCandidate, DiscoveryQuery, ProducerKind
+from denbust.discovery.models import (
+    DiscoveredCandidate,
+    DiscoveryQuery,
+    DiscoveryQueryKind,
+    ProducerKind,
+)
 from denbust.news_items.normalize import canonicalize_news_url
 
 
@@ -143,7 +148,8 @@ class ExaSearchEngine:
                     "query_kind": query.query_kind.value,
                     "query_tags": query.tags,
                     "source_targeted_taxonomy": (
-                        query.query_kind.value == "source_targeted" and "taxonomy" in query.tags
+                        query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
+                        and "taxonomy" in query.tags
                     ),
                     "preferred_domains": query.preferred_domains,
                     "request_id": request_id,
