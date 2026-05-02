@@ -6,10 +6,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from denbust.data_models import Category, SubCategory
 from denbust.taxonomy import default_taxonomy
 from denbust.validation.common import (
-    ALLOWED_SUBCATEGORIES_BY_CATEGORY,
     DEFAULT_VALIDATION_SET_PATH,
     VALIDATION_SET_COLUMNS,
     canonicalize_csv_url,
@@ -22,6 +20,7 @@ from denbust.validation.common import (
     write_csv_rows,
 )
 from denbust.validation.models import ValidationSetRow
+from denbust.validation.row_integrity import RowIntegrityInput, validate_row_integrity
 
 
 @dataclass(frozen=True)
@@ -107,57 +106,44 @@ def validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Vali
     relevant = parse_bool(raw_row["relevant"])
     enforcement_related = parse_bool(raw_row.get("enforcement_related", "False") or "False")
     index_relevant = parse_bool(raw_row.get("index_relevant", "False") or "False")
-    taxonomy_version = raw_row.get("taxonomy_version", "").strip()
-    taxonomy_category_id = raw_row.get("taxonomy_category_id", "").strip()
-    taxonomy_subcategory_id = raw_row.get("taxonomy_subcategory_id", "").strip()
     category_value = normalize_category_value(raw_row["category"])
     sub_category_value = normalize_subcategory_value(raw_row["sub_category"])
+    integrity = validate_row_integrity(
+        RowIntegrityInput(
+            relevant=relevant,
+            enforcement_related=enforcement_related,
+            index_relevant=index_relevant,
+            category_value=category_value,
+            sub_category_value=sub_category_value,
+            taxonomy_version=raw_row.get("taxonomy_version", ""),
+            taxonomy_category_id=raw_row.get("taxonomy_category_id", ""),
+            taxonomy_subcategory_id=raw_row.get("taxonomy_subcategory_id", ""),
+            normalize_non_relevant=True,
+        ),
+        taxonomy=taxonomy,
+    )
+    if integrity.issues:
+        raise ValueError(_reviewed_row_error_message(integrity.issues[0].message))
 
-    if relevant:
-        category = Category(category_value)
-        if category == Category.NOT_RELEVANT:
-            raise ValueError("Reviewed relevant rows cannot use category 'not_relevant'")
-        sub_category = None
-        if sub_category_value:
-            sub_category = SubCategory(sub_category_value)
-            allowed = ALLOWED_SUBCATEGORIES_BY_CATEGORY[category]
-            if sub_category not in allowed:
-                raise ValueError(
-                    f"Invalid sub_category '{sub_category.value}' for category '{category.value}'"
-                )
-        elif enforcement_related and not (taxonomy_category_id and taxonomy_subcategory_id):
-            raise ValueError(
-                "Reviewed enforcement-related rows must include a non-empty sub_category"
-            )
-    else:
-        category = Category.NOT_RELEVANT
-        enforcement_related = False
-        index_relevant = False
-        taxonomy_version = ""
-        taxonomy_category_id = ""
-        taxonomy_subcategory_id = ""
-        sub_category = None
+    assert integrity.category is not None
+    assert integrity.enforcement_related is not None
+    assert integrity.index_relevant is not None
+    category = integrity.category
+    sub_category = integrity.sub_category
+    enforcement_related = integrity.enforcement_related
+    index_relevant = integrity.index_relevant
+    taxonomy_version = integrity.taxonomy_version
+    taxonomy_category_id = integrity.taxonomy_category_id
+    taxonomy_subcategory_id = integrity.taxonomy_subcategory_id
 
-    if taxonomy_category_id or taxonomy_subcategory_id:
-        if not (taxonomy_category_id and taxonomy_subcategory_id):
-            raise ValueError("Taxonomy labels must include both category and subcategory ids")
-        if not taxonomy.has_pair(taxonomy_category_id, taxonomy_subcategory_id):
-            raise ValueError(
-                f"Invalid taxonomy pair: {taxonomy_category_id}/{taxonomy_subcategory_id}"
-            )
-        if taxonomy_version and taxonomy_version != taxonomy.version:
-            raise ValueError(
-                f"Unsupported taxonomy version {taxonomy_version!r}; expected {taxonomy.version!r}"
-            )
+    if relevant and (
+        sub_category is None
+        and enforcement_related
+        and not (taxonomy_category_id and taxonomy_subcategory_id)
+    ):
+        raise ValueError("Reviewed enforcement-related rows must include a non-empty sub_category")
+    if taxonomy_category_id and taxonomy_subcategory_id:
         taxonomy_version = taxonomy.version
-        expected_index_relevant = taxonomy.is_index_relevant(
-            taxonomy_category_id,
-            taxonomy_subcategory_id,
-        )
-        if index_relevant != expected_index_relevant:
-            raise ValueError(
-                "index_relevant does not match the packaged taxonomy for the selected leaf"
-            )
 
     finalized_at = datetime.now(UTC)
     return ValidationSetRow(
@@ -189,6 +175,14 @@ def validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Vali
         finalized_at=finalized_at,
         draft_source=draft_source,
     )
+
+
+def _reviewed_row_error_message(message: str) -> str:
+    if message == "Relevant rows cannot use category 'not_relevant'":
+        return "Reviewed relevant rows cannot use category 'not_relevant'"
+    if message.startswith("index_relevant does not match the packaged taxonomy"):
+        return "index_relevant does not match the packaged taxonomy for the selected leaf"
+    return message
 
 
 def finalize_validation_set(

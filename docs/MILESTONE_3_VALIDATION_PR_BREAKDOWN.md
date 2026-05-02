@@ -39,11 +39,13 @@ This note breaks Milestone 3 from [CHATGPT_26_04_PLAN.md](/Users/shaypalachy/clo
   booleans/datetimes/categories, invalid taxonomy pairs, and relevant rows missing taxonomy labels
   fail locally before API calls.
 - Keep `denbust validation-lint --validation-set ...` available for credential-free checks.
+- Share taxonomy/category/index-relevance row-integrity checks between validation lint and
+  reviewed-row finalize/import, while leaving CSV-shape diagnostics in the lint layer.
 - Treat Anthropic provider/API failures as fatal run errors instead of synthetic `not_relevant`
   predictions.
 - Keep local validation and live-check outputs untracked; summarize the results in PRs or operator
   notes.
-- Status: current hardening follow-up.
+- Status: merged hardening follow-up.
 
 ## Sequencing
 
