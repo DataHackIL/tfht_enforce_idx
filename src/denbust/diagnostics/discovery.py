@@ -93,6 +93,7 @@ class QueueHealthMetrics(BaseModel):
     full_article_page_candidates: int = 0
     stale_candidates: int = 0
     retry_backlog_candidates: int = 0
+    self_heal_eligible_candidates: int = 0
 
 
 class ProducerConversionMetrics(BaseModel):
@@ -132,6 +133,19 @@ class FailureSummary(BaseModel):
 
     name: str
     count: int
+
+
+class ScrapeFailureDiagnostic(BaseModel):
+    """Structured scrape-failure group for future self-heal triage."""
+
+    attempt_kind: str
+    fetch_status: str
+    error_code: str
+    source_adapter_name: str
+    domain: str
+    count: int = 0
+    self_heal_eligible_count: int = 0
+    latest_attempt_at: datetime | None = None
 
 
 class SourceSuggestion(BaseModel):
@@ -178,6 +192,7 @@ class DiscoveryDiagnosticReport(BaseModel):
     top_failure_sources: list[FailureSummary] = Field(default_factory=list)
     top_failure_domains: list[FailureSummary] = Field(default_factory=list)
     top_failure_codes: list[FailureSummary] = Field(default_factory=list)
+    scrape_failure_diagnostics: list[ScrapeFailureDiagnostic] = Field(default_factory=list)
     source_suggestions: SourceSuggestionReport = Field(default_factory=SourceSuggestionReport)
 
 
@@ -253,6 +268,7 @@ def build_discovery_diagnostic_report(
         top_failure_sources=_build_failure_summaries(candidates, attempts, key="source"),
         top_failure_domains=_build_failure_summaries(candidates, attempts, key="domain"),
         top_failure_codes=_build_failure_summaries(candidates, attempts, key="error_code"),
+        scrape_failure_diagnostics=_build_scrape_failure_diagnostics(candidates, attempts),
         source_suggestions=_build_source_suggestion_report(
             config=config,
             candidates=candidates,
@@ -343,7 +359,8 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
     lines.append(
         "  failed={scrape_failed_candidates} partial={partially_scraped_candidates} "
         "unsupported={unsupported_source_candidates} stale={stale_candidates} "
-        "retry_backlog={retry_backlog_candidates}".format(**queue.model_dump(mode="json"))
+        "retry_backlog={retry_backlog_candidates} "
+        "self_heal_eligible={self_heal_eligible_candidates}".format(**queue.model_dump(mode="json"))
     )
     lines.append(
         "  basis search_result_only={search_result_only_candidates} "
@@ -384,6 +401,17 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
             "Top failure codes: "
             + ", ".join(f"{item.name}={item.count}" for item in report.top_failure_codes)
         )
+    if report.scrape_failure_diagnostics:
+        lines.append("")
+        lines.append("Structured scrape failures")
+        for failure in report.scrape_failure_diagnostics:
+            lines.append(
+                "  {error_code} source={source_adapter_name} domain={domain} "
+                "kind={attempt_kind} status={fetch_status} count={count} "
+                "self_heal_eligible={self_heal_eligible_count}".format(
+                    **failure.model_dump(mode="json")
+                )
+            )
     if report.source_suggestions.suggestions:
         lines.append("")
         lines.append("Source suggestions")
@@ -532,6 +560,9 @@ def _build_queue_health_metrics(
         full_article_page_candidates=basis_counts[ContentBasis.FULL_ARTICLE_PAGE],
         stale_candidates=stale,
         retry_backlog_candidates=retry_backlog,
+        self_heal_eligible_candidates=sum(
+            1 for candidate in candidates if candidate.self_heal_eligible
+        ),
     )
 
 
@@ -668,6 +699,61 @@ def _build_failure_summaries(
             raise ValueError(f"Unsupported failure summary key: {key}")
         counts[value] += 1
     return [FailureSummary(name=name, count=count) for name, count in counts.most_common(5)]
+
+
+def _build_scrape_failure_diagnostics(
+    candidates: list[PersistentCandidate],
+    attempts: list[ScrapeAttempt],
+) -> list[ScrapeFailureDiagnostic]:
+    candidate_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    grouped: dict[tuple[str, str, str, str, str], ScrapeFailureDiagnostic] = {}
+    for attempt in attempts:
+        if attempt.fetch_status is FetchStatus.SUCCESS:
+            continue
+        candidate = candidate_by_id.get(attempt.candidate_id)
+        domain = (
+            candidate.domain
+            if candidate is not None and candidate.domain is not None
+            else "unknown"
+        )
+        source_adapter_name = attempt.source_adapter_name or "unknown"
+        error_code = attempt.error_code or "unknown"
+        key = (
+            attempt.attempt_kind.value,
+            attempt.fetch_status.value,
+            error_code,
+            source_adapter_name,
+            domain,
+        )
+        diagnostic = grouped.get(key)
+        if diagnostic is None:
+            diagnostic = ScrapeFailureDiagnostic(
+                attempt_kind=attempt.attempt_kind.value,
+                fetch_status=attempt.fetch_status.value,
+                error_code=error_code,
+                source_adapter_name=source_adapter_name,
+                domain=domain,
+            )
+            grouped[key] = diagnostic
+        diagnostic.count += 1
+        if candidate is not None and candidate.self_heal_eligible:
+            diagnostic.self_heal_eligible_count += 1
+        finished_or_started = attempt.finished_at or attempt.started_at
+        if (
+            diagnostic.latest_attempt_at is None
+            or finished_or_started > diagnostic.latest_attempt_at
+        ):
+            diagnostic.latest_attempt_at = finished_or_started
+    return sorted(
+        grouped.values(),
+        key=lambda item: (
+            -item.self_heal_eligible_count,
+            -item.count,
+            item.error_code,
+            item.source_adapter_name,
+            item.domain,
+        ),
+    )[:10]
 
 
 def _build_source_suggestion_report(

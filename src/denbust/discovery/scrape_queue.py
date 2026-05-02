@@ -33,6 +33,8 @@ SCRAPEABLE_CANDIDATE_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.PARTIALLY_SCRAPED,
 )
 
+SELF_HEAL_CANDIDATE_STATUSES: tuple[CandidateStatus, ...] = (CandidateStatus.SCRAPE_FAILED,)
+
 
 @dataclass
 class CandidateScrapeBatch:
@@ -83,6 +85,39 @@ def select_candidates_for_scrape(
             0 if candidate.next_scrape_attempt_at is None else 1,
             candidate.next_scrape_attempt_at or max_datetime,
             -candidate.last_seen_at.timestamp(),
+            candidate.candidate_id,
+        ),
+    )
+    return ordered[:limit]
+
+
+def select_candidates_for_self_heal(
+    persistence: DiscoveryPersistence,
+    *,
+    limit: int,
+    now: datetime | None = None,
+) -> list[PersistentCandidate]:
+    """Return failed candidates eligible for a future self-healing workflow."""
+    current_time = now or datetime.now(UTC)
+    candidates = persistence.list_candidates(statuses=SELF_HEAL_CANDIDATE_STATUSES)
+    eligible = [
+        candidate
+        for candidate in candidates
+        if candidate.self_heal_eligible
+        and (
+            candidate.next_scrape_attempt_at is None
+            or candidate.next_scrape_attempt_at <= current_time
+        )
+    ]
+    max_datetime = datetime.max.replace(tzinfo=UTC)
+    ordered = sorted(
+        eligible,
+        key=lambda candidate: (
+            -candidate.retry_priority,
+            candidate.next_scrape_attempt_at or max_datetime,
+            -candidate.last_scrape_attempt_at.timestamp()
+            if candidate.last_scrape_attempt_at is not None
+            else 0,
             candidate.candidate_id,
         ),
     )
@@ -448,6 +483,10 @@ async def scrape_candidates(
                             source_adapter_name=source_name,
                             error_code="candidate_not_found",
                             error_message=f"{source_name} adapter did not return the candidate URL",
+                            diagnostics={
+                                "failure_stage": "source_adapter_match",
+                                "candidate_urls": sorted(candidate_urls),
+                            },
                         )
                     )
                 except Exception as exc:
@@ -463,6 +502,10 @@ async def scrape_candidates(
                             source_adapter_name=source_name,
                             error_code="source_adapter_error",
                             error_message=error_message,
+                            diagnostics={
+                                "failure_stage": "source_adapter_fetch",
+                                "exception_type": type(exc).__name__,
+                            },
                         )
                     )
                     errors.append(f"{in_progress.candidate_id}: {error_message}")
@@ -550,6 +593,7 @@ async def _fetch_partial_page(
             fetch_status=FetchStatus.TIMEOUT,
             error_code="generic_fetch_timeout",
             error_message=f"Generic fetch timed out: {exc}",
+            diagnostics={"failure_stage": "generic_fetch", "exception_type": type(exc).__name__},
         )
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
@@ -559,12 +603,14 @@ async def _fetch_partial_page(
             else FetchStatus.FAILED,
             error_code=f"generic_fetch_http_{status_code}",
             error_message=f"Generic fetch returned HTTP {status_code}",
+            diagnostics={"failure_stage": "generic_fetch", "http_status": status_code},
         )
     except httpx.HTTPError as exc:
         return GenericFetchResult(
             fetch_status=FetchStatus.FAILED,
             error_code="generic_fetch_error",
             error_message=f"Generic fetch failed: {type(exc).__name__}: {exc}",
+            diagnostics={"failure_stage": "generic_fetch", "exception_type": type(exc).__name__},
         )
 
     parsed = _extract_partial_page_metadata(response.text)
@@ -582,7 +628,10 @@ async def _fetch_partial_page(
         error_code="generic_fetch_no_metadata",
         error_message="Generic fetch returned a page without usable metadata",
         final_url=str(response.url),
-        diagnostics={"content_type": response.headers.get("content-type", "")},
+        diagnostics={
+            "content_type": response.headers.get("content-type", ""),
+            "failure_stage": "generic_extract_metadata",
+        },
     )
 
 

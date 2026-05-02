@@ -13,6 +13,7 @@ from denbust.config import Config, OperationalProvider
 from denbust.diagnostics.discovery import (
     DiscoveryDiagnosticReport,
     _build_failure_summaries,
+    _build_scrape_failure_diagnostics,
     _load_operational_record_urls,
     _normalize_domain,
     _read_jsonl,
@@ -46,6 +47,7 @@ def _candidate(
     last_seen_at: datetime,
     next_scrape_attempt_at: datetime | None = None,
     content_basis: ContentBasis = ContentBasis.CANDIDATE_ONLY,
+    self_heal_eligible: bool = False,
 ) -> PersistentCandidate:
     return PersistentCandidate(
         candidate_id=candidate_id,
@@ -60,6 +62,7 @@ def _candidate(
         first_seen_at=first_seen_at,
         last_seen_at=last_seen_at,
         next_scrape_attempt_at=next_scrape_attempt_at,
+        self_heal_eligible=self_heal_eligible,
     )
 
 
@@ -102,6 +105,7 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
                 last_seen_at=now - timedelta(days=2),
                 next_scrape_attempt_at=now - timedelta(hours=1),
                 content_basis=ContentBasis.SEARCH_RESULT_ONLY,
+                self_heal_eligible=True,
             ),
             _candidate(
                 "candidate-google-partial",
@@ -173,13 +177,17 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
     assert report.queue_health.full_article_page_candidates == 1
     assert report.queue_health.stale_candidates == 1
     assert report.queue_health.retry_backlog_candidates == 1
+    assert report.queue_health.self_heal_eligible_candidates == 1
     assert report.candidate_conversion.scrape_succeeded_candidates == 1
     assert report.candidate_conversion.search_result_only_candidates == 1
     assert report.candidate_conversion.operational_record_matches == 1
     assert report.candidate_conversion.per_producer[0].candidate_count >= 1
     assert report.top_failure_sources[0].name == "mako"
     assert report.top_failure_domains[0].name in {"www.mako.co.il", "www.maariv.co.il"}
+    assert report.scrape_failure_diagnostics[0].error_code == "candidate_not_found"
+    assert report.scrape_failure_diagnostics[0].self_heal_eligible_count == 1
     assert "Overlap" in render_discovery_diagnostic_report(report)
+    assert "Structured scrape failures" in render_discovery_diagnostic_report(report)
 
 
 def test_persist_discovery_diagnostic_artifacts_writes_latest_files(tmp_path: Path) -> None:
@@ -699,3 +707,67 @@ def test_build_failure_summaries_ignores_success_attempts_and_rejects_unknown_ke
     assert summaries[0].count == 1
     with pytest.raises(ValueError, match="Unsupported failure summary key: nope"):
         _build_failure_summaries(candidates, attempts, key="nope")
+
+
+def test_build_scrape_failure_diagnostics_groups_failures_for_self_heal_triage() -> None:
+    """Failure diagnostics should retain source, status, kind, domain, and self-heal counts."""
+    now = datetime.now(UTC)
+    candidates = [
+        _candidate(
+            "candidate-1",
+            url="https://www.mako.co.il/news/article/1",
+            discovered_via=["brave"],
+            status=CandidateStatus.SCRAPE_FAILED,
+            first_seen_at=now,
+            last_seen_at=now,
+            self_heal_eligible=True,
+        ),
+        _candidate(
+            "candidate-2",
+            url="https://www.mako.co.il/news/article/2",
+            discovered_via=["google_cse"],
+            status=CandidateStatus.SCRAPE_FAILED,
+            first_seen_at=now,
+            last_seen_at=now,
+        ),
+    ]
+    attempts = [
+        ScrapeAttempt(
+            candidate_id="candidate-1",
+            started_at=now - timedelta(minutes=2),
+            finished_at=now - timedelta(minutes=2),
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.FAILED,
+            source_adapter_name="mako",
+            error_code="candidate_not_found",
+        ),
+        ScrapeAttempt(
+            candidate_id="candidate-2",
+            started_at=now - timedelta(minutes=1),
+            finished_at=now - timedelta(minutes=1),
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.FAILED,
+            source_adapter_name="mako",
+            error_code="candidate_not_found",
+        ),
+        ScrapeAttempt(
+            candidate_id="candidate-1",
+            started_at=now,
+            finished_at=now,
+            attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+            fetch_status=FetchStatus.SUCCESS,
+        ),
+    ]
+
+    diagnostics = _build_scrape_failure_diagnostics(candidates, attempts)
+
+    assert len(diagnostics) == 1
+    diagnostic = diagnostics[0]
+    assert diagnostic.attempt_kind == "source_adapter"
+    assert diagnostic.fetch_status == "failed"
+    assert diagnostic.error_code == "candidate_not_found"
+    assert diagnostic.source_adapter_name == "mako"
+    assert diagnostic.domain == "www.mako.co.il"
+    assert diagnostic.count == 2
+    assert diagnostic.self_heal_eligible_count == 1
+    assert diagnostic.latest_attempt_at == now - timedelta(minutes=1)

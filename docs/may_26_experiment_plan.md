@@ -25,14 +25,14 @@ next PR.
 
 | Document | Current signal for this experiment |
 |---|---|
-| `.agent-plan.md` | Main operational pointer. It says the next planned PR is optional `DL-PR-12` self-healing scaffolding hooks, with no current blockers. |
+| `.agent-plan.md` | Main operational pointer. After `DL-PR-12`, it points to a fresh source-health diagnostic pass to decide whether #71/#74 can close as duplicate Mako hygiene or whether #72 needs another source-native reliability PR. |
 | `PLAN.md` | Human plan map, but currently stale. It still describes "Post-`DL-PR-07`" and says `DL-PR-08` is next even though later discovery PRs have shipped. Treat as a doc-drift signal, not as source of truth. |
 | `README.md` | Most complete current user-facing description of implemented jobs: discover, backfill discover/scrape, ingest, monthly report, release, backup, diagnostics, daily AI review. |
 | `docs/CHATGPT_26_04_PLAN.md` | Main product/data roadmap. It frames the next major work as taxonomy, validation, product alignment, manual corrections, monthly reporting, and minisite export. Much of this appears partly implemented and needs verification. |
 | `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` | Validation sub-plan. It says PR 3.4 typology-aware evaluation reports is the current next PR, which conflicts with `.agent-plan.md`. Treat as a stale or parallel sub-plan until measured. |
 | `docs/PHASE_C_PLAN.md` | Phase C plan. C-8 is marked implemented and the 90-day catch-up remains an operator-run backfill. Use it to verify taxonomy keyword/backfill assumptions. |
 | `docs/tfht_discovery_layer_design_amended.md` | Discovery architecture design. It defines the durable candidate layer, backfill, diagnostics, self-healing fields, and the key evaluation methodology. |
-| `docs/tfht_discovery_layer_implementation_plan.md` | Discovery rollout plan. It says `DL-PR-12` is optional self-healing scaffolding only, not full self-healing. |
+| `docs/tfht_discovery_layer_implementation_plan.md` | Discovery rollout plan. It now records `DL-PR-12` as self-healing scaffolding only, not full self-healing. |
 | `docs/discovery_operations.md` | Local and GitHub runbook after `DL-PR-11`. Use its commands as the starting point for local experiments. |
 | `docs/2026_04_04_tfht_state_of_project_report.md` | Orientation report. It correctly predicts the next major axis as typology, validation, and product alignment. |
 | `docs/articles_examples.md` | Known source/article watchlist. It should become a machine-readable coverage fixture or feed one. |
@@ -237,7 +237,8 @@ Decision rules:
 - If Ynet returns recent RSS/category items but still misses known relevant URLs, use the #66
   fixture-backed source-targeted taxonomy test as the first regression check before adding new live
   source work.
-- If diagnostics cannot explain why a source returned zero, `DL-PR-12`-style structured failure diagnostics become more urgent.
+- If diagnostics cannot explain why a source returned zero after `DL-PR-12`, add a source-health
+  diagnostics follow-up rather than jumping straight to automatic self-healing.
 
 ## Phase 4 - Fresh Discovery Run
 
@@ -577,7 +578,9 @@ The experiment should not assume these are true, but these are the current hypot
 6. #52 and #53 appear treated by PR #96's public Maariv/ICE diagnostic helpers; close or update the
    issues with that evidence if they remain open.
 7. #88 should stay lower priority unless bounded backfill demonstrates real local slowness.
-8. The repo needs a first-class experiment or live-check CLI if these checks are going to be run more
+8. `DL-PR-12` provides structured scrape-failure diagnostics and self-heal eligibility hooks, but
+   full AI repair remains future work.
+9. The repo needs a first-class experiment or live-check CLI if these checks are going to be run more
    than once.
 
 ## Completion Criteria

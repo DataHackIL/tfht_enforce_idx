@@ -874,12 +874,23 @@ Self-healing needs a backlog of failures to learn from and re-attempt.
 - repeated blocks/timeouts
 - candidates that are valuable but currently unsupported
 
+### Current scaffolding hooks
+The implemented layer now stops at explicit hooks:
+- `self_heal_eligible` is set on failed scrape candidates and reported in queue-health diagnostics
+- scrape failure diagnostics are grouped by attempt kind, fetch status, error code, source adapter,
+  and domain, including counts of self-heal-eligible candidates
+- source-adapter match/fetch failures and generic fetch/extract failures carry stable
+  `failure_stage` diagnostics
+- future orchestration can select eligible failed candidates and record attempts with
+  `attempt_kind = "self_heal_retry"`
+
 ### Candidate-layer fields that support this
 - `last_scrape_error_code`
 - `last_scrape_error_message`
 - `scrape_attempt_count`
 - `self_heal_eligible`
 - provenance/source adapter metadata
+- scrape-attempt `diagnostics_json`
 
 ### Future self-heal job
 Could:
@@ -888,6 +899,10 @@ Could:
 - suggest source-adapter changes
 - create a revised scrape attempt
 - update candidate status and attempt logs
+
+It should not infer repairs from free-text alone; it should consume the structured failure
+diagnostics and append a `self_heal_retry` scrape attempt only after a concrete repair strategy is
+chosen.
 
 This requires the durable candidate queue/history that this amended design introduces.
 
