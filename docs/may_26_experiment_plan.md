@@ -62,7 +62,7 @@ The repo currently has 21 issues returned by the repo-specific GitHub MCP. Seven
 | #52 Expose diagnostic-safe public probe helpers for Maariv scraper | Treated | PR #96 added public Maariv diagnostic helpers; close or update the issue with that evidence if it remains open. |
 | #53 Expose diagnostic-safe public probe helpers for ICE scraper | Treated | PR #96 added public ICE diagnostic helpers; close or update the issue with that evidence if it remains open. |
 | #65 Add Ynet category-page backstop for משפט ופלילים discovery | Treated | The source-recall follow-up keeps Ynet RSS primary and adds the non-browser category-page backstop with separate source-health signals. |
-| #66 Add fixture-based Ynet end-to-end regression test after web-search source exists | Open | Active next follow-up. Source-targeted taxonomy queries now make the search-backed source-domain path stable enough for fixture-backed recall coverage. |
+| #66 Add fixture-based Ynet end-to-end regression test after web-search source exists | Converted to test | Fixture-backed coverage now protects the Ynet source-targeted taxonomy search path for the known February 12, 2026 article through candidate normalization, provenance, source-adapter materialization, and pre-classification ingest handoff. |
 | #71 Mako source completely failing due to browser navigation issues | Open | Active high-priority source-health issue. Live Mako diagnostics must be run with browser runtime installed. |
 | #72 Major Israeli news sources returning zero results | Open | Active system-level health issue treated by the search-backed discovery/backfill follow-through: live diagnostics reproduced Ynet, Walla, Maariv, and ICE source-zero/stale patterns while the query builders now add domain-constrained taxonomy fallback searches. |
 | #74 Mako source experiencing complete failure with browser navigation | Open | Active but likely duplicate/continuation of #71. Verify whether both can be collapsed after the experiment. |
@@ -233,8 +233,9 @@ Decision rules:
 
 - If 4+ configured sources return zero or hard failures, #72 remains active and should become the next correctness PR.
 - If Mako alone fails with browser/navigation errors, merge #71 and #74 conceptually and fix Mako first.
-- If Ynet returns recent RSS/category items but still misses known relevant URLs, prioritize
-  search-backed recall or #66 fixture-based end-to-end coverage.
+- If Ynet returns recent RSS/category items but still misses known relevant URLs, use the #66
+  fixture-backed source-targeted taxonomy test as the first regression check before adding new live
+  source work.
 - If diagnostics cannot explain why a source returned zero, `DL-PR-12`-style structured failure diagnostics become more urgent.
 
 ## Phase 4 - Fresh Discovery Run
@@ -570,8 +571,8 @@ The experiment should not assume these are true, but these are the current hypot
 4. #72 remains the central source-native reliability signal: the current evidence shows Ynet, Walla,
    Maariv, and ICE remain affected by source-native zero/stale/keyword-zero patterns while Mako and
    Haaretz pass, with search-backed fallback coverage now broadened for those domains.
-5. #65 is treated by the Ynet category-page backstop; future Ynet work should focus on #66
-   fixture-backed end-to-end coverage over the stable search-backed source-domain path.
+5. #65 is treated by the Ynet category-page backstop, and #66 is converted to fixture-backed
+   coverage over the stable search-backed source-domain path.
 6. #52 and #53 appear treated by PR #96's public Maariv/ICE diagnostic helpers; close or update the
    issues with that evidence if they remain open.
 7. #88 should stay lower priority unless bounded backfill demonstrates real local slowness.

@@ -35,7 +35,8 @@ backstop while keeping the RSS feed as the primary Ynet source. The Phase C sour
 follow-through added a report-level source-zero guardrail and explicit Mako browser/navigation
 failure-mode details. The current #72 follow-through reproduced systemic source-zero for Ynet,
 Walla, Maariv, and ICE, then expanded search-backed discovery/backfill so taxonomy recall terms are
-also queried against each configured news domain.
+also queried against each configured news domain. The #66 follow-up added fixture-backed Ynet recall
+coverage over that source-targeted taxonomy path.
 
 ### What is already in place
 
@@ -55,13 +56,17 @@ also queried against each configured news domain.
 - Search-backed discovery and backfill now emit source-targeted taxonomy queries for every enabled
   configured news domain, giving the durable candidate layer a domain-constrained fallback when
   source-native probes zero out.
+- A fixture-backed Ynet regression protects the source-targeted taxonomy search path for the known
+  February 12, 2026 article `https://www.ynet.co.il/news/article/bkcarhip11g`, including candidate
+  normalization, preferred-domain/query provenance, source-adapter materialization, and
+  pre-classification ingest handoff.
 - Validation evaluation already reports stage-wise relevance, enforcement, taxonomy, and index
   metrics.
 
 ### What comes next
 
-1. Add fixture-backed Ynet/search recall regression coverage for #66 now that the search-backed
-   source-domain query path exists for taxonomy recall terms.
+1. Decide whether optional `DL-PR-12` self-healing scaffolding or Mako #71/#74 hygiene is the next
+   evidence-backed PR after a fresh local diagnostic pass.
 2. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
 3. Treat optional self-healing scaffolding as later work unless the hardened experiment data shows it
@@ -77,6 +82,7 @@ also queried against each configured news domain.
 - `src/denbust/diagnostics/source_health.py`
 - `src/denbust/cli.py`
 - `tests/unit/test_pipeline_core.py`
+- `tests/unit/test_ynet_search_recall_fixture.py`
 - `tests/unit/test_cli.py`
 - new diagnostics-focused unit tests under `tests/unit/`
 

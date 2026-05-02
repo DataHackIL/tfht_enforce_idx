@@ -49,6 +49,8 @@ Planned future datasets:
   search-engine recall
 - Adds source-targeted taxonomy queries for each configured news domain so search-backed discovery
   and capped historical backfill can compensate when source-native pages produce zero recent matches
+- Protects the Ynet source-targeted taxonomy search path with fixture-backed recall coverage for a
+  known February 12, 2026 article, including candidate provenance and pre-classification handoff
 - Keeps Ynet RSS as the primary משפט ופלילים source while adding a non-browser category-page
   backstop for source-native recall
 - Emits Facebook-targeted `social_targeted` search queries and retains those results as non-scrapeable reference candidates
@@ -302,6 +304,8 @@ DL-PR-06 now builds on the earlier discovery milestones:
 - taxonomy-targeted query building from packaged TFHT discovery terms
 - capped source-targeted taxonomy query building for historical backfill via
   `backfill.max_source_targeted_taxonomy_queries_per_window`
+- fixture-backed Ynet recall coverage for source-targeted taxonomy search candidates, durable
+  candidate normalization, source-adapter materialization, and pre-classification ingest handling
 - Exa query execution for the same broad and source-targeted discovery searches
 - Google CSE query execution for the same broad and source-targeted discovery searches
 - dedicated `DENBUST_BRAVE_SEARCH_API_KEY`, `DENBUST_EXA_API_KEY`, and
