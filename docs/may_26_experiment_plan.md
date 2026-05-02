@@ -67,6 +67,7 @@ The repo currently has 21 issues returned by the repo-specific GitHub MCP. Seven
 | #72 Major Israeli news sources returning zero results | Open | Active system-level health issue treated by the search-backed discovery/backfill follow-through: live diagnostics reproduced Ynet, Walla, Maariv, and ICE source-zero/stale patterns while the query builders now add domain-constrained taxonomy fallback searches. |
 | #74 Mako source experiencing complete failure with browser navigation | Open | Active but likely duplicate/continuation of #71. Verify whether both can be collapsed after the experiment. |
 | #88 Optimize backfill batch aggregate counts in discovery persistence | Open | Active optimization, not a correctness blocker. Measure batch/candidate counts but do not prioritize unless local runs show aggregation is materially slow. |
+| #97 Share validation taxonomy rules between lint and finalize | Treated | The validation follow-up now routes taxonomy pair/version, legacy category compatibility, and `index_relevant` row checks through shared validation code used by both lint and reviewed-row finalize/import. |
 
 ### Initial local-state warning
 

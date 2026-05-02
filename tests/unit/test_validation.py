@@ -134,6 +134,48 @@ def build_validation_csv_row(**overrides: str) -> dict[str, str]:
     return row
 
 
+def build_validation_draft_row(**overrides: str) -> dict[str, str]:
+    """Create a valid reviewed validation draft row for tests."""
+    row = {
+        "source_name": "mako",
+        "article_date": "2026-03-03T00:00:00+00:00",
+        "url": "https://example.com/b",
+        "canonical_url": "https://example.com/b",
+        "title": "title b",
+        "snippet": "snippet b",
+        "suggested_relevant": "True",
+        "suggested_enforcement_related": "True",
+        "suggested_index_relevant": "True",
+        "suggested_taxonomy_version": "1",
+        "suggested_taxonomy_category_id": "brothels",
+        "suggested_taxonomy_subcategory_id": "administrative_closure",
+        "suggested_category": "brothel",
+        "suggested_sub_category": "closure",
+        "suggested_confidence": "high",
+        "relevant": "True",
+        "enforcement_related": "True",
+        "index_relevant": "True",
+        "taxonomy_version": "1",
+        "taxonomy_category_id": "brothels",
+        "taxonomy_subcategory_id": "administrative_closure",
+        "category": "brothel",
+        "sub_category": "closure",
+        "review_status": "reviewed",
+        "annotation_source": "tfht_manual_tracking_v1",
+        "expected_month_bucket": "",
+        "expected_city": "",
+        "expected_status": "",
+        "manual_city": "",
+        "manual_address": "",
+        "manual_event_label": "",
+        "manual_status": "",
+        "annotation_notes": "",
+        "collected_at": "2026-03-03T00:00:00+00:00",
+    }
+    row.update(overrides)
+    return row
+
+
 class FakeSource:
     """Simple validation collection source stub."""
 
@@ -932,6 +974,69 @@ class TestValidationFinalize:
         with pytest.raises(ValueError, match=match):
             finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
 
+    @pytest.mark.parametrize(
+        ("overrides", "lint_match", "finalize_match"),
+        [
+            (
+                {
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "not_a_leaf",
+                },
+                "Invalid taxonomy pair",
+                "Invalid taxonomy pair",
+            ),
+            (
+                {
+                    "taxonomy_category_id": "brothels",
+                    "taxonomy_subcategory_id": "",
+                },
+                "Relevant rows must include taxonomy_version and taxonomy ids",
+                "Taxonomy labels must include both category and subcategory ids",
+            ),
+            (
+                {
+                    "category": "pimping",
+                    "sub_category": "arrest",
+                },
+                "category does not match the packaged taxonomy legacy mapping",
+                "category does not match the packaged taxonomy legacy mapping",
+            ),
+            (
+                {
+                    "index_relevant": "False",
+                },
+                "index_relevant does not match the packaged taxonomy",
+                "index_relevant does not match the packaged taxonomy",
+            ),
+        ],
+    )
+    def test_lint_and_finalize_share_taxonomy_integrity_rejections(
+        self,
+        tmp_path: Path,
+        overrides: dict[str, str],
+        lint_match: str,
+        finalize_match: str,
+    ) -> None:
+        validation_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_path,
+            VALIDATION_SET_COLUMNS,
+            [build_validation_csv_row(**overrides)],
+        )
+        lint_result = lint_validation_set(validation_path)
+
+        draft_path = tmp_path / "draft.csv"
+        write_csv_rows(
+            draft_path,
+            DRAFT_COLUMNS,
+            [build_validation_draft_row(**overrides)],
+        )
+
+        assert lint_result.passed is False
+        assert lint_match in "\n".join(issue.render() for issue in lint_result.issues)
+        with pytest.raises(ValueError, match=finalize_match):
+            finalize_validation_set(input_path=draft_path, validation_set_path=tmp_path / "out.csv")
+
     def test_finalize_validation_set_normalizes_valid_taxonomy_version(
         self, tmp_path: Path
     ) -> None:
@@ -1396,6 +1501,32 @@ class TestValidationEvaluate:
         assert "Invalid sub_category 'arrest' for category 'brothel'" in rendered
         assert "index_relevant does not match the packaged taxonomy" in rendered
         assert "Relevant rows cannot use category 'not_relevant'" in rendered
+
+    def test_validation_lint_keeps_non_relevant_rows_label_strict(self, tmp_path: Path) -> None:
+        validation_path = tmp_path / "validation.csv"
+        write_csv_rows(
+            validation_path,
+            VALIDATION_SET_COLUMNS,
+            [
+                build_validation_csv_row(
+                    relevant="False",
+                    enforcement_related="False",
+                    index_relevant="False",
+                    taxonomy_version="",
+                    taxonomy_category_id="",
+                    taxonomy_subcategory_id="",
+                    category="definitely_invalid",
+                    sub_category="also_invalid",
+                )
+            ],
+        )
+
+        result = lint_validation_set(validation_path)
+
+        rendered = "\n".join(issue.render() for issue in result.issues)
+        assert result.passed is False
+        assert "Invalid category value: 'definitely_invalid'" in rendered
+        assert "Invalid sub_category value: 'also_invalid'" in rendered
 
     def test_validation_lint_reports_missing_file_empty_file_and_bad_header(
         self, tmp_path: Path

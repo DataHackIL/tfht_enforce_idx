@@ -36,7 +36,9 @@ follow-through added a report-level source-zero guardrail and explicit Mako brow
 failure-mode details. The current #72 follow-through reproduced systemic source-zero for Ynet,
 Walla, Maariv, and ICE, then expanded search-backed discovery/backfill so taxonomy recall terms are
 also queried against each configured news domain. The #66 follow-up added fixture-backed Ynet recall
-coverage over that source-targeted taxonomy path.
+coverage over that source-targeted taxonomy path. The #97 validation follow-up now shares
+taxonomy/category/index-relevance row-integrity checks between validation lint and finalize/import,
+so permanent-set preflight and reviewed-row ingestion enforce the same semantic invariants.
 
 ### What is already in place
 
@@ -62,6 +64,8 @@ coverage over that source-targeted taxonomy path.
   pre-classification ingest handoff.
 - Validation evaluation already reports stage-wise relevance, enforcement, taxonomy, and index
   metrics.
+- Validation lint and reviewed-row finalize/import now share row-level taxonomy pair/version,
+  legacy category compatibility, and `index_relevant` checks.
 
 ### What comes next
 

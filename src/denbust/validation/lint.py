@@ -6,15 +6,14 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from denbust.data_models import Category, SubCategory
 from denbust.taxonomy import TaxonomyDefinition, default_taxonomy
 from denbust.validation.common import (
-    ALLOWED_SUBCATEGORIES_BY_CATEGORY,
     DEFAULT_VALIDATION_SET_PATH,
     VALIDATION_SET_COLUMNS,
     parse_bool,
     parse_datetime,
 )
+from denbust.validation.row_integrity import RowIntegrityInput, validate_row_integrity
 
 
 @dataclass(frozen=True)
@@ -78,57 +77,7 @@ def _lint_datetime(
         issues.append(ValidationLintIssue(row_number=row_number, field=field, message=str(exc)))
 
 
-def _lint_category(
-    issues: list[ValidationLintIssue],
-    *,
-    row_number: int,
-    row: dict[str, str],
-) -> tuple[Category | None, SubCategory | None]:
-    category: Category | None = None
-    sub_category: SubCategory | None = None
-    category_value = row.get("category", "").strip()
-    sub_category_value = row.get("sub_category", "").strip()
-    try:
-        category = Category(category_value)
-    except ValueError:
-        issues.append(
-            ValidationLintIssue(
-                row_number=row_number,
-                field="category",
-                message=f"Invalid category value: {category_value!r}",
-            )
-        )
-
-    if sub_category_value:
-        try:
-            sub_category = SubCategory(sub_category_value)
-        except ValueError:
-            issues.append(
-                ValidationLintIssue(
-                    row_number=row_number,
-                    field="sub_category",
-                    message=f"Invalid sub_category value: {sub_category_value!r}",
-                )
-            )
-
-    if category is not None and sub_category is not None:
-        allowed = ALLOWED_SUBCATEGORIES_BY_CATEGORY.get(category, set())
-        if sub_category not in allowed:
-            issues.append(
-                ValidationLintIssue(
-                    row_number=row_number,
-                    field="sub_category",
-                    message=(
-                        f"Invalid sub_category {sub_category.value!r} "
-                        f"for category {category.value!r}"
-                    ),
-                )
-            )
-
-    return category, sub_category
-
-
-def _lint_taxonomy(
+def _lint_row_integrity(
     issues: list[ValidationLintIssue],
     *,
     row_number: int,
@@ -137,68 +86,29 @@ def _lint_taxonomy(
     index_relevant: bool | None,
     taxonomy: TaxonomyDefinition,
 ) -> None:
-    taxonomy_version = row.get("taxonomy_version", "").strip()
-    category_id = row.get("taxonomy_category_id", "").strip()
-    subcategory_id = row.get("taxonomy_subcategory_id", "").strip()
-
-    if relevant and not (taxonomy_version and category_id and subcategory_id):
+    result = validate_row_integrity(
+        RowIntegrityInput(
+            relevant=relevant,
+            enforcement_related=None,
+            index_relevant=index_relevant,
+            category_value=row.get("category", ""),
+            sub_category_value=row.get("sub_category", ""),
+            taxonomy_version=row.get("taxonomy_version", ""),
+            taxonomy_category_id=row.get("taxonomy_category_id", ""),
+            taxonomy_subcategory_id=row.get("taxonomy_subcategory_id", ""),
+            require_taxonomy_for_relevant=True,
+            require_taxonomy_version=True,
+        ),
+        taxonomy=taxonomy,
+    )
+    for issue in result.issues:
         issues.append(
             ValidationLintIssue(
                 row_number=row_number,
-                field="taxonomy_category_id",
-                message="Relevant rows must include taxonomy_version and taxonomy ids",
+                field=issue.field,
+                message=issue.message,
             )
         )
-        return
-
-    if not (taxonomy_version or category_id or subcategory_id):
-        return
-
-    if not (taxonomy_version and category_id and subcategory_id):
-        issues.append(
-            ValidationLintIssue(
-                row_number=row_number,
-                field="taxonomy_category_id",
-                message="Taxonomy labels must include version, category, and subcategory",
-            )
-        )
-        return
-
-    if taxonomy_version != taxonomy.version:
-        issues.append(
-            ValidationLintIssue(
-                row_number=row_number,
-                field="taxonomy_version",
-                message=(
-                    f"Unsupported taxonomy version {taxonomy_version!r}; "
-                    f"expected {taxonomy.version!r}"
-                ),
-            )
-        )
-
-    if not taxonomy.has_pair(category_id, subcategory_id):
-        issues.append(
-            ValidationLintIssue(
-                row_number=row_number,
-                field="taxonomy_subcategory_id",
-                message=f"Invalid taxonomy pair: {category_id}/{subcategory_id}",
-            )
-        )
-        return
-
-    if index_relevant is not None:
-        expected = taxonomy.is_index_relevant(category_id, subcategory_id)
-        if index_relevant != expected:
-            issues.append(
-                ValidationLintIssue(
-                    row_number=row_number,
-                    field="index_relevant",
-                    message=(
-                        "index_relevant does not match the packaged taxonomy "
-                        f"for {category_id}/{subcategory_id}"
-                    ),
-                )
-            )
 
 
 def lint_validation_set(
@@ -256,20 +166,7 @@ def lint_validation_set(
                 row=row,
                 field="index_relevant",
             )
-            category, _sub_category = _lint_category(
-                issues,
-                row_number=row_number,
-                row=row,
-            )
-            if relevant and category == Category.NOT_RELEVANT:
-                issues.append(
-                    ValidationLintIssue(
-                        row_number=row_number,
-                        field="category",
-                        message="Relevant rows cannot use category 'not_relevant'",
-                    )
-                )
-            _lint_taxonomy(
+            _lint_row_integrity(
                 issues,
                 row_number=row_number,
                 row=row,

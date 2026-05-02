@@ -63,6 +63,8 @@ Planned future datasets:
   `denbust diagnose-discovery`
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains
 - Lints the tracked classifier validation CSV with `denbust validation-lint`
+- Shares validation taxonomy/category/index-relevance row-integrity rules between
+  `denbust validation-lint` and reviewed-row finalize/import
 - Runs tracked classifier/live-source scenarios with `denbust live-check`
 - Runs scheduled GitHub Actions discovery separately from candidate-driven ingest
 - Exposes manual GitHub Actions workflows for historical `backfill_discover` and `backfill_scrape`
