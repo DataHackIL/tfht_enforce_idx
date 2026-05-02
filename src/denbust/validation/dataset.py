@@ -125,12 +125,13 @@ def validate_reviewed_row(raw_row: dict[str, str], *, draft_source: str) -> Vali
     if integrity.issues:
         raise ValueError(_reviewed_row_error_message(integrity.issues[0].message))
 
+    assert integrity.category is not None
+    assert integrity.enforcement_related is not None
+    assert integrity.index_relevant is not None
     category = integrity.category
-    if category is None:
-        raise ValueError(f"Invalid category value: {category_value!r}")
     sub_category = integrity.sub_category
-    enforcement_related = bool(integrity.enforcement_related)
-    index_relevant = bool(integrity.index_relevant)
+    enforcement_related = integrity.enforcement_related
+    index_relevant = integrity.index_relevant
     taxonomy_version = integrity.taxonomy_version
     taxonomy_category_id = integrity.taxonomy_category_id
     taxonomy_subcategory_id = integrity.taxonomy_subcategory_id

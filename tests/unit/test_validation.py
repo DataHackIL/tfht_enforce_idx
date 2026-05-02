@@ -18,6 +18,7 @@ from denbust.data_models import (
     RawArticle,
     SubCategory,
 )
+from denbust.taxonomy import default_taxonomy
 from denbust.validation.collect import (
     collect_validation_draft,
     run_validation_collect,
@@ -58,6 +59,7 @@ from denbust.validation.evaluate import (
 )
 from denbust.validation.lint import lint_validation_set, run_validation_lint
 from denbust.validation.models import ClassifierVariantSpec, VariantMetrics
+from denbust.validation.row_integrity import RowIntegrityInput, validate_row_integrity
 
 
 def build_raw_article(
@@ -1527,6 +1529,50 @@ class TestValidationEvaluate:
         assert result.passed is False
         assert "Invalid category value: 'definitely_invalid'" in rendered
         assert "Invalid sub_category value: 'also_invalid'" in rendered
+
+    def test_row_integrity_reports_missing_taxonomy_version_when_required(self) -> None:
+        result = validate_row_integrity(
+            RowIntegrityInput(
+                relevant=True,
+                enforcement_related=True,
+                index_relevant=True,
+                category_value="brothel",
+                sub_category_value="closure",
+                taxonomy_version="",
+                taxonomy_category_id="brothels",
+                taxonomy_subcategory_id="administrative_closure",
+                require_taxonomy_version=True,
+            ),
+            taxonomy=default_taxonomy(),
+        )
+
+        assert [
+            (issue.field, issue.message)
+            for issue in result.issues
+            if issue.field == "taxonomy_category_id"
+        ] == [
+            (
+                "taxonomy_category_id",
+                "Taxonomy labels must include version, category, and subcategory",
+            )
+        ]
+
+    def test_row_integrity_accepts_taxonomy_pair_without_index_relevance_check(self) -> None:
+        result = validate_row_integrity(
+            RowIntegrityInput(
+                relevant=True,
+                enforcement_related=True,
+                index_relevant=None,
+                category_value="brothel",
+                sub_category_value="closure",
+                taxonomy_version="1",
+                taxonomy_category_id="brothels",
+                taxonomy_subcategory_id="administrative_closure",
+            ),
+            taxonomy=default_taxonomy(),
+        )
+
+        assert result.issues == []
 
     def test_validation_lint_reports_missing_file_empty_file_and_bad_header(
         self, tmp_path: Path

@@ -47,11 +47,6 @@ class RowIntegrityResult:
     enforcement_related: bool | None
     index_relevant: bool | None
 
-    @property
-    def passed(self) -> bool:
-        """Return whether the row passed all row-level checks."""
-        return not self.issues
-
 
 def validate_row_integrity(
     row: RowIntegrityInput,
