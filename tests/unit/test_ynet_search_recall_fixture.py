@@ -8,7 +8,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-from pydantic import HttpUrl
 
 import denbust.pipeline as pipeline_module
 from denbust.config import Config, SourceConfig, SourceType
@@ -17,11 +16,13 @@ from denbust.discovery.base import DiscoveryContext
 from denbust.discovery.engines.brave import BraveSearchEngine
 from denbust.discovery.models import (
     CandidateStatus,
+    ContentBasis,
     DiscoveryQuery,
     DiscoveryQueryKind,
     DiscoveryRun,
     DiscoveryRunStatus,
     FetchStatus,
+    ProducerKind,
 )
 from denbust.discovery.queries import build_discovery_queries
 from denbust.discovery.scrape_queue import scrape_candidates
@@ -29,11 +30,11 @@ from denbust.discovery.source_native import persist_discovered_candidates
 from denbust.discovery.state_paths import resolve_discovery_state_paths
 from denbust.discovery.storage import StateRepoDiscoveryPersistence
 from denbust.models.common import DatasetName, JobName
-from denbust.store.seen import SeenStore
 
 YNET_RECALL_URL = "https://www.ynet.co.il/news/article/bkcarhip11g"
 YNET_RECALL_CANONICAL_URL = "https://ynet.co.il/news/article/bkcarhip11g"
 YNET_RECALL_TITLE = 'כלאו נשים בתנאי עבדות: "הוא אנס, היא סחטה" | קשה לקריאה'
+YNET_RECALL_SNIPPET = "בתי בושת, סרסרות, זנות וסחר בבני אדם."
 YNET_RECALL_PUBLISHED_AT = datetime(2026, 2, 12, 8, 0, tzinfo=UTC)
 
 
@@ -84,9 +85,10 @@ def _ynet_source_targeted_taxonomy_query(queries: list[DiscoveryQuery]) -> Disco
 
 
 @pytest.mark.asyncio
-async def test_ynet_source_targeted_taxonomy_search_result_reaches_classifier_input(
+async def test_ynet_source_targeted_taxonomy_search_result_fallback_reaches_classifier_input(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    respx_mock: object,
 ) -> None:
     """Protect #66: Ynet recall via source-targeted taxonomy search, not live RSS/search pages."""
     monkeypatch.setattr(
@@ -124,7 +126,7 @@ async def test_ynet_source_targeted_taxonomy_search_result_reaches_classifier_in
                             {
                                 "url": YNET_RECALL_URL,
                                 "title": YNET_RECALL_TITLE,
-                                "description": "בתי בושת, סרסרות, זנות וסחר בבני אדם.",
+                                "description": YNET_RECALL_SNIPPET,
                                 "page_age": YNET_RECALL_PUBLISHED_AT.isoformat(),
                             }
                         ]
@@ -176,6 +178,24 @@ async def test_ynet_source_targeted_taxonomy_search_result_reaches_classifier_in
         persistence=persistence,
     )
     candidate = persisted.candidates[0]
+    provenance = persisted.provenance[0]
+    assert len(persisted.provenance) == 1
+    assert provenance.candidate_id == candidate.candidate_id
+    assert provenance.producer_name == "brave"
+    assert provenance.producer_kind is ProducerKind.SEARCH_ENGINE
+    assert provenance.query_text == "סחר"
+    assert str(provenance.raw_url) == YNET_RECALL_URL
+    assert str(provenance.normalized_url) == YNET_RECALL_CANONICAL_URL
+    assert provenance.title == YNET_RECALL_TITLE
+    assert provenance.publication_datetime_hint == YNET_RECALL_PUBLISHED_AT
+    assert provenance.metadata["query_tags"] == [
+        "ynet",
+        "taxonomy",
+        "category:human_trafficking",
+    ]
+    assert provenance.metadata["preferred_domains"] == ["www.ynet.co.il"]
+    assert provenance.metadata["source_targeted_taxonomy"] is True
+    assert persistence.list_provenance(candidate.candidate_id) == persisted.provenance
     assert candidate.candidate_status is CandidateStatus.NEW
     assert str(candidate.current_url) == YNET_RECALL_URL
     assert str(candidate.canonical_url) == YNET_RECALL_CANONICAL_URL
@@ -188,59 +208,65 @@ async def test_ynet_source_targeted_taxonomy_search_result_reaches_classifier_in
     )
     assert candidate.metadata["latest_discovery_metadata"]["source_targeted_taxonomy"] is True
 
-    fixture_article = RawArticle(
-        url=HttpUrl(YNET_RECALL_URL),
-        title=YNET_RECALL_TITLE,
-        snippet="בתי בושת, סרסרות, זנות וסחר בבני אדם.",
-        date=YNET_RECALL_PUBLISHED_AT,
-        source_name="ynet",
+    article_fixture_html = f"""
+    <!doctype html>
+    <html lang="he">
+      <head>
+        <title>{YNET_RECALL_TITLE}</title>
+        <meta name="description" content="{YNET_RECALL_SNIPPET}">
+        <meta property="article:published_time" content="{YNET_RECALL_PUBLISHED_AT.isoformat()}">
+      </head>
+      <body></body>
+    </html>
+    """
+    article_route = respx_mock.get(YNET_RECALL_URL).mock(
+        return_value=httpx.Response(
+            200,
+            text=article_fixture_html,
+            headers={"content-type": "text/html; charset=utf-8"},
+        )
     )
-    ynet_source = FixtureYnetSource([fixture_article])
+    ynet_source = FixtureYnetSource([])
     scrape_batch = await scrape_candidates(
         config=config,
         persistence=persistence,
         candidates=[candidate],
         sources=[ynet_source],
-        preloaded_source_articles={"ynet": [fixture_article]},
     )
 
     assert scrape_batch.errors == []
-    assert scrape_batch.raw_articles == [fixture_article]
-    assert scrape_batch.updated_candidates[0].candidate_status is CandidateStatus.SCRAPE_SUCCEEDED
-    assert scrape_batch.attempts[0].fetch_status is FetchStatus.SUCCESS
+    assert scrape_batch.raw_articles == []
+    assert len(scrape_batch.fallback_candidates) == 1
+    fallback_candidate = scrape_batch.fallback_candidates[0]
+    assert fallback_candidate.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    assert fallback_candidate.content_basis is ContentBasis.PARTIAL_PAGE
+    assert fallback_candidate.metadata["fallback_title"] == YNET_RECALL_TITLE
+    assert fallback_candidate.metadata["fallback_snippet"] == YNET_RECALL_SNIPPET
+    assert fallback_candidate.metadata["fallback_source_name"] == "ynet"
+    assert fallback_candidate.metadata["fallback_publication_datetime"] == (
+        YNET_RECALL_PUBLISHED_AT.isoformat()
+    )
+    assert fallback_candidate.metadata["fallback_final_url"] == YNET_RECALL_URL
+    assert article_route.called
+    assert [attempt.fetch_status for attempt in scrape_batch.attempts] == [
+        FetchStatus.FAILED,
+        FetchStatus.PARTIAL,
+    ]
     assert scrape_batch.attempts[0].source_adapter_name == "ynet"
+    assert scrape_batch.attempts[0].error_code == "candidate_not_found"
+    assert scrape_batch.attempts[1].source_adapter_name is None
 
     classifier = CapturingClassifier()
-    seen_store = SeenStore(tmp_path / "seen.json")
-    result = pipeline_module._build_run_snapshot(config, config_path=None, days=90)
-    result.source_count = 1
-    result.raw_article_count = len(scrape_batch.raw_articles)
-    processed = await pipeline_module._process_ingest_articles(
-        config=config,
-        result=result,
-        source_names=["ynet"],
-        sources=[ynet_source],
-        all_articles=scrape_batch.raw_articles,
-        seen_store=seen_store,
+    fallback_records = await pipeline_module._build_fallback_operational_records(
+        candidates=scrape_batch.fallback_candidates,
         classifier=classifier,
-        deduplicator=object(),
-        operational_store=None,
     )
 
-    assert classifier.inputs == [fixture_article]
-    assert processed.raw_article_count == 1
-    assert processed.unseen_article_count == 1
-    assert processed.debug_payload is not None
-    assert processed.debug_payload["counts"]["raw_article_count"] == 1
-    assert processed.debug_payload["classifier_summary"]["unseen_article_count"] == 1
-    assert processed.debug_payload["classifier_summary"]["classified_article_count"] == 1
-    assert processed.debug_payload["unseen_articles"] == [
-        {
-            "source_name": "ynet",
-            "url": YNET_RECALL_URL,
-            "canonical_url": YNET_RECALL_CANONICAL_URL,
-            "title": YNET_RECALL_TITLE,
-            "snippet": "בתי בושת, סרסרות, זנות וסחר בבני אדם.",
-            "publication_datetime": YNET_RECALL_PUBLISHED_AT.isoformat(),
-        }
-    ]
+    assert fallback_records == []
+    assert len(classifier.inputs) == 1
+    fallback_input = classifier.inputs[0]
+    assert str(fallback_input.url) == YNET_RECALL_CANONICAL_URL
+    assert fallback_input.title == YNET_RECALL_TITLE
+    assert fallback_input.snippet == YNET_RECALL_SNIPPET
+    assert fallback_input.date == YNET_RECALL_PUBLISHED_AT
+    assert fallback_input.source_name == "ynet"
