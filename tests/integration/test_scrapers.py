@@ -19,7 +19,12 @@ from denbust.sources.haaretz import (
     _HaaretzSearchEntry,
     create_haaretz_source,
 )
-from denbust.sources.ice import IceScraper, create_ice_source
+from denbust.sources.ice import (
+    IceScraper,
+    build_ice_search_url,
+    create_ice_source,
+    effective_ice_search_terms,
+)
 from denbust.sources.maariv import MaarivScraper, create_maariv_source
 from denbust.sources.mako import SEARCH_POLL_INTERVAL_MS, MakoScraper, create_mako_source
 from denbust.sources.rss import RSSSource, YnetRSSSource, diagnose_ynet_category_html
@@ -1526,6 +1531,68 @@ class TestIceScraper:
         articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=[keyword])
 
         assert len(articles) == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_fetch_uses_supplemental_terms_after_primary_keywords_return_zero(self) -> None:
+        """Supplemental ICE searches should run only after explicit keywords produce no articles."""
+        scraper = self._create_scraper()
+        keyword = "זנות"
+        supplemental = "חשד לבית בושת"
+        primary_route = respx.get(scraper._build_search_url(keyword)).mock(
+            return_value=Response(
+                200,
+                text="""
+                <html><body><h1>תוצאות חיפוש</h1><article><ul>
+                <li><div>missing article link</div></li>
+                </ul></article></body></html>
+                """,
+            )
+        )
+        supplemental_route = respx.get(build_ice_search_url(supplemental)).mock(
+            return_value=Response(
+                200,
+                text="""
+                <html>
+                  <body>
+                    <main>
+                      <h1>נמצאו 1 תוצאות חיפוש של חשד לבית בושת</h1>
+                      <article>
+                        <ul>
+                          <li>
+                            <a href="/law/news/article/1099999">חשד לבית בושת בבניין מגורים</a>
+                            <a href="/law/news/article/1099999">המשטרה עצרה חשוד</a>
+                            <span>12/3/2026 7:46</span>
+                          </li>
+                        </ul>
+                      </article>
+                    </main>
+                  </body>
+                </html>
+                """,
+            )
+        )
+        for term in effective_ice_search_terms([keyword]):
+            if term in {keyword, supplemental}:
+                continue
+            respx.get(build_ice_search_url(term)).mock(
+                return_value=Response(
+                    200,
+                    text="""
+                    <html><body><h1>תוצאות חיפוש</h1><article><ul>
+                    <li><div>missing article link</div></li>
+                    </ul></article></body></html>
+                    """,
+                )
+            )
+
+        articles = await scraper.fetch(days=TEST_LOOKBACK_DAYS, keywords=[keyword])
+
+        assert primary_route.called is True
+        assert supplemental_route.called is True
+        assert [str(article.url) for article in articles] == [
+            "https://www.ice.co.il/law/news/article/1099999"
+        ]
 
 
 class TestHaaretzScraper:

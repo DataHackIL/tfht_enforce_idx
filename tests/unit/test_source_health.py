@@ -133,7 +133,7 @@ def test_ice_diagnostic_helper_reports_public_parse_counts() -> None:
 
 
 def test_walla_effective_keywords_add_source_native_recall_phrases() -> None:
-    keywords = effective_walla_keywords(["זנות", "בית בושת"])
+    keywords = effective_walla_keywords(["זנות", "בית בושת", "", "  ", "בית בושת"])
 
     assert keywords[:2] == ["זנות", "בית בושת"]
     assert "חשד לבית בושת" in keywords
@@ -142,7 +142,7 @@ def test_walla_effective_keywords_add_source_native_recall_phrases() -> None:
 
 
 def test_ice_effective_search_terms_add_source_native_recall_phrases() -> None:
-    terms = effective_ice_search_terms(["זנות", "בית בושת"])
+    terms = effective_ice_search_terms(["זנות", "בית בושת", "", "  ", "בית בושת"])
 
     assert terms[:2] == ["זנות", "בית בושת"]
     assert "חשד לבית בושת" in terms
@@ -1488,6 +1488,45 @@ async def test_probe_ice_queries_supplemental_terms_after_sampled_keywords_zero(
     assert result.checks[0].details["supplemental_search_term_count"] > 1
     assert result.checks[0].details["probe_phase"] == "sampled_keywords"
     assert any(check.details["probe_phase"] == "supplemental_fallback" for check in result.checks)
+
+
+@pytest.mark.asyncio
+async def test_probe_ice_reports_supplemental_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        final_url = url
+        if url == build_ice_search_url("חשד לבית בושת"):
+            final_url = "https://example.com/redirect"
+        return _FetchResult(
+            requested_url=url,
+            final_url=final_url,
+            status_code=200,
+            content_type="text/html",
+            text="""
+            <html>
+              <body>
+                <h1>תוצאות חיפוש</h1>
+                <article><ul><li><div>missing article link</div></li></ul></article>
+              </body>
+            </html>
+            """,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_ice(days=21, sample_keywords=["זנות"])
+
+    assert result.live_status == DiagnosticStatus.WARN
+    assert result.failure_bucket == FailureBucket.UNEXPECTED_REDIRECT
+    assert any(
+        check.details["probe_phase"] == "supplemental_fallback"
+        and check.details["final_url"] == "https://example.com/redirect"
+        for check in result.checks
+    )
 
 
 @pytest.mark.asyncio
