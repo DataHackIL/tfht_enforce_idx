@@ -132,6 +132,12 @@ the narrow persistence count API; choose further backfill work only from fresh b
 The durable evidence summary is checked in at
 [phase_c_source_health_triage_2026_05_03.md](phase_c_source_health_triage_2026_05_03.md).
 
+The 2026-05-03T13:13:10Z Mako-only follow-up used the same shape under
+`data/may_26_followup/20260503T131309Z/` after `.venv/bin/python -m playwright install chromium`.
+Mako returned `ok`, with parsed keyword-matching search results for `זנות` and `בית בושת`; the
+selected-source `source_zero_summary` had zero affected sources. That closes #71/#74 as
+stale/duplicate Mako runtime hygiene unless a later Chromium-backed probe regresses.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:

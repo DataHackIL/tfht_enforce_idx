@@ -54,14 +54,44 @@ Affected sources: `ynet`, `walla`, `maariv`, `ice`.
 
 ## Issue Decisions
 
-- #71: recommend closing as duplicate or stale Mako runtime hygiene unless a future
-  Chromium-backed Mako probe regresses.
-- #74: recommend closing as duplicate or stale with #71 unless a future Chromium-backed Mako probe
+- #71: close as duplicate or stale Mako runtime hygiene unless a future Chromium-backed Mako probe
   regresses.
+- #74: close as duplicate or stale with #71 unless a future Chromium-backed Mako probe regresses.
 - #72: keep active and use as the next narrow source-native reliability follow-up because the
   4-source guardrail still fires for Ynet, Walla, Maariv, and ICE.
 - #88: keep as later optimization; this source-health triage did not exercise or expose backfill
   aggregate-count slowness.
+
+## Mako Runtime Hygiene Follow-Up
+
+- Timestamp: `2026-05-03T13:13:10.260820Z`
+- Config: `agents/news/local.yaml`
+- Isolated state root: `data/may_26_followup/20260503T131309Z/state`
+- Browser setup: `.venv/bin/python -m playwright install chromium`
+- Source-specific diagnostic command:
+
+```bash
+DENBUST_STATE_ROOT="data/may_26_followup/20260503T131309Z/state" \
+.venv/bin/denbust diagnose-sources \
+  --config agents/news/local.yaml \
+  --live-only \
+  --source mako \
+  --sample-keyword "זנות" \
+  --sample-keyword "בית בושת" \
+  --sample-keyword "סחר בבני אדם" \
+  --format json \
+  --output "data/may_26_followup/20260503T131309Z/artifacts/diagnose_sources_live_mako.json"
+```
+
+Result: Mako returned `ok`; `source_zero_summary.affected_source_count` was `0` for the selected
+source. The `זנות` and `בית בושת` search probes returned parsed keyword-matching articles. The
+`סחר בבני אדם` search probe rendered but parsed zero articles, and the `men-men_news` section page
+parsed 30 articles with zero sampled keyword matches; those warnings did not indicate browser
+runtime, navigation, context-destruction, redirect/anti-bot, or selector-drift regression.
+
+This confirms #71/#74 are stale/duplicate Mako runtime hygiene after Chromium-backed verification.
+No scraper behavior, selector rewrite, retry path, or live-network-dependent regression test is
+needed for their closure.
 
 ## Validation
 

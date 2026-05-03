@@ -26,7 +26,7 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: Post-#72 Source-Health Follow-Through
+## Current Next Focus: Post-Mako Runtime Hygiene Follow-Through
 
 PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
 local validation data problems and Anthropic provider failures fail visibly before operators trust
@@ -69,6 +69,14 @@ broader backfill storage refactor or source-health work is included. The auditab
 summary remains checked in at
 [`docs/phase_c_source_health_triage_2026_05_03.md`](docs/phase_c_source_health_triage_2026_05_03.md).
 
+A fresh source-specific Mako follow-up on 2026-05-03T13:13:10Z used
+`data/may_26_followup/20260503T131309Z/state`, installed Chromium through Playwright first, and
+reran the same sampled Mako diagnostic probe. Mako again returned `ok`, with parsed
+keyword-matching search results for `זנות` and `בית בושת`, zero affected sources in the
+source-zero summary, and no runtime/navigation regression. #71/#74 are therefore closed as
+stale/duplicate Mako runtime hygiene; no scraper behavior, selector rewrite, retry path, or
+live-network-dependent test is added for that closure.
+
 ### What is already in place
 
 - Candidate persistence, scrape attempts, queue state, fallback retention, and backfill jobs already
@@ -108,7 +116,7 @@ summary remains checked in at
 
 ### What comes next
 
-1. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
+1. Treat #71/#74 as closed stale/duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
 2. Wait for fresh bounded evidence before selecting another Mako runtime, source-health, backfill,
    or self-healing follow-up.
