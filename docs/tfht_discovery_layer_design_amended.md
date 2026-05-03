@@ -264,6 +264,13 @@ This lets the system treat:
 
 as different producers of the same candidate object type.
 
+Current Phase C source-health evidence supports keeping this producer model but prioritizing
+source-native reliability before broader repair automation. The 2026-05-03 Chromium-backed triage
+pass showed Mako and Haaretz live probes healthy while Ynet, Walla, Maariv, and ICE still triggered
+the 4-source zero/stale guardrail. That keeps #72 active as a source-native follow-up and leaves
+full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
+outside the next narrow PR.
+
 ---
 
 ## Core models

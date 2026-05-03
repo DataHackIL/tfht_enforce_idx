@@ -26,7 +26,7 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: Source-Health Follow-Through After DL-PR-12
+## Current Next Focus: #72 Source-Native Reliability Follow-Through
 
 PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
 local validation data problems and Anthropic provider failures fail visibly before operators trust
@@ -43,6 +43,17 @@ so permanent-set preflight and reviewed-row ingestion enforce the same semantic 
 diagnostic buckets, the queue reports self-heal-eligible candidates, generic fetch/source-adapter
 attempts carry stable failure-stage diagnostics, and future orchestration can select
 self-heal-eligible failed candidates without running AI repair.
+
+A fresh Phase C source-health triage pass on 2026-05-03 used an isolated
+`data/may_26_followup/20260503T074131Z/state` root and Chromium installed through Playwright before
+live Mako probing. The all-source run showed Mako `ok` and Haaretz `ok`; Ynet, Walla, Maariv, and
+ICE still produced source-zero, stale-result, or keyword-zero diagnostics, so
+`source_zero_summary.systemic_source_zero_suspected` remains true at the 4-source threshold. The
+per-source Mako run also passed, which makes #71/#74 duplicate or stale Mako runtime hygiene rather
+than the next correctness fix. #72 remains active as the narrow source-native reliability follow-up.
+#88 remains a later persistence optimization because this diagnostic pass did not exercise or expose
+backfill aggregate-count slowness. The auditable evidence summary is checked in at
+[`docs/phase_c_source_health_triage_2026_05_03.md`](docs/phase_c_source_health_triage_2026_05_03.md).
 
 ### What is already in place
 
@@ -77,11 +88,13 @@ self-heal-eligible failed candidates without running AI repair.
 
 ### What comes next
 
-1. Run a fresh local source-health diagnostic pass and use it to decide whether #71/#74 can be
-   closed as duplicate Mako hygiene or whether #72 needs another source-native reliability PR.
+1. Implement a narrow #72 source-native reliability PR for Ynet, Walla, Maariv, and ICE using the
+   fresh Phase C diagnostic evidence.
 2. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
-3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
+3. Keep #88 lower priority unless bounded backfill evidence shows aggregate-count updates are a real
+   local bottleneck.
+4. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
    self-heal implementation PR has fresh failure evidence.
 
 ### Likely code touchpoints
