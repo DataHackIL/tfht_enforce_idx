@@ -61,6 +61,8 @@ Planned future datasets:
   + Google CSE discovery experiments
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
+- Reports self-heal-eligible candidate backlog and structured scrape-failure groups for future
+  repair workflows, without running automatic AI repair or selector rewriting
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains
 - Lints the tracked classifier validation CSV with `denbust validation-lint`
 - Shares validation taxonomy/category/index-relevance row-integrity rules between
@@ -348,6 +350,11 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   4+ affected-source guardrail, plus Mako `failure_mode` details for missing Chromium, navigation
   timeout, context teardown, redirect/anti-bot, selector drift, parse-zero, and stale/keyword-zero
   outcomes
+- `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
+  `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
+  attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable
+  failure-stage diagnostics, and code can select eligible failed candidates for a later
+  `self_heal_retry` orchestration pass without implementing AI repair.
 
 ## Config Layout
 

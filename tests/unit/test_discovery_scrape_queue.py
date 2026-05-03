@@ -26,6 +26,7 @@ from denbust.discovery.scrape_queue import (
     scrape_candidates,
     select_backfill_candidates_for_scrape,
     select_candidates_for_scrape,
+    select_candidates_for_self_heal,
 )
 from denbust.discovery.state_paths import resolve_discovery_state_paths
 from denbust.discovery.storage import StateRepoDiscoveryPersistence
@@ -195,6 +196,67 @@ def test_select_candidates_for_scrape_prioritizes_none_and_earlier_retry_times(
     ]
 
 
+def test_select_candidates_for_self_heal_filters_failed_eligible_due_candidates(
+    tmp_path: Path,
+) -> None:
+    """Future self-heal workflows should only see eligible failed candidates whose retry is due."""
+    store = build_store(tmp_path)
+    due_time = datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+    eligible = build_candidate(
+        "eligible",
+        status=CandidateStatus.SCRAPE_FAILED,
+        next_scrape_attempt_at=due_time - timedelta(minutes=5),
+    ).model_copy(
+        update={
+            "self_heal_eligible": True,
+            "retry_priority": 2,
+            "last_scrape_attempt_at": due_time - timedelta(hours=2),
+        }
+    )
+    future = build_candidate(
+        "future",
+        status=CandidateStatus.SCRAPE_FAILED,
+        next_scrape_attempt_at=due_time + timedelta(minutes=5),
+    ).model_copy(update={"self_heal_eligible": True})
+    not_eligible = build_candidate(
+        "not-eligible",
+        status=CandidateStatus.SCRAPE_FAILED,
+        next_scrape_attempt_at=due_time - timedelta(minutes=10),
+    )
+    partial = build_candidate("partial", status=CandidateStatus.PARTIALLY_SCRAPED).model_copy(
+        update={"self_heal_eligible": True}
+    )
+    store.upsert_candidates([future, not_eligible, eligible, partial])
+
+    selected = select_candidates_for_self_heal(store, limit=10, now=due_time)
+
+    assert [candidate.candidate_id for candidate in selected] == ["eligible"]
+
+
+def test_select_candidates_for_self_heal_prioritizes_immediate_candidates(
+    tmp_path: Path,
+) -> None:
+    """Self-heal selection should treat missing retry timestamps as immediately due."""
+    store = build_store(tmp_path)
+    due_time = datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+    immediate = build_candidate("immediate", status=CandidateStatus.SCRAPE_FAILED).model_copy(
+        update={
+            "self_heal_eligible": True,
+            "next_scrape_attempt_at": None,
+        }
+    )
+    dated_retry = build_candidate(
+        "dated-retry",
+        status=CandidateStatus.SCRAPE_FAILED,
+        next_scrape_attempt_at=due_time - timedelta(hours=1),
+    ).model_copy(update={"self_heal_eligible": True})
+    store.upsert_candidates([dated_retry, immediate])
+
+    selected = select_candidates_for_self_heal(store, limit=1, now=due_time)
+
+    assert [candidate.candidate_id for candidate in selected] == ["immediate"]
+
+
 def test_metadata_datetime_handles_invalid_and_naive_values() -> None:
     """Backfill metadata parsing should reject invalid strings and normalize naive ones to UTC."""
     invalid_candidate = build_candidate("invalid", status=CandidateStatus.NEW).model_copy(
@@ -274,7 +336,9 @@ async def test_scrape_candidates_returns_empty_batch_for_no_candidates(tmp_path:
 async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path: Path) -> None:
     """Successful source-adapter scrapes should yield raw articles and succeeded candidates."""
     store = build_store(tmp_path)
-    candidate = build_candidate("candidate-1", status=CandidateStatus.NEW)
+    candidate = build_candidate("candidate-1", status=CandidateStatus.SCRAPE_FAILED).model_copy(
+        update={"self_heal_eligible": True}
+    )
     store.upsert_candidates([candidate])
     source = FakeSource("ynet", [build_raw_article()])
 
@@ -291,6 +355,7 @@ async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path:
     assert stored.candidate_status is CandidateStatus.SCRAPE_SUCCEEDED
     assert stored.content_basis is ContentBasis.FULL_ARTICLE_PAGE
     assert stored.scrape_attempt_count == 1
+    assert stored.self_heal_eligible is False
     assert batch.fallback_candidates == []
     assert len(batch.raw_articles) == 1
     assert len(batch.attempts) == 1
@@ -693,6 +758,10 @@ async def test_fetch_partial_page_returns_timeout_blocked_http_error_and_no_meta
     )
     assert timeout_result.fetch_status is FetchStatus.TIMEOUT
     assert timeout_result.error_code == "generic_fetch_timeout"
+    assert timeout_result.diagnostics == {
+        "failure_stage": "generic_fetch",
+        "exception_type": "ReadTimeout",
+    }
 
     blocked_response = httpx.Response(403, request=request)
 
@@ -706,6 +775,7 @@ async def test_fetch_partial_page_returns_timeout_blocked_http_error_and_no_meta
     )
     assert blocked_result.fetch_status is FetchStatus.BLOCKED
     assert blocked_result.error_code == "generic_fetch_http_403"
+    assert blocked_result.diagnostics == {"failure_stage": "generic_fetch", "http_status": 403}
 
     class ErrorClient:
         async def get(self, url: str) -> httpx.Response:
@@ -714,6 +784,10 @@ async def test_fetch_partial_page_returns_timeout_blocked_http_error_and_no_meta
     error_result = await scrape_queue_module._fetch_partial_page(candidate, client=ErrorClient())
     assert error_result.fetch_status is FetchStatus.FAILED
     assert error_result.error_code == "generic_fetch_error"
+    assert error_result.diagnostics == {
+        "failure_stage": "generic_fetch",
+        "exception_type": "RequestError",
+    }
 
     no_meta_response = httpx.Response(
         200,
@@ -733,7 +807,10 @@ async def test_fetch_partial_page_returns_timeout_blocked_http_error_and_no_meta
     assert no_meta_result.fetch_status is FetchStatus.FAILED
     assert no_meta_result.error_code == "generic_fetch_no_metadata"
     assert no_meta_result.final_url == "https://example.com/article"
-    assert no_meta_result.diagnostics == {"content_type": "text/html"}
+    assert no_meta_result.diagnostics == {
+        "content_type": "text/html",
+        "failure_stage": "generic_extract_metadata",
+    }
 
 
 def test_extract_partial_page_helpers_cover_meta_parsing_edge_cases() -> None:

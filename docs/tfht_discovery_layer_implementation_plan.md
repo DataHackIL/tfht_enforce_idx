@@ -409,11 +409,26 @@ The feature is operationally usable in CI/GitHub Actions.
 ### Goal
 Add explicit hooks for the future AI-based self-healing phase without implementing it yet.
 
+### Status
+Implemented by the scaffolding PR after the #97 validation-rule follow-up.
+
 ### Scope
 - add `self_heal_eligible` plumbing where still missing
 - add structured scrape-failure diagnostics
 - add explicit self-heal retry attempt kind
 - add docs for future self-heal workflow
+
+### Implemented notes
+- `PersistentCandidate.self_heal_eligible` remains the durable queue flag and is surfaced in
+  discovery queue-health diagnostics.
+- `ScrapeAttemptKind.SELF_HEAL_RETRY` is the explicit attempt kind reserved for a future
+  orchestration pass.
+- Scrape failures now have structured diagnostic groupings by attempt kind, fetch status, error
+  code, source adapter, and domain, with counts for self-heal-eligible candidates.
+- Source-adapter and generic-fetch failures carry stable failure-stage diagnostics so future repair
+  code can reason over failure classes without parsing free-text error messages.
+- The queue exposes selection for self-heal-eligible failed candidates, but no AI repair,
+  selector rewriting, source creation, or live-network-dependent behavior is implemented.
 
 ### Deliverable
 A clean on-ramp for the next large feature, but not the feature itself.
@@ -459,6 +474,12 @@ The recommended order is:
 
 ### After DL-PR-11
 - the feature can be used operationally in CI/jobs
+
+### After DL-PR-12
+- self-heal-eligible failures are visible in diagnostics
+- scrape failure classes are structured enough for later repair triage
+- future self-heal orchestration can select eligible failed candidates and record
+  `self_heal_retry` attempts, but no automatic repair runs yet
 
 ---
 

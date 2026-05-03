@@ -137,6 +137,7 @@ def test_scrape_attempt_validates_finished_at() -> None:
     )
 
     assert attempt.fetch_status == FetchStatus.SUCCESS
+    assert ScrapeAttemptKind.SELF_HEAL_RETRY.value == "self_heal_retry"
 
     with pytest.raises(ValueError):
         ScrapeAttempt(

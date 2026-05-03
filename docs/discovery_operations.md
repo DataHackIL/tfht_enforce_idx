@@ -187,6 +187,23 @@ state_repo/news_items/backfill_scrape/
 operationally sensitive. Operators should choose when to spend scrape budget on historical work
 instead of scheduling it blindly.
 
+## Self-Heal Scaffolding
+
+`DL-PR-12` does not run AI repair. It only makes the future repair backlog explicit:
+
+- failed scrape candidates can be marked `self_heal_eligible`
+- `denbust diagnose-discovery` reports the self-heal-eligible queue count
+- the persisted discovery diagnostics artifact includes structured scrape-failure groups by attempt
+  kind, fetch status, error code, source adapter, and domain
+- source-adapter and generic-fetch attempts include stable `failure_stage` diagnostics where the
+  failure path is known
+- future orchestration can select eligible failed candidates and record a `self_heal_retry` scrape
+  attempt after a repair strategy exists
+
+Do not treat these hooks as permission to rewrite selectors, create sources, or call an AI repair
+loop automatically. Those behaviors need a separate implementation PR with live failure evidence and
+fixture-backed regression tests.
+
 Classifier provider/API failures are fatal for `ingest`, `scrape_candidates`, and
 `backfill_scrape`. A run that cannot reach Anthropic records a sanitized
 `classifier_provider_error=...`, sets `fatal=true`, returns `fatal: classifier provider error`, and

@@ -26,7 +26,7 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: May 2026 Experiment Follow-Through
+## Current Next Focus: Source-Health Follow-Through After DL-PR-12
 
 PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
 local validation data problems and Anthropic provider failures fail visibly before operators trust
@@ -39,6 +39,10 @@ also queried against each configured news domain. The #66 follow-up added fixtur
 coverage over that source-targeted taxonomy path. The #97 validation follow-up now shares
 taxonomy/category/index-relevance row-integrity checks between validation lint and finalize/import,
 so permanent-set preflight and reviewed-row ingestion enforce the same semantic invariants.
+`DL-PR-12` now adds the smallest self-healing on-ramp: scrape failures are grouped into structured
+diagnostic buckets, the queue reports self-heal-eligible candidates, generic fetch/source-adapter
+attempts carry stable failure-stage diagnostics, and future orchestration can select
+self-heal-eligible failed candidates without running AI repair.
 
 ### What is already in place
 
@@ -50,6 +54,10 @@ so permanent-set preflight and reviewed-row ingestion enforce the same semantic 
   cases.
 - Source-health diagnostics include a `source_zero_summary` that flags the 4+ affected-source
   guardrail used to decide whether a run is systemic rather than source-specific.
+- Discovery diagnostics include structured scrape-failure groups keyed by attempt kind, fetch
+  status, error code, source adapter, and domain, including self-heal-eligible counts.
+- Candidate scrape failures mark durable candidates as `self_heal_eligible`, and the candidate queue
+  exposes a future self-heal selector without changing current ingest/backfill behavior.
 - Mako live diagnostics distinguish missing browser runtime, navigation timeout, context destroyed,
   redirect/anti-bot, selector drift, parse-zero, and stale/keyword-zero failure modes where the
   rendered state supports that classification.
@@ -69,12 +77,12 @@ so permanent-set preflight and reviewed-row ingestion enforce the same semantic 
 
 ### What comes next
 
-1. Decide whether optional `DL-PR-12` self-healing scaffolding or Mako #71/#74 hygiene is the next
-   evidence-backed PR after a fresh local diagnostic pass.
+1. Run a fresh local source-health diagnostic pass and use it to decide whether #71/#74 can be
+   closed as duplicate Mako hygiene or whether #72 needs another source-native reliability PR.
 2. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
-3. Treat optional self-healing scaffolding as later work unless the hardened experiment data shows it
-   is the highest-leverage next step.
+3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
+   self-heal implementation PR has fresh failure evidence.
 
 ### Likely code touchpoints
 
@@ -82,7 +90,9 @@ so permanent-set preflight and reviewed-row ingestion enforce the same semantic 
 - `src/denbust/discovery/state_paths.py`
 - `src/denbust/discovery/storage.py`
 - `src/denbust/discovery/models.py`
+- `src/denbust/discovery/scrape_queue.py`
 - `src/denbust/diagnostics/__init__.py`
+- `src/denbust/diagnostics/discovery.py`
 - `src/denbust/diagnostics/source_health.py`
 - `src/denbust/cli.py`
 - `tests/unit/test_pipeline_core.py`
