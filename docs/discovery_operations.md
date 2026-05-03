@@ -152,9 +152,14 @@ successful ICE scrape attempts, left 33 candidates from Haaretz, ICE, Maariv, Ma
 scraped, and produced no scrape failures, retry backlog, or self-heal backlog. Artifact-only
 source-health was inconclusive because the diagnostic path skipped the `scrape_candidates` debug
 summaries. Because the first pass produced scrapeable candidates, no latest-seven-complete-UTC-days
-backfill window was added. Treat the next narrow follow-up as queue-drain diagnostic work: report
-candidate selection order, source mix, and budget-cap behavior before changing queue prioritization
-or fairness behavior.
+backfill window was added.
+
+After PR #110 was squash-merged as `8c89d91`, `denbust diagnose-discovery` reports bounded
+queue-drain diagnostics in its JSON and text output. The `queue_drain` section includes the
+configured candidate cap, matching scrape-attempt budget field, latest attempted candidate order,
+selected source mix, remaining eligible candidate order, remaining eligible source mix, and the
+inferred stop reason. Use those fields in the next bounded candidate-drain evidence pass before
+changing queue prioritization or fairness behavior.
 
 ## GitHub Actions Run Path
 

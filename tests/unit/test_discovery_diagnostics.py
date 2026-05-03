@@ -191,6 +191,103 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
     assert "Structured scrape failures" in render_discovery_diagnostic_report(report)
 
 
+def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(
+    tmp_path: Path,
+) -> None:
+    """Queue-drain diagnostics should expose selection order, source mix, and cap stops."""
+    now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
+    config = Config(store={"state_root": tmp_path}, max_articles=2)
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    first = _candidate(
+        "selected-ice-1",
+        url="https://www.ice.co.il/article/1",
+        discovered_via=["ice"],
+        status=CandidateStatus.SCRAPE_SUCCEEDED,
+        first_seen_at=now - timedelta(hours=3),
+        last_seen_at=now - timedelta(minutes=20),
+        content_basis=ContentBasis.FULL_ARTICLE_PAGE,
+    )
+    second = _candidate(
+        "selected-ice-2",
+        url="https://www.ice.co.il/article/2",
+        discovered_via=["ice"],
+        status=CandidateStatus.SCRAPE_SUCCEEDED,
+        first_seen_at=now - timedelta(hours=3),
+        last_seen_at=now - timedelta(minutes=10),
+        content_basis=ContentBasis.FULL_ARTICLE_PAGE,
+    )
+    pending_mako = _candidate(
+        "pending-mako",
+        url="https://www.mako.co.il/news/article/pending",
+        discovered_via=["mako"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now - timedelta(hours=2),
+        last_seen_at=now - timedelta(minutes=5),
+    )
+    pending_haaretz = _candidate(
+        "pending-haaretz",
+        url="https://www.haaretz.co.il/news/article/pending",
+        discovered_via=["haaretz"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now - timedelta(hours=2),
+        last_seen_at=now - timedelta(minutes=15),
+    )
+    persistence.upsert_candidates([first, second, pending_mako, pending_haaretz])
+    attempts = [
+        ScrapeAttempt(
+            candidate_id="selected-ice-1",
+            started_at=now,
+            finished_at=now,
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.SUCCESS,
+            source_adapter_name="ice",
+        ),
+        ScrapeAttempt(
+            candidate_id="selected-ice-2",
+            started_at=now + timedelta(seconds=1),
+            finished_at=now + timedelta(seconds=1),
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.SUCCESS,
+            source_adapter_name="ice",
+        ),
+    ]
+    persistence.append_attempts(attempts)
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        attempts_override=attempts,
+        candidates_override=persistence.list_candidates(),
+        include_operational_matches=False,
+    )
+
+    assert report.queue_drain.max_candidate_budget == 2
+    assert report.queue_drain.max_scrape_attempt_budget == 2
+    assert report.queue_drain.latest_attempted_candidate_count == 2
+    assert report.queue_drain.latest_scrape_attempt_count == 2
+    assert report.queue_drain.remaining_eligible_candidate_count == 2
+    assert report.queue_drain.stop_reason == "budget_cap_reached"
+    assert [item.candidate_id for item in report.queue_drain.latest_attempted_candidate_order] == [
+        "selected-ice-1",
+        "selected-ice-2",
+    ]
+    assert [
+        item.candidate_id for item in report.queue_drain.remaining_eligible_candidate_order
+    ] == ["pending-mako", "pending-haaretz"]
+    assert [item.model_dump(mode="json") for item in report.queue_drain.selected_source_mix] == [
+        {"source": "ice", "candidate_count": 2}
+    ]
+    assert [
+        item.model_dump(mode="json") for item in report.queue_drain.remaining_eligible_source_mix
+    ] == [
+        {"source": "haaretz", "candidate_count": 1},
+        {"source": "mako", "candidate_count": 1},
+    ]
+    rendered = render_discovery_diagnostic_report(report)
+    assert "Queue drain" in rendered
+    assert "stop_reason=budget_cap_reached" in rendered
+    assert "selected_source_mix: ice=2" in rendered
+
+
 def test_persist_discovery_diagnostic_artifacts_writes_latest_files(tmp_path: Path) -> None:
     """The diagnostics artifact writer should persist both JSON reports."""
     config = Config(store={"state_root": tmp_path})

@@ -71,6 +71,16 @@ def select_candidates_for_scrape(
     """Return eligible durable candidates for scraping."""
     current_time = now or datetime.now(UTC)
     candidates = persistence.list_candidates(statuses=SCRAPEABLE_CANDIDATE_STATUSES)
+    return order_scrape_eligible_candidates(candidates, now=current_time)[:limit]
+
+
+def order_scrape_eligible_candidates(
+    candidates: list[PersistentCandidate],
+    *,
+    now: datetime | None = None,
+) -> list[PersistentCandidate]:
+    """Return scrape-eligible candidates in the queue contract order."""
+    current_time = now or datetime.now(UTC)
     eligible = [
         candidate
         for candidate in candidates
@@ -88,7 +98,7 @@ def select_candidates_for_scrape(
             candidate.candidate_id,
         ),
     )
-    return ordered[:limit]
+    return ordered
 
 
 def select_candidates_for_self_heal(
