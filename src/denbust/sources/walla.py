@@ -22,6 +22,18 @@ WALLA_BASE_URL = "https://news.walla.co.il"
 WALLA_ARCHIVE_CATEGORY_IDS = (1, 10)
 DEFAULT_RATE_LIMIT_DELAY_SECONDS = 1.5
 MAX_ARCHIVE_PAGES_PER_MONTH = 12
+WALLA_SUPPLEMENTAL_KEYWORDS = [
+    "חשד לבית בושת",
+    "בית בושת אותר",
+    "חשד לזנות",
+    "שידול לזנות",
+    "סרסרות",
+    "סרסורות",
+    "סחר בנשים",
+    "סחר מיני",
+    "מכון עיסוי",
+    "מכון ליווי",
+]
 
 
 class WallaArchiveEntry(NamedTuple):
@@ -31,6 +43,24 @@ class WallaArchiveEntry(NamedTuple):
     title: str
     snippet: str
     date: datetime
+
+
+def effective_walla_keywords(keywords: list[str]) -> list[str]:
+    """Return Walla's effective keyword set with targeted supplemental phrases."""
+    seen: set[str] = set()
+    values: list[str] = []
+
+    for keyword in [*keywords, *WALLA_SUPPLEMENTAL_KEYWORDS]:
+        candidate = " ".join(keyword.split()).strip()
+        if not candidate:
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(candidate)
+
+    return values
 
 
 class WallaScraper(Source):
@@ -56,6 +86,7 @@ class WallaScraper(Source):
 
         now = datetime.now(UTC)
         cutoff = now - timedelta(days=days)
+        effective_keywords = effective_walla_keywords(keywords)
         months = list(self._iter_months(cutoff, now))
         articles: list[RawArticle] = []
 
@@ -70,7 +101,9 @@ class WallaScraper(Source):
                 for year, month in months:
                     await self._rate_limit()
                     articles.extend(
-                        await self._scrape_archive_month(category_id, year, month, cutoff, keywords)
+                        await self._scrape_archive_month(
+                            category_id, year, month, cutoff, effective_keywords
+                        )
                     )
 
             self._client = None

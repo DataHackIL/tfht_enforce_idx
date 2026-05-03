@@ -486,12 +486,11 @@ The recommended order is:
 - Mako passes in both all-source and source-specific live diagnostics, so #71/#74 should be treated
   as duplicate or stale runtime hygiene unless a future Chromium-backed Mako probe regresses
 - Haaretz passes live diagnostics
-- Ynet, Walla, Maariv, and ICE still trigger the 4-source
-  `source_zero_summary.systemic_source_zero_suspected` guardrail through zero, stale-result, or
-  keyword-zero outcomes
-- the next implementation PR should stay narrow to #72 source-native reliability; full AI repair,
-  selector rewriting, automatic source creation, and live-network-dependent CI tests remain out of
-  scope
+- #72 is addressed narrowly: Walla archive filtering and ICE search use targeted supplemental
+  Hebrew recall terms, and `source_zero_summary.systemic_source_zero_suspected` now counts hard
+  source-zero/stale/fetch/parse failures rather than keyword-zero warnings alone
+- full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
+  remain out of scope until a later repair PR has fresh evidence
 
 ---
 

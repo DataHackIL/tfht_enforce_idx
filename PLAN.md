@@ -26,7 +26,7 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: #72 Source-Native Reliability Follow-Through
+## Current Next Focus: Post-#72 Source-Health Follow-Through
 
 PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
 local validation data problems and Anthropic provider failures fail visibly before operators trust
@@ -44,15 +44,22 @@ diagnostic buckets, the queue reports self-heal-eligible candidates, generic fet
 attempts carry stable failure-stage diagnostics, and future orchestration can select
 self-heal-eligible failed candidates without running AI repair.
 
+The #72 source-native reliability follow-through keeps the fix intentionally narrow. Walla archive
+filtering and ICE search now use targeted supplemental Hebrew recall terms, matching the
+source-native relaxation already present for Ynet and Maariv. Source-health diagnostics still report
+keyword-zero as a per-source warning, but the report-level `source_zero_summary` guardrail now
+counts hard source-zero/stale/fetch/parse failures only, so healthy pages with no sampled keyword
+hit no longer masquerade as systemic source outage evidence.
+
 A fresh Phase C source-health triage pass on 2026-05-03 used an isolated
 `data/may_26_followup/20260503T074131Z/state` root and Chromium installed through Playwright before
 live Mako probing. The all-source run showed Mako `ok` and Haaretz `ok`; Ynet, Walla, Maariv, and
-ICE still produced source-zero, stale-result, or keyword-zero diagnostics, so
-`source_zero_summary.systemic_source_zero_suspected` remains true at the 4-source threshold. The
-per-source Mako run also passed, which makes #71/#74 duplicate or stale Mako runtime hygiene rather
-than the next correctness fix. #72 remains active as the narrow source-native reliability follow-up.
-#88 remains a later persistence optimization because this diagnostic pass did not exercise or expose
-backfill aggregate-count slowness. The auditable evidence summary is checked in at
+ICE still produced source-zero, stale-result, or keyword-zero diagnostics under the then-current
+guardrail. The per-source Mako run also passed, which makes #71/#74 duplicate or stale Mako runtime
+hygiene rather than the next correctness fix. #72 is now addressed by the narrow source-native
+recall/guardrail follow-up. #88 remains a later persistence optimization because this diagnostic pass
+did not exercise or expose backfill aggregate-count slowness. The auditable evidence summary is
+checked in at
 [`docs/phase_c_source_health_triage_2026_05_03.md`](docs/phase_c_source_health_triage_2026_05_03.md).
 
 ### What is already in place
@@ -63,8 +70,9 @@ backfill aggregate-count slowness. The auditable evidence summary is checked in 
   `denbust diagnose-discovery`.
 - Source-health diagnostics already cover selector drift, parse-zero, stale-result, and keyword-zero
   cases.
-- Source-health diagnostics include a `source_zero_summary` that flags the 4+ affected-source
-  guardrail used to decide whether a run is systemic rather than source-specific.
+- Source-health diagnostics include a `source_zero_summary` that flags the 4+ hard affected-source
+  guardrail used to decide whether a run is systemic rather than source-specific; keyword-zero
+  outcomes stay visible on individual source checks without counting as hard source-zero evidence.
 - Discovery diagnostics include structured scrape-failure groups keyed by attempt kind, fetch
   status, error code, source adapter, and domain, including self-heal-eligible counts.
 - Candidate scrape failures mark durable candidates as `self_heal_eligible`, and the candidate queue
@@ -72,6 +80,8 @@ backfill aggregate-count slowness. The auditable evidence summary is checked in 
 - Mako live diagnostics distinguish missing browser runtime, navigation timeout, context destroyed,
   redirect/anti-bot, selector drift, parse-zero, and stale/keyword-zero failure modes where the
   rendered state supports that classification.
+- Walla and ICE source-native paths use targeted supplemental Hebrew recall terms for diagnostics
+  and discovery, matching the source-specific relaxation already present for Ynet and Maariv.
 - Ynet source-health diagnostics now split RSS and category-page checks so RSS low coverage,
   category HTTP failure, category parse-zero, and category keyword-zero outcomes are visible.
 - Search-backed discovery and backfill now emit source-targeted taxonomy queries for every enabled
@@ -88,13 +98,11 @@ backfill aggregate-count slowness. The auditable evidence summary is checked in 
 
 ### What comes next
 
-1. Implement a narrow #72 source-native reliability PR for Ynet, Walla, Maariv, and ICE using the
-   fresh Phase C diagnostic evidence.
-2. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
+1. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
-3. Keep #88 lower priority unless bounded backfill evidence shows aggregate-count updates are a real
+2. Keep #88 lower priority unless bounded backfill evidence shows aggregate-count updates are a real
    local bottleneck.
-4. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
+3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
    self-heal implementation PR has fresh failure evidence.
 
 ### Likely code touchpoints

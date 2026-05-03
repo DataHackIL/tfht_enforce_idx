@@ -264,12 +264,14 @@ This lets the system treat:
 
 as different producers of the same candidate object type.
 
-Current Phase C source-health evidence supports keeping this producer model but prioritizing
-source-native reliability before broader repair automation. The 2026-05-03 Chromium-backed triage
-pass showed Mako and Haaretz live probes healthy while Ynet, Walla, Maariv, and ICE still triggered
-the 4-source zero/stale guardrail. That keeps #72 active as a source-native follow-up and leaves
-full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
-outside the next narrow PR.
+Current Phase C source-health evidence supports keeping this producer model while avoiding broader
+repair automation without fresh failure evidence. The 2026-05-03 Chromium-backed triage pass showed
+Mako and Haaretz live probes healthy while Ynet, Walla, Maariv, and ICE triggered the then-current
+zero/stale/keyword-zero guardrail. The #72 follow-up keeps source-native reliability narrow by
+expanding Walla/ICE targeted recall terms and by reserving the report-level hard source-zero
+guardrail for fetch/feed/stale/parse failures rather than keyword-zero warnings alone. Full AI
+repair, selector rewriting, automatic source creation, and live-network-dependent CI tests remain
+outside this narrow source-health path.
 
 ---
 

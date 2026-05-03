@@ -118,11 +118,13 @@ with `.venv/bin/`.
 
 The 2026-05-03 triage run used this shape under
 `data/may_26_followup/20260503T074131Z/`. Mako passed in both all-source and source-specific runs,
-Haaretz passed, and `source_zero_summary.systemic_source_zero_suspected` stayed true because Ynet,
-Walla, Maariv, and ICE were affected. Operators should treat #71/#74 as duplicate or stale Mako
-runtime hygiene unless a Chromium-backed Mako probe regresses, keep #72 active for source-native
-reliability work, and leave #88 as a later optimization unless backfill aggregation is observed as a
-real bottleneck. The durable evidence summary is checked in at
+Haaretz passed, and the then-current `source_zero_summary.systemic_source_zero_suspected` stayed
+true because Ynet, Walla, Maariv, and ICE were affected by zero, stale, or keyword-zero evidence.
+After the #72 follow-up, keyword-zero remains a per-source warning but no longer counts toward the
+report-level hard source-zero guardrail. Operators should treat #71/#74 as duplicate or stale Mako
+runtime hygiene unless a Chromium-backed Mako probe regresses, and leave #88 as a later optimization
+unless backfill aggregation is observed as a real bottleneck. The durable evidence summary is
+checked in at
 [phase_c_source_health_triage_2026_05_03.md](phase_c_source_health_triage_2026_05_03.md).
 
 ## GitHub Actions Run Path

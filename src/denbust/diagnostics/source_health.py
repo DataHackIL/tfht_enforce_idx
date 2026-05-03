@@ -63,7 +63,6 @@ SOURCE_ZERO_GUARDRAIL_BUCKETS = {
     FailureBucket.FEED_FETCH_FAILED,
     FailureBucket.FEED_EMPTY_OR_STALE,
     FailureBucket.STALE_RESULTS,
-    FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
     FailureBucket.HTTP_FETCH_FAILED,
     FailureBucket.UNEXPECTED_REDIRECT,
     FailureBucket.SELECTOR_DRIFT_SUSPECTED,
@@ -997,6 +996,7 @@ async def _probe_ice(
     sample_keywords: list[str],
 ) -> SourceDiagnosticResult:
     cutoff = datetime.now(UTC) - timedelta(days=days)
+    search_terms = ice_source.effective_ice_search_terms(sample_keywords)
     checks: list[ProbeCheck] = []
     saw_successful_page = False
     saw_results_container = False
@@ -1009,7 +1009,7 @@ async def _probe_ice(
         headers={"User-Agent": ice_source.USER_AGENT},
         follow_redirects=True,
     ) as client:
-        for keyword in sample_keywords:
+        for keyword in search_terms:
             page_url = ice_source.build_ice_search_url(keyword, page_number=1)
             try:
                 fetch_result = await _fetch_text(
@@ -1066,6 +1066,8 @@ async def _probe_ice(
                         "status_code": fetch_result.status_code,
                         "content_type": fetch_result.content_type,
                         "payload_length": len(fetch_result.text),
+                        "sample_keyword_count": len(sample_keywords),
+                        "effective_search_term_count": len(search_terms),
                         "candidate_count": parsed.candidate_count,
                         "parsed_article_count": parsed.parsed_article_count,
                         "stale_candidate_count": parsed.stale_candidate_count,
@@ -1139,6 +1141,7 @@ async def _probe_walla(
     entry_total = 0
     recent_entry_total = 0
     keyword_match_total = 0
+    effective_keywords = walla_source.effective_walla_keywords(sample_keywords)
 
     async with httpx.AsyncClient(
         timeout=30.0,
@@ -1175,7 +1178,7 @@ async def _probe_walla(
                 keyword_matches = [
                     entry
                     for entry in recent_entries
-                    if scraper._matches_keywords(entry, sample_keywords)
+                    if scraper._matches_keywords(entry, effective_keywords)
                 ]
 
                 entry_total += len(entries)
@@ -1206,6 +1209,8 @@ async def _probe_walla(
                             "status_code": fetch_result.status_code,
                             "content_type": fetch_result.content_type,
                             "payload_length": len(fetch_result.text),
+                            "sample_keyword_count": len(sample_keywords),
+                            "effective_keyword_count": len(effective_keywords),
                             "entry_count": len(entries),
                             "recent_entry_count": len(recent_entries),
                             "keyword_match_count": len(keyword_matches),

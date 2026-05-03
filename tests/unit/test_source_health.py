@@ -21,8 +21,13 @@ from denbust.diagnostics.source_health import (
     _FetchResult,
 )
 from denbust.sources.base import Source
-from denbust.sources.ice import build_ice_search_url, diagnose_ice_search_html
+from denbust.sources.ice import (
+    build_ice_search_url,
+    diagnose_ice_search_html,
+    effective_ice_search_terms,
+)
 from denbust.sources.maariv import diagnose_maariv_section_html
+from denbust.sources.walla import effective_walla_keywords
 
 
 def _config_with_state_root(state_root: Path) -> Config:
@@ -125,6 +130,24 @@ def test_ice_diagnostic_helper_reports_public_parse_counts() -> None:
     assert result.stale_candidate_count == 0
     assert result.unparseable_date_count == 0
     assert result.article_urls == ["https://www.ice.co.il/article/123"]
+
+
+def test_walla_effective_keywords_add_source_native_recall_phrases() -> None:
+    keywords = effective_walla_keywords(["זנות", "בית בושת"])
+
+    assert keywords[:2] == ["זנות", "בית בושת"]
+    assert "חשד לבית בושת" in keywords
+    assert "מכון עיסוי" in keywords
+    assert len(keywords) == len(set(keywords))
+
+
+def test_ice_effective_search_terms_add_source_native_recall_phrases() -> None:
+    terms = effective_ice_search_terms(["זנות", "בית בושת"])
+
+    assert terms[:2] == ["זנות", "בית בושת"]
+    assert "חשד לבית בושת" in terms
+    assert "סחר מיני" in terms
+    assert len(terms) == len(set(terms))
 
 
 def test_source_health_diagnostics_do_not_call_maariv_or_ice_private_parse_methods() -> None:
@@ -399,14 +422,14 @@ def test_merge_status_and_derive_bucket_and_live_result() -> None:
     assert result.checks[0].details["failure_bucket"] == FailureBucket.UNEXPECTED_REDIRECT.value
 
 
-def test_build_source_zero_summary_flags_systemic_source_zero_for_relevant_buckets() -> None:
+def test_build_source_zero_summary_flags_systemic_source_zero_for_hard_buckets() -> None:
     summary = source_health._build_source_zero_summary(
         [
             SourceDiagnosticResult(
                 source_name="ynet",
                 status=DiagnosticStatus.WARN,
                 live_status=DiagnosticStatus.WARN,
-                failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+                failure_bucket=FailureBucket.FEED_EMPTY_OR_STALE,
             ),
             SourceDiagnosticResult(
                 source_name="walla",
@@ -445,6 +468,42 @@ def test_build_source_zero_summary_flags_systemic_source_zero_for_relevant_bucke
     assert summary.enabled_source_count == 6
     assert summary.selected_source_count == 6
     assert summary.affected_sources == ["ynet", "walla", "mako", "maariv"]
+
+
+def test_build_source_zero_summary_keeps_keyword_zero_out_of_systemic_guardrail() -> None:
+    summary = source_health._build_source_zero_summary(
+        [
+            SourceDiagnosticResult(
+                source_name="ynet",
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+            ),
+            SourceDiagnosticResult(
+                source_name="walla",
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+            ),
+            SourceDiagnosticResult(
+                source_name="maariv",
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+            ),
+            SourceDiagnosticResult(
+                source_name="ice",
+                status=DiagnosticStatus.WARN,
+                live_status=DiagnosticStatus.WARN,
+                failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
+            ),
+        ],
+        enabled_source_count=6,
+    )
+
+    assert summary.affected_sources == []
+    assert summary.affected_source_count == 0
+    assert summary.systemic_source_zero_suspected is False
 
 
 def test_build_source_zero_summary_ignores_generic_warns_without_source_zero_bucket() -> None:
@@ -488,7 +547,7 @@ def test_build_source_zero_summary_preserves_enabled_count_for_scoped_runs() -> 
 
     assert summary.enabled_source_count == 6
     assert summary.selected_source_count == 1
-    assert summary.affected_source_count == 1
+    assert summary.affected_source_count == 0
     assert summary.systemic_source_zero_suspected is False
 
 
@@ -1317,6 +1376,49 @@ async def test_probe_ice_reports_successful_page(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
+async def test_probe_ice_queries_supplemental_search_terms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_urls: list[str] = []
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        requested_urls.append(url)
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text="""
+            <html>
+              <body>
+                <h1>תוצאות חיפוש</h1>
+                <article>
+                  <ul>
+                    <li>
+                      <a href="/article/123">בית בושת אותר</a>
+                      <span>01/01/2099 12:00</span>
+                    </li>
+                  </ul>
+                </article>
+              </body>
+            </html>
+            """,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_ice(days=21, sample_keywords=["זנות"])
+
+    assert result.live_status == DiagnosticStatus.OK
+    assert build_ice_search_url("חשד לבית בושת") in requested_urls
+    assert result.checks[0].details["sample_keyword_count"] == 1
+    assert result.checks[0].details["effective_search_term_count"] > 1
+
+
+@pytest.mark.asyncio
 async def test_probe_ice_handles_nested_heading_text(monkeypatch: pytest.MonkeyPatch) -> None:
     html = """
     <html>
@@ -1537,6 +1639,48 @@ async def test_probe_walla_reports_success(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert result.live_status == DiagnosticStatus.OK
     assert result.failure_bucket is None
+
+
+@pytest.mark.asyncio
+async def test_probe_walla_uses_source_specific_relaxed_keywords(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <html>
+      <body>
+        <li>
+          <a href="https://news.walla.co.il/item/3823239">
+            <article>
+              <h3>חשד לבית בושת בבני ברק</h3>
+              <p>המשטרה עצרה חשודים.</p>
+              <span class="pub-date">12:00 01/01/2099</span>
+            </article>
+          </a>
+        </li>
+      </body>
+    </html>
+    """
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text=html,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_walla(days=21, sample_keywords=["זנות"])
+
+    assert result.live_status == DiagnosticStatus.OK
+    assert result.failure_bucket is None
+    assert result.checks[0].details["sample_keyword_count"] == 1
+    assert result.checks[0].details["effective_keyword_count"] > 1
 
 
 @pytest.mark.asyncio
