@@ -63,10 +63,10 @@ The repo currently has 21 issues returned by the repo-specific GitHub MCP. Seven
 | #53 Expose diagnostic-safe public probe helpers for ICE scraper | Treated | PR #96 added public ICE diagnostic helpers; close or update the issue with that evidence if it remains open. |
 | #65 Add Ynet category-page backstop for משפט ופלילים discovery | Treated | The source-recall follow-up keeps Ynet RSS primary and adds the non-browser category-page backstop with separate source-health signals. |
 | #66 Add fixture-based Ynet end-to-end regression test after web-search source exists | Converted to test | Fixture-backed coverage now protects the Ynet source-targeted taxonomy search path for the known February 12, 2026 article through candidate normalization, provenance, source-adapter materialization, and pre-classification ingest handoff. |
-| #71 Mako source completely failing due to browser navigation issues | Open | Active high-priority source-health issue. Live Mako diagnostics must be run with browser runtime installed. |
-| #72 Major Israeli news sources returning zero results | Open | Active system-level health issue treated by the search-backed discovery/backfill follow-through: live diagnostics reproduced Ynet, Walla, Maariv, and ICE source-zero/stale patterns while the query builders now add domain-constrained taxonomy fallback searches. |
-| #74 Mako source experiencing complete failure with browser navigation | Open | Active but likely duplicate/continuation of #71. Verify whether both can be collapsed after the experiment. |
-| #88 Optimize backfill batch aggregate counts in discovery persistence | Open | Active optimization, not a correctness blocker. Measure batch/candidate counts but do not prioritize unless local runs show aggregation is materially slow. |
+| #71 Mako source completely failing due to browser navigation issues | Open | Phase C triage recommends closing as duplicate/stale Mako runtime hygiene: the 2026-05-03 Chromium-backed Mako all-source and source-specific probes passed. |
+| #72 Major Israeli news sources returning zero results | Open | Active system-level health issue. The 2026-05-03 all-source diagnostic still fired the 4-source guardrail for Ynet, Walla, Maariv, and ICE while Mako and Haaretz passed. |
+| #74 Mako source experiencing complete failure with browser navigation | Open | Phase C triage recommends closing as duplicate/stale with #71 unless a future Chromium-backed Mako probe regresses. |
+| #88 Optimize backfill batch aggregate counts in discovery persistence | Open | Active optimization, not a correctness blocker. The 2026-05-03 source-health triage did not exercise or expose batch aggregation slowness, so keep it later. |
 | #97 Share validation taxonomy rules between lint and finalize | Treated | The validation follow-up now routes taxonomy pair/version, legacy category compatibility, and `index_relevant` row checks through shared validation code used by both lint and reviewed-row finalize/import. |
 
 ### Initial local-state warning
@@ -562,17 +562,17 @@ Create `reports/final_experiment_summary.md` with these sections:
 
 The experiment should not assume these are true, but these are the current hypotheses:
 
-1. `DL-PR-12` is not the only plausible next step. The fresh Phase C source-health run showed the
-   4+ affected-source guardrail firing, so the #72 follow-through expanded search-backed discovery
-   and backfill with source-targeted taxonomy searches.
-2. `PLAN.md` and `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` likely need status updates after the
-   experiment, regardless of what implementation work comes next.
-3. Mako issues #71 and #74 are duplicates or near-duplicates unless a future Mako live probe fails
+1. The 2026-05-03 Phase C source-health triage used isolated state under
+   `data/may_26_followup/20260503T074131Z/state`, installed Chromium before Mako probing, and found
+   the existing diagnostics structured enough to make the issue decision without code changes.
+2. Mako issues #71 and #74 are duplicates or near-duplicates unless a future Mako live probe fails
    after `python -m playwright install chromium`; the current Mako diagnostics are healthy with the
    browser runtime installed.
-4. #72 remains the central source-native reliability signal: the current evidence shows Ynet, Walla,
+3. #72 remains the central source-native reliability signal: the current evidence shows Ynet, Walla,
    Maariv, and ICE remain affected by source-native zero/stale/keyword-zero patterns while Mako and
    Haaretz pass, with search-backed fallback coverage now broadened for those domains.
+4. `PLAN.md` and `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` likely need status updates after the
+   experiment, regardless of what implementation work comes next.
 5. #65 is treated by the Ynet category-page backstop, and #66 is converted to fixture-backed
    coverage over the stable search-backed source-domain path.
 6. #52 and #53 appear treated by PR #96's public Maariv/ICE diagnostic helpers; close or update the

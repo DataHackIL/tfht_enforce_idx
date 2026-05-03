@@ -481,6 +481,18 @@ The recommended order is:
 - future self-heal orchestration can select eligible failed candidates and record
   `self_heal_retry` attempts, but no automatic repair runs yet
 
+### After Phase C source-health triage
+- the 2026-05-03 Chromium-backed source-health pass is the current evidence baseline
+- Mako passes in both all-source and source-specific live diagnostics, so #71/#74 should be treated
+  as duplicate or stale runtime hygiene unless a future Chromium-backed Mako probe regresses
+- Haaretz passes live diagnostics
+- Ynet, Walla, Maariv, and ICE still trigger the 4-source
+  `source_zero_summary.systemic_source_zero_suspected` guardrail through zero, stale-result, or
+  keyword-zero outcomes
+- the next implementation PR should stay narrow to #72 source-native reliability; full AI repair,
+  selector rewriting, automatic source creation, and live-network-dependent CI tests remain out of
+  scope
+
 ---
 
 ## What should explicitly wait until later

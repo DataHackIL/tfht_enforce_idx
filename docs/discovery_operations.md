@@ -80,6 +80,47 @@ denbust live-check \
 Generated `data/may_26_followup/` bundles are local experiment artifacts and should remain
 untracked.
 
+For Phase C source-health triage, install Chromium before probing Mako and isolate state under a
+fresh ignored follow-up root:
+
+```bash
+export FOLLOWUP_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+export FOLLOWUP_ROOT="data/may_26_followup/${FOLLOWUP_ID}"
+export DENBUST_STATE_ROOT="${FOLLOWUP_ROOT}/state"
+mkdir -p "${FOLLOWUP_ROOT}"/{logs,artifacts}
+
+python -m playwright install chromium
+
+denbust diagnose-sources \
+  --config agents/news/local.yaml \
+  --live-only \
+  --sample-keyword "זנות" \
+  --sample-keyword "בית בושת" \
+  --sample-keyword "סחר בבני אדם" \
+  --format json \
+  --output "${FOLLOWUP_ROOT}/artifacts/diagnose_sources_live_all.json"
+
+for source in ynet walla mako maariv haaretz ice; do
+  denbust diagnose-sources \
+    --config agents/news/local.yaml \
+    --live-only \
+    --source "${source}" \
+    --sample-keyword "זנות" \
+    --sample-keyword "בית בושת" \
+    --sample-keyword "סחר בבני אדם" \
+    --format json \
+    --output "${FOLLOWUP_ROOT}/artifacts/diagnose_sources_live_${source}.json"
+done
+```
+
+The 2026-05-03 triage run used this shape under
+`data/may_26_followup/20260503T074131Z/`. Mako passed in both all-source and source-specific runs,
+Haaretz passed, and `source_zero_summary.systemic_source_zero_suspected` stayed true because Ynet,
+Walla, Maariv, and ICE were affected. Operators should treat #71/#74 as duplicate or stale Mako
+runtime hygiene unless a Chromium-backed Mako probe regresses, keep #72 active for source-native
+reliability work, and leave #88 as a later optimization unless backfill aggregation is observed as a
+real bottleneck.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:
