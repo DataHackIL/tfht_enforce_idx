@@ -362,6 +362,9 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   while the then-current 4-source guardrail still fired for Ynet, Walla, Maariv, and ICE; the #72
   follow-up narrows that guardrail to hard source failures and makes #71/#74 duplicate or stale Mako
   runtime hygiene unless Mako regresses again
+- the 2026-05-03T13:13:10Z source-specific Mako follow-up reran the Chromium-backed probe under
+  `data/may_26_followup/20260503T131309Z/state`; Mako again returned `ok`, so #71/#74 are closed as
+  stale/duplicate runtime hygiene without changing scraper behavior
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable

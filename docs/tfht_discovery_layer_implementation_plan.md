@@ -485,9 +485,10 @@ The recommended order is:
   `self_heal_retry` attempts, but no automatic repair runs yet
 
 ### After Phase C source-health triage
-- the 2026-05-03 Chromium-backed source-health pass is the current evidence baseline
-- Mako passes in both all-source and source-specific live diagnostics, so #71/#74 should be treated
-  as duplicate or stale runtime hygiene unless a future Chromium-backed Mako probe regresses
+- the 2026-05-03 Chromium-backed source-health pass and the 2026-05-03T13:13:10Z Mako-only
+  follow-up are the current evidence baseline
+- Mako passes in both all-source and source-specific live diagnostics, so #71/#74 are closed as
+  duplicate or stale runtime hygiene unless a future Chromium-backed Mako probe regresses
 - Haaretz passes live diagnostics
 - #72 is addressed narrowly: Walla archive filtering and ICE search use targeted supplemental
   Hebrew recall terms, and `source_zero_summary.systemic_source_zero_suspected` now counts hard
