@@ -226,13 +226,21 @@ class TestCreateSourcesWarnings:
         )
 
         monkeypatch.setattr("denbust.pipeline.create_walla_source", lambda: FakeSource("walla", []))
-        monkeypatch.setattr("denbust.pipeline.create_mako_source", lambda: FakeSource("mako", []))
+
+        def create_fake_mako_source(browser_config: object | None = None) -> FakeSource:
+            del browser_config
+            return FakeSource("mako", [])
+
+        monkeypatch.setattr("denbust.pipeline.create_mako_source", create_fake_mako_source)
         monkeypatch.setattr(
             "denbust.pipeline.create_maariv_source", lambda: FakeSource("maariv", [])
         )
-        monkeypatch.setattr(
-            "denbust.pipeline.create_haaretz_source", lambda: FakeSource("haaretz", [])
-        )
+
+        def create_fake_haaretz_source(browser_config: object | None = None) -> FakeSource:
+            del browser_config
+            return FakeSource("haaretz", [])
+
+        monkeypatch.setattr("denbust.pipeline.create_haaretz_source", create_fake_haaretz_source)
 
         sources = create_sources(config)
 

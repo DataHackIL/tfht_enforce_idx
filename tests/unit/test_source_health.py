@@ -640,6 +640,7 @@ def test_classify_mako_exception_distinguishes_navigation_failure_modes(
     [
         "Playwright is not installed. Install it and Chromium.",
         "Chromium could not be launched for Mako scraping.",
+        "Could not attach mako scraper to Chrome over CDP at http://127.0.0.1:9222.",
         "browser executable not found",
     ],
 )

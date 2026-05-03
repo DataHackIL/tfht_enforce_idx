@@ -1692,6 +1692,8 @@ def _classify_mako_exception(exc: Exception) -> MakoFailureMode:
     if (
         "playwright is not installed" in message
         or "chromium could not be launched" in message
+        or "could not attach" in message
+        or "chrome over cdp" in message
         or "executable doesn't exist" in message
         or "browser executable not found" in message
     ):

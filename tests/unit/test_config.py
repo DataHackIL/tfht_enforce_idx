@@ -6,6 +6,8 @@ import pytest
 
 from denbust.config import (
     BackfillConfig,
+    BrowserConfig,
+    BrowserMode,
     CandidatesConfig,
     Config,
     DedupConfig,
@@ -41,6 +43,8 @@ class TestConfig:
         assert config.dedup.similarity_threshold == 0.7
         assert config.output.format == OutputFormat.CLI
         assert config.output.formats == [OutputFormat.CLI]
+        assert config.browser.mode == BrowserMode.PLAYWRIGHT_HEADLESS
+        assert config.browser.chrome_cdp_url == "http://127.0.0.1:9222"
         assert config.store.state_root == Path("data")
         assert config.store.seen_path is None
         assert config.store.runs_dir is None
@@ -149,6 +153,18 @@ class TestConfig:
 
         assert config.telegram_bot_token == "bot-token"
         assert config.telegram_chat_id == "chat-id"
+
+    def test_browser_config_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Browser scraper mode should be configurable through environment variables."""
+        monkeypatch.setenv("DENBUST_BROWSER_MODE", "chrome_cdp")
+        monkeypatch.setenv("DENBUST_CHROME_CDP_URL", "http://127.0.0.1:9333")
+
+        config = Config()
+
+        assert config.browser == BrowserConfig(
+            mode=BrowserMode.CHROME_CDP,
+            chrome_cdp_url="http://127.0.0.1:9333",
+        )
 
     def test_email_port_validation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Invalid SMTP ports should raise a clear error."""

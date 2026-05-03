@@ -632,7 +632,8 @@ class TestMakoScraper:
         events: list[str] = []
 
         class FakePage:
-            pass
+            async def close(self) -> None:
+                events.append("page_close")
 
         class FakeContext:
             def __init__(self) -> None:
@@ -647,6 +648,11 @@ class TestMakoScraper:
                 assert pattern == "**/*"
                 self.route_handler = handler
                 events.append("route")
+
+            async def unroute(self, pattern: str, handler: Any) -> None:
+                assert pattern == "**/*"
+                assert handler is self.route_handler
+                events.append("unroute")
 
             async def close(self) -> None:
                 events.append("context_close")
@@ -696,6 +702,8 @@ class TestMakoScraper:
             "new_context",
             "route",
             "new_page",
+            "unroute",
+            "page_close",
             "context_close",
             "browser_close",
             "exit",
@@ -1935,7 +1943,8 @@ class TestHaaretzScraper:
         events: list[str] = []
 
         class FakePage:
-            pass
+            async def close(self) -> None:
+                events.append("page_close")
 
         class FakeContext:
             def __init__(self) -> None:
@@ -1947,8 +1956,13 @@ class TestHaaretzScraper:
 
             async def route(self, pattern: str, handler: Any) -> None:
                 assert pattern == "**/*"
-                del handler
+                self.route_handler = handler
                 events.append("route")
+
+            async def unroute(self, pattern: str, handler: Any) -> None:
+                assert pattern == "**/*"
+                assert handler is self.route_handler
+                events.append("unroute")
 
             async def close(self) -> None:
                 events.append("context_close")
@@ -1997,6 +2011,8 @@ class TestHaaretzScraper:
             "new_context",
             "route",
             "new_page",
+            "unroute",
+            "page_close",
             "context_close",
             "browser_close",
             "exit",

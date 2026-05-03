@@ -53,6 +53,41 @@ class OutputFormat(StrEnum):
     EMAIL = "email"
 
 
+class BrowserMode(StrEnum):
+    """Browser session mode for browser-backed source scrapers."""
+
+    PLAYWRIGHT_HEADLESS = "playwright_headless"
+    CHROME_CDP = "chrome_cdp"
+
+
+class BrowserConfig(BaseModel):
+    """Shared browser configuration for browser-backed source scrapers."""
+
+    mode: BrowserMode = BrowserMode.PLAYWRIGHT_HEADLESS
+    chrome_cdp_url: str = "http://127.0.0.1:9222"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_env_overrides(cls, data: object) -> object:
+        """Apply browser mode overrides from the environment."""
+        if data is None:
+            normalized: dict[str, object] = {}
+        elif isinstance(data, dict):
+            normalized = dict(data)
+        else:
+            return data
+
+        env_mode = os.environ.get("DENBUST_BROWSER_MODE")
+        if env_mode:
+            normalized["mode"] = env_mode
+
+        env_cdp_url = os.environ.get("DENBUST_CHROME_CDP_URL")
+        if env_cdp_url:
+            normalized["chrome_cdp_url"] = env_cdp_url
+
+        return normalized
+
+
 class OutputConfig(BaseModel):
     """Configuration for output."""
 
@@ -387,6 +422,7 @@ class Config(BaseModel):
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
     dedup: DedupConfig = Field(default_factory=DedupConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    browser: BrowserConfig = Field(default_factory=BrowserConfig)
     store: StoreConfig = Field(default_factory=StoreConfig)
     operational: OperationalConfig = Field(default_factory=OperationalConfig)
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)

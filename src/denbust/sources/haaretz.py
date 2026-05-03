@@ -13,8 +13,14 @@ from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup, Tag
 from pydantic import HttpUrl
 
+from denbust.config import BrowserConfig
 from denbust.data_models import RawArticle
 from denbust.sources.base import Source
+from denbust.sources.browser import (
+    ScraperBrowserSession,
+    close_scraper_browser_session,
+    open_scraper_browser_session,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -78,16 +84,6 @@ VIEWPORT: _ViewportSize = {"width": 1440, "height": 2000}
 
 
 @dataclass
-class _BrowserSession:
-    """Open Playwright browser resources for a single fetch cycle."""
-
-    manager: Any
-    browser: Any
-    context: Any
-    page: Page
-
-
-@dataclass
 class _HaaretzSearchEntry:
     """Parsed Haaretz search result entry before keyword filtering."""
 
@@ -100,13 +96,23 @@ class _HaaretzSearchEntry:
 class HaaretzScraper(Source):
     """Browser-backed search scraper for Haaretz."""
 
-    def __init__(self, rate_limit_delay_seconds: float = DEFAULT_RATE_LIMIT_DELAY_SECONDS) -> None:
+    def __init__(
+        self,
+        rate_limit_delay_seconds: float = DEFAULT_RATE_LIMIT_DELAY_SECONDS,
+        browser_config: BrowserConfig | None = None,
+    ) -> None:
         self._name = "haaretz"
         self._rate_limit_delay_seconds = rate_limit_delay_seconds
+        self._browser_config = browser_config or BrowserConfig()
+        self._debug_state: dict[str, Any] = {}
 
     @property
     def name(self) -> str:
         return self._name
+
+    def get_debug_state(self) -> dict[str, Any] | None:
+        """Return structured runtime telemetry for debug logs."""
+        return self._debug_state or None
 
     async def fetch(self, days: int, keywords: list[str]) -> list[RawArticle]:
         """Fetch recent keyword-matching articles from Haaretz search results."""
@@ -117,10 +123,23 @@ class HaaretzScraper(Source):
 
         cutoff = datetime.now(UTC) - timedelta(days=days)
         articles: list[RawArticle] = []
+        self._debug_state = {
+            "days": days,
+            "keywords": list(keywords),
+            "browser_session": {"status": "pending"},
+        }
 
         try:
             session = await self._open_browser_session()
+            self._debug_state["browser_session"] = {
+                "status": "ok",
+                **self._browser_session_diagnostics(session),
+            }
         except Exception as e:
+            self._debug_state["browser_session"] = {
+                "status": "error",
+                "error": str(e),
+            }
             logger.exception("Haaretz browser session could not be opened: %s", e)
             return []
 
@@ -156,49 +175,32 @@ class HaaretzScraper(Source):
             return
         await asyncio.sleep(self._rate_limit_delay_seconds)
 
-    async def _open_browser_session(self) -> _BrowserSession:
+    def _browser_session_diagnostics(self, session: object) -> dict[str, Any]:
+        """Return browser diagnostics when the concrete session provides them."""
+        diagnostics = getattr(session, "diagnostics", None)
+        if callable(diagnostics):
+            session_diagnostics = diagnostics()
+            if isinstance(session_diagnostics, dict):
+                return session_diagnostics
+        return {}
+
+    async def _open_browser_session(self) -> ScraperBrowserSession:
         """Open a Playwright browser session for Haaretz scraping."""
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError as e:
-            raise RuntimeError(
-                "Playwright is not installed. Install it and Chromium with "
-                "`python -m pip install playwright` and `python -m playwright install chromium`."
-            ) from e
+        return await open_scraper_browser_session(
+            source_name=self._name,
+            browser_config=self._browser_config,
+            user_agent=USER_AGENT,
+            locale="he-IL",
+            viewport=VIEWPORT,
+            route_handler=self._handle_browser_route,
+        )
 
-        manager = async_playwright()
-        playwright = await manager.__aenter__()
-
-        try:
-            browser = await playwright.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent=USER_AGENT,
-                locale="he-IL",
-                viewport=VIEWPORT,
-            )
-            await context.route("**/*", self._handle_browser_route)
-            page = await context.new_page()
-        except Exception as e:
-            await manager.__aexit__(type(e), e, e.__traceback__)
-            raise RuntimeError(
-                "Chromium could not be launched for Haaretz scraping. "
-                "Install it with `python -m playwright install chromium`."
-            ) from e
-
-        return _BrowserSession(manager=manager, browser=browser, context=context, page=page)
-
-    async def _close_browser_session(self, session: _BrowserSession) -> None:
+    async def _close_browser_session(self, session: ScraperBrowserSession) -> None:
         """Close all Playwright resources for Haaretz scraping."""
-        try:
-            await session.context.close()
-        finally:
-            try:
-                await session.browser.close()
-            finally:
-                await session.manager.__aexit__(None, None, None)
+        await close_scraper_browser_session(session)
 
     async def _search_keyword(
-        self, session: _BrowserSession, keyword: str, cutoff: datetime
+        self, session: ScraperBrowserSession, keyword: str, cutoff: datetime
     ) -> list[RawArticle]:
         """Search Haaretz for a specific keyword across paginated results."""
         articles: list[RawArticle] = []
@@ -420,6 +422,6 @@ class HaaretzScraper(Source):
         await route.continue_()
 
 
-def create_haaretz_source() -> HaaretzScraper:
+def create_haaretz_source(browser_config: BrowserConfig | None = None) -> HaaretzScraper:
     """Create Haaretz scraper source."""
-    return HaaretzScraper()
+    return HaaretzScraper(browser_config=browser_config)
