@@ -188,13 +188,13 @@ def create_sources(config: Config) -> list[Source]:
 
         elif source_cfg.type == SourceType.SCRAPER:
             if source_cfg.name == "mako":
-                sources.append(create_mako_source())
+                sources.append(create_mako_source(browser_config=config.browser))
             elif source_cfg.name == "maariv":
                 sources.append(create_maariv_source())
             elif source_cfg.name == "ice":
                 sources.append(create_ice_source())
             elif source_cfg.name == "haaretz":
-                sources.append(create_haaretz_source())
+                sources.append(create_haaretz_source(browser_config=config.browser))
             elif source_cfg.name == "walla":
                 sources.append(create_walla_source())
             else:

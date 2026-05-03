@@ -14,8 +14,15 @@ from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup, Tag
 from pydantic import HttpUrl
 
+from denbust.config import BrowserConfig
 from denbust.data_models import RawArticle
 from denbust.sources.base import Source
+from denbust.sources.browser import (
+    PLAYWRIGHT_INSTALL_HINT,
+    ScraperBrowserSession,
+    close_scraper_browser_session,
+    open_scraper_browser_session,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -41,7 +48,6 @@ MAKO_SEARCH_URL = f"{MAKO_BASE_URL}/Search"
 MAKO_SEARCH_CHANNEL_ID = "3d385dd2dd5d4110VgnVCM100000290c10acRCRD"
 # Men section often has crime/enforcement news
 MAKO_MEN_NEWS_URL = "https://www.mako.co.il/men-men_news"
-PLAYWRIGHT_INSTALL_HINT = "python -m playwright install chromium"
 SECTION_READY_SELECTORS = [
     "a[href*='Article']",
     "article",
@@ -89,16 +95,6 @@ BLOCKED_RESOURCE_URL_FRAGMENTS = (
 
 
 @dataclass
-class _BrowserSession:
-    """Open Playwright browser resources for a single fetch cycle."""
-
-    manager: Any
-    browser: Any
-    context: Any
-    page: Page
-
-
-@dataclass
 class _SearchPageSnapshot:
     """Rendered Mako search page state at a point in time."""
 
@@ -112,10 +108,15 @@ class _SearchPageSnapshot:
 class MakoScraper(Source):
     """Scraper for Mako news website."""
 
-    def __init__(self, rate_limit_delay_seconds: float = DEFAULT_RATE_LIMIT_DELAY_SECONDS) -> None:
+    def __init__(
+        self,
+        rate_limit_delay_seconds: float = DEFAULT_RATE_LIMIT_DELAY_SECONDS,
+        browser_config: BrowserConfig | None = None,
+    ) -> None:
         """Initialize Mako scraper."""
         self._name = "mako"
         self._rate_limit_delay_seconds = rate_limit_delay_seconds
+        self._browser_config = browser_config or BrowserConfig()
         self._debug_state: dict[str, Any] = {}
 
     @property
@@ -147,8 +148,7 @@ class MakoScraper(Source):
             session = await self._open_browser_session()
             self._debug_state["browser_session"] = {
                 "status": "ok",
-                "headless": True,
-                "user_agent": USER_AGENT,
+                **self._browser_session_diagnostics(session),
             }
         except Exception as e:
             self._debug_state["browser_session"] = {
@@ -217,6 +217,15 @@ class MakoScraper(Source):
         if isinstance(bucket, list):
             bucket.append(entry)
 
+    def _browser_session_diagnostics(self, session: object) -> dict[str, Any]:
+        """Return browser diagnostics when the concrete session provides them."""
+        diagnostics = getattr(session, "diagnostics", None)
+        if callable(diagnostics):
+            session_diagnostics = diagnostics()
+            if isinstance(session_diagnostics, dict):
+                return session_diagnostics
+        return {}
+
     async def _rate_limit(self) -> None:
         """Sleep between Mako requests unless disabled for tests."""
         if self._rate_limit_delay_seconds <= 0:
@@ -224,54 +233,23 @@ class MakoScraper(Source):
 
         await asyncio.sleep(self._rate_limit_delay_seconds)
 
-    async def _open_browser_session(self) -> _BrowserSession:
+    async def _open_browser_session(self) -> ScraperBrowserSession:
         """Open a Playwright browser session for Mako scraping."""
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError as e:
-            raise RuntimeError(
-                "Playwright is not installed. Install it and Chromium with "
-                f"`python -m pip install playwright` and `{PLAYWRIGHT_INSTALL_HINT}`."
-            ) from e
-
-        manager = async_playwright()
-        playwright = await manager.__aenter__()
-
-        try:
-            browser = await playwright.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent=USER_AGENT,
-                locale="he-IL",
-                viewport=VIEWPORT,
-            )
-            await context.route("**/*", self._handle_browser_route)
-            page = await context.new_page()
-        except Exception as e:
-            await manager.__aexit__(type(e), e, e.__traceback__)
-            raise RuntimeError(
-                "Chromium could not be launched for Mako scraping. "
-                f"Install it with `{PLAYWRIGHT_INSTALL_HINT}`."
-            ) from e
-
-        return _BrowserSession(
-            manager=manager,
-            browser=browser,
-            context=context,
-            page=page,
+        return await open_scraper_browser_session(
+            source_name=self._name,
+            browser_config=self._browser_config,
+            user_agent=USER_AGENT,
+            locale="he-IL",
+            viewport=VIEWPORT,
+            route_handler=self._handle_browser_route,
         )
 
-    async def _close_browser_session(self, session: _BrowserSession) -> None:
+    async def _close_browser_session(self, session: ScraperBrowserSession) -> None:
         """Close all Playwright resources for Mako scraping."""
-        try:
-            await session.context.close()
-        finally:
-            try:
-                await session.browser.close()
-            finally:
-                await session.manager.__aexit__(None, None, None)
+        await close_scraper_browser_session(session)
 
     async def _search_keyword(
-        self, session: _BrowserSession, keyword: str, cutoff: datetime
+        self, session: ScraperBrowserSession, keyword: str, cutoff: datetime
     ) -> list[RawArticle]:
         """Search Mako for a specific keyword."""
         search_url = self._build_search_url(keyword)
@@ -314,7 +292,7 @@ class MakoScraper(Source):
         return parsed_articles
 
     async def _scrape_section(
-        self, session: _BrowserSession, url: str, cutoff: datetime, keywords: list[str]
+        self, session: ScraperBrowserSession, url: str, cutoff: datetime, keywords: list[str]
     ) -> list[RawArticle]:
         """Scrape a Mako section page."""
         page = getattr(session, "page", None)
@@ -365,12 +343,12 @@ class MakoScraper(Source):
             return title if isinstance(title, str) else ""
         return ""
 
-    async def _fetch_search_html(self, session: _BrowserSession, keyword: str) -> str | None:
+    async def _fetch_search_html(self, session: ScraperBrowserSession, keyword: str) -> str | None:
         """Fetch rendered search page HTML via Playwright."""
         url = self._build_search_url(keyword)
         return await self._fetch_search_results_html(session.page, url, keyword)
 
-    async def _fetch_section_html(self, session: _BrowserSession, url: str) -> str:
+    async def _fetch_section_html(self, session: ScraperBrowserSession, url: str) -> str:
         """Fetch rendered section page HTML via Playwright."""
         return await self._fetch_rendered_html(
             session.page,
@@ -764,6 +742,6 @@ class MakoScraper(Source):
         return any(kw.lower() in text for kw in keywords)
 
 
-def create_mako_source() -> MakoScraper:
+def create_mako_source(browser_config: BrowserConfig | None = None) -> MakoScraper:
     """Create Mako scraper source."""
-    return MakoScraper()
+    return MakoScraper(browser_config=browser_config)
