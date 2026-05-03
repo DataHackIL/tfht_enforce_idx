@@ -114,6 +114,7 @@ def select_candidates_for_self_heal(
         eligible,
         key=lambda candidate: (
             -candidate.retry_priority,
+            0 if candidate.next_scrape_attempt_at is None else 1,
             candidate.next_scrape_attempt_at or max_datetime,
             -candidate.last_scrape_attempt_at.timestamp()
             if candidate.last_scrape_attempt_at is not None
@@ -270,6 +271,7 @@ def _mark_attempt_success(
             "last_scrape_error_code": None,
             "last_scrape_error_message": None,
             "content_basis": ContentBasis.FULL_ARTICLE_PAGE,
+            "self_heal_eligible": False,
             "titles": deduplicate_strings([*candidate.titles, article.title]),
             "snippets": deduplicate_strings([*candidate.snippets, article.snippet]),
             "metadata": {

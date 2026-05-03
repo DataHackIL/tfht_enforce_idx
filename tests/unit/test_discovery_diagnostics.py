@@ -87,6 +87,7 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
                 first_seen_at=now - timedelta(days=2),
                 last_seen_at=now - timedelta(hours=2),
                 content_basis=ContentBasis.FULL_ARTICLE_PAGE,
+                self_heal_eligible=True,
             ),
             _candidate(
                 "candidate-source-only",
@@ -730,6 +731,15 @@ def test_build_scrape_failure_diagnostics_groups_failures_for_self_heal_triage()
             first_seen_at=now,
             last_seen_at=now,
         ),
+        _candidate(
+            "candidate-3",
+            url="https://www.mako.co.il/news/article/3",
+            discovered_via=["exa"],
+            status=CandidateStatus.SCRAPE_SUCCEEDED,
+            first_seen_at=now,
+            last_seen_at=now,
+            self_heal_eligible=True,
+        ),
     ]
     attempts = [
         ScrapeAttempt(
@@ -757,6 +767,15 @@ def test_build_scrape_failure_diagnostics_groups_failures_for_self_heal_triage()
             attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
             fetch_status=FetchStatus.SUCCESS,
         ),
+        ScrapeAttempt(
+            candidate_id="candidate-3",
+            started_at=now - timedelta(seconds=30),
+            finished_at=now - timedelta(seconds=30),
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.FAILED,
+            source_adapter_name="mako",
+            error_code="candidate_not_found",
+        ),
     ]
 
     diagnostics = _build_scrape_failure_diagnostics(candidates, attempts)
@@ -768,6 +787,6 @@ def test_build_scrape_failure_diagnostics_groups_failures_for_self_heal_triage()
     assert diagnostic.error_code == "candidate_not_found"
     assert diagnostic.source_adapter_name == "mako"
     assert diagnostic.domain == "www.mako.co.il"
-    assert diagnostic.count == 2
+    assert diagnostic.count == 3
     assert diagnostic.self_heal_eligible_count == 1
-    assert diagnostic.latest_attempt_at == now - timedelta(minutes=1)
+    assert diagnostic.latest_attempt_at == now - timedelta(seconds=30)

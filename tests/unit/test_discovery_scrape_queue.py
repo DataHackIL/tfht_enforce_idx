@@ -233,6 +233,30 @@ def test_select_candidates_for_self_heal_filters_failed_eligible_due_candidates(
     assert [candidate.candidate_id for candidate in selected] == ["eligible"]
 
 
+def test_select_candidates_for_self_heal_prioritizes_immediate_candidates(
+    tmp_path: Path,
+) -> None:
+    """Self-heal selection should treat missing retry timestamps as immediately due."""
+    store = build_store(tmp_path)
+    due_time = datetime(2026, 4, 11, 10, 0, tzinfo=UTC)
+    immediate = build_candidate("immediate", status=CandidateStatus.SCRAPE_FAILED).model_copy(
+        update={
+            "self_heal_eligible": True,
+            "next_scrape_attempt_at": None,
+        }
+    )
+    dated_retry = build_candidate(
+        "dated-retry",
+        status=CandidateStatus.SCRAPE_FAILED,
+        next_scrape_attempt_at=due_time - timedelta(hours=1),
+    ).model_copy(update={"self_heal_eligible": True})
+    store.upsert_candidates([dated_retry, immediate])
+
+    selected = select_candidates_for_self_heal(store, limit=1, now=due_time)
+
+    assert [candidate.candidate_id for candidate in selected] == ["immediate"]
+
+
 def test_metadata_datetime_handles_invalid_and_naive_values() -> None:
     """Backfill metadata parsing should reject invalid strings and normalize naive ones to UTC."""
     invalid_candidate = build_candidate("invalid", status=CandidateStatus.NEW).model_copy(
@@ -312,7 +336,9 @@ async def test_scrape_candidates_returns_empty_batch_for_no_candidates(tmp_path:
 async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path: Path) -> None:
     """Successful source-adapter scrapes should yield raw articles and succeeded candidates."""
     store = build_store(tmp_path)
-    candidate = build_candidate("candidate-1", status=CandidateStatus.NEW)
+    candidate = build_candidate("candidate-1", status=CandidateStatus.SCRAPE_FAILED).model_copy(
+        update={"self_heal_eligible": True}
+    )
     store.upsert_candidates([candidate])
     source = FakeSource("ynet", [build_raw_article()])
 
@@ -329,6 +355,7 @@ async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path:
     assert stored.candidate_status is CandidateStatus.SCRAPE_SUCCEEDED
     assert stored.content_basis is ContentBasis.FULL_ARTICLE_PAGE
     assert stored.scrape_attempt_count == 1
+    assert stored.self_heal_eligible is False
     assert batch.fallback_candidates == []
     assert len(batch.raw_articles) == 1
     assert len(batch.attempts) == 1

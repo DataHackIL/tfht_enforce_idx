@@ -561,7 +561,10 @@ def _build_queue_health_metrics(
         stale_candidates=stale,
         retry_backlog_candidates=retry_backlog,
         self_heal_eligible_candidates=sum(
-            1 for candidate in candidates if candidate.self_heal_eligible
+            1
+            for candidate in candidates
+            if candidate.candidate_status is CandidateStatus.SCRAPE_FAILED
+            and candidate.self_heal_eligible
         ),
     )
 
@@ -736,7 +739,11 @@ def _build_scrape_failure_diagnostics(
             )
             grouped[key] = diagnostic
         diagnostic.count += 1
-        if candidate is not None and candidate.self_heal_eligible:
+        if (
+            candidate is not None
+            and candidate.candidate_status is CandidateStatus.SCRAPE_FAILED
+            and candidate.self_heal_eligible
+        ):
             diagnostic.self_heal_eligible_count += 1
         finished_or_started = attempt.finished_at or attempt.started_at
         if (
