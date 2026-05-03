@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from denbust.discovery.models import (
     BackfillBatch,
@@ -14,6 +15,14 @@ from denbust.discovery.models import (
     PersistentCandidate,
     ScrapeAttempt,
 )
+
+
+@dataclass(frozen=True)
+class BackfillCandidateCounts:
+    """Candidate aggregate counts for one historical backfill batch."""
+
+    merged_candidate_count: int
+    queued_for_scrape_count: int
 
 
 class DiscoveryRunStore(ABC):
@@ -44,6 +53,24 @@ class CandidateStore(ABC):
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
         """List durable candidates, optionally filtered by status and batch."""
+
+    @abstractmethod
+    def count_candidates(
+        self,
+        *,
+        statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
+    ) -> int:
+        """Count durable candidates, optionally filtered by status and batch."""
+
+    @abstractmethod
+    def count_backfill_batch_candidates(
+        self,
+        *,
+        batch_id: str,
+        scrapeable_statuses: Sequence[CandidateStatus],
+    ) -> BackfillCandidateCounts:
+        """Count all candidates and scrape-eligible candidates for one backfill batch."""
 
     @abstractmethod
     def find_candidate_by_urls(

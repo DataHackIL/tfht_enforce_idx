@@ -328,6 +328,9 @@ Implemented.
   window fetching are skipped with warnings rather than treated as fatal
 - `news_items / backfill_scrape` drains one historical batch at a time with oldest-window-first
   ordering and reuses the existing scrape-to-ingest path
+- backfill batch status refreshes use persistence-layer candidate counts for merged and
+  scrape-eligible totals; Supabase uses server-side exact-count metadata, and state-repo runs stream
+  JSONL count fields without materializing full candidates in the pipeline
 
 ### Out of scope
 - no self-healing yet

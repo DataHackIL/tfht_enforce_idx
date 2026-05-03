@@ -59,6 +59,8 @@ Planned future datasets:
 - Plans historical backfill windows and persists durable `backfill_batches` metadata for slow-drain
   discovery/scrape work
 - Drains one historical backfill batch at a time with oldest-window-first scrape prioritization
+- Refreshes backfill batch aggregate counts through the discovery persistence layer, including
+  Supabase exact-count requests, without materializing full candidate rows in the pipeline
 - Provides an opt-in `agents/news/local_search.yaml` config for local source-native + Brave + Exa
   + Google CSE discovery experiments
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
@@ -325,6 +327,8 @@ DL-PR-06 now builds on the earlier discovery milestones:
   and runs historical search-engine discovery plus capability-based source-native discovery
 - a real `news_items / backfill_scrape` job that drains one historical batch at a time through the
   existing scrape-to-ingest path
+- persistence-layer aggregate count API used by backfill batch status refreshes, with Supabase
+  exact-count requests and state-repo streaming counts preserving existing aggregate semantics
 - `news_items / ingest` now uses the candidate scrape layer for source-native candidates while
   preserving the existing direct-fetch convenience flow as a compatibility fallback
 - Supabase migrations for:

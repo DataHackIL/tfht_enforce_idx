@@ -52,21 +52,29 @@ keyword-zero visible both per source and in separate report-level keyword-zero c
 source-zero/stale/fetch/parse failures so healthy pages with no sampled keyword hit no longer
 masquerade as systemic source outage evidence.
 
+The #88 backfill reliability/performance follow-up keeps the backfill behavior unchanged while
+moving aggregate candidate counts behind the discovery persistence boundary. Batch status refreshes
+now ask persistence for merged and scrape-eligible counts directly; the Supabase backend uses
+PostgREST exact-count metadata, and the state-repo backend streams candidate JSONL count fields
+without hydrating full `PersistentCandidate` models for this pipeline path.
+
 A fresh Phase C source-health triage pass on 2026-05-03 used an isolated
 `data/may_26_followup/20260503T074131Z/state` root and Chromium installed through Playwright before
 live Mako probing. The all-source run showed Mako `ok` and Haaretz `ok`; Ynet, Walla, Maariv, and
 ICE still produced source-zero, stale-result, or keyword-zero diagnostics under the then-current
 guardrail. The per-source Mako run also passed, which makes #71/#74 duplicate or stale Mako runtime
 hygiene rather than the next correctness fix. #72 is now addressed by the narrow source-native
-recall/guardrail follow-up. #88 remains a later persistence optimization because this diagnostic pass
-did not exercise or expose backfill aggregate-count slowness. The auditable evidence summary is
-checked in at
+recall/guardrail follow-up. #88 is now addressed by the narrow aggregate-count persistence API; no
+broader backfill storage refactor or source-health work is included. The auditable Phase C evidence
+summary remains checked in at
 [`docs/phase_c_source_health_triage_2026_05_03.md`](docs/phase_c_source_health_triage_2026_05_03.md).
 
 ### What is already in place
 
 - Candidate persistence, scrape attempts, queue state, fallback retention, and backfill jobs already
   exist under `src/denbust/discovery/` and `src/denbust/pipeline.py`.
+- Backfill batch aggregate refreshes use persistence-layer candidate counts instead of listing all
+  batch candidates in the pipeline.
 - Discovery diagnostics already flow through `src/denbust/diagnostics/discovery.py` and
   `denbust diagnose-discovery`.
 - Source-health diagnostics already cover selector drift, parse-zero, stale-result, and keyword-zero
@@ -102,8 +110,8 @@ checked in at
 
 1. Treat #71/#74 as duplicate or near-duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
-2. Keep #88 lower priority unless bounded backfill evidence shows aggregate-count updates are a real
-   local bottleneck.
+2. Wait for fresh bounded evidence before selecting another Mako runtime, source-health, backfill,
+   or self-healing follow-up.
 3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
    self-heal implementation PR has fresh failure evidence.
 

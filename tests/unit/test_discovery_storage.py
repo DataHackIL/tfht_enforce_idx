@@ -23,6 +23,7 @@ from denbust.discovery.models import (
     ScrapeAttempt,
     ScrapeAttemptKind,
 )
+from denbust.discovery.persistence import BackfillCandidateCounts
 from denbust.discovery.source_native import (
     SourceDiscoveryAdapter,
     persist_discovered_candidates,
@@ -155,6 +156,8 @@ class RecordingPersistence(NullDiscoveryPersistence):
 
     def __init__(self) -> None:
         self.find_calls = 0
+        self.count_calls = 0
+        self.aggregate_count_calls = 0
         self.written_run: DiscoveryRun | None = None
         self.candidates: list[PersistentCandidate] = []
         self.provenance: list[CandidateProvenance] = []
@@ -174,6 +177,26 @@ class RecordingPersistence(NullDiscoveryPersistence):
 
     def append_provenance(self, events: list[CandidateProvenance]) -> None:
         self.provenance = list(events)
+
+    def count_candidates(
+        self,
+        *,
+        statuses: list[CandidateStatus] | tuple[CandidateStatus, ...] | None = None,
+        backfill_batch_id: str | None = None,
+    ) -> int:
+        del statuses, backfill_batch_id
+        self.count_calls += 1
+        return 11
+
+    def count_backfill_batch_candidates(
+        self,
+        *,
+        batch_id: str,
+        scrapeable_statuses: list[CandidateStatus] | tuple[CandidateStatus, ...],
+    ) -> BackfillCandidateCounts:
+        del batch_id, scrapeable_statuses
+        self.aggregate_count_calls += 1
+        return BackfillCandidateCounts(merged_candidate_count=13, queued_for_scrape_count=7)
 
 
 def test_source_discovery_adapter_name_and_discovered_at_override() -> None:
@@ -382,6 +405,11 @@ def test_null_discovery_persistence_is_noop() -> None:
 
     assert store.get_candidate("missing") is None
     assert store.list_candidates() == []
+    assert store.count_candidates() == 0
+    assert store.count_backfill_batch_candidates(
+        batch_id="batch-1",
+        scrapeable_statuses=[CandidateStatus.NEW],
+    ) == BackfillCandidateCounts(merged_candidate_count=0, queued_for_scrape_count=0)
     assert store.get_backfill_batch("missing") is None
     assert store.list_backfill_batches() == []
     assert (
@@ -425,6 +453,19 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
         == "queued"
     )
     assert store.list_candidates(backfill_batch_id="batch-1", limit=1)[0].candidate_id == "backfill"
+    assert store.count_candidates(backfill_batch_id="batch-1") == 1
+    assert store.count_candidates(statuses=[CandidateStatus.QUEUED]) == 1
+    assert (
+        store.count_candidates(
+            statuses=[CandidateStatus.QUEUED],
+            backfill_batch_id="batch-1",
+        )
+        == 0
+    )
+    assert store.count_backfill_batch_candidates(
+        batch_id="batch-1",
+        scrapeable_statuses=[CandidateStatus.SCRAPE_FAILED],
+    ) == BackfillCandidateCounts(merged_candidate_count=1, queued_for_scrape_count=1)
     assert (
         store.find_candidate_by_urls(
             canonical_url="https://www.walla.co.il/item",
@@ -458,6 +499,7 @@ def test_state_repo_discovery_persistence_handles_missing_and_blank_jsonl(tmp_pa
     paths.latest_candidates_path.parent.mkdir(parents=True, exist_ok=True)
     paths.latest_backfill_batches_path.parent.mkdir(parents=True, exist_ok=True)
     paths.latest_candidates_path.write_text("\n\n", encoding="utf-8")
+    paths.backfill_queue_path.write_text("\n\n", encoding="utf-8")
     paths.latest_backfill_batches_path.write_text("\n\n", encoding="utf-8")
     store.append_provenance([])
     store.append_attempts([])
@@ -465,6 +507,11 @@ def test_state_repo_discovery_persistence_handles_missing_and_blank_jsonl(tmp_pa
     store.upsert_backfill_batches([])
 
     assert store.list_candidates() == []
+    assert store.count_candidates() == 0
+    assert store.count_backfill_batch_candidates(
+        batch_id="batch-1",
+        scrapeable_statuses=[CandidateStatus.NEW],
+    ) == BackfillCandidateCounts(merged_candidate_count=0, queued_for_scrape_count=0)
     assert store.get_backfill_batch("missing") is None
     assert store.list_backfill_batches(statuses=[BackfillBatchStatus.RUNNING]) == []
 
@@ -577,6 +624,59 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
     assert headers["Authorization"] == "Bearer service-role"
 
 
+def test_supabase_discovery_persistence_counts_candidates_server_side() -> None:
+    """Supabase candidate counts should use PostgREST exact-count metadata."""
+    client = FakeHttpClient(
+        [
+            httpx.Response(200, json=[], headers={"content-range": "0-0/12"}),
+            httpx.Response(200, json=[], headers={"content-range": "*/5"}),
+            httpx.Response(200, json=[], headers={"content-range": "0-0/12"}),
+            httpx.Response(200, json=[], headers={"content-range": "*/5"}),
+            httpx.Response(200, json=[{"candidate_id": "fallback"}]),
+        ]
+    )
+    store = SupabaseDiscoveryPersistence(
+        base_url="https://supabase.example.com",
+        service_role_key="service-role",
+        schema="public",
+        table_names={
+            "discovery_runs": "discovery_runs",
+            "persistent_candidates": "persistent_candidates",
+            "backfill_batches": "backfill_batches",
+            "candidate_provenance": "candidate_provenance",
+            "scrape_attempts": "scrape_attempts",
+        },
+        client=client,
+    )
+
+    assert store.count_candidates(backfill_batch_id="batch-1") == 12
+    assert (
+        store.count_candidates(
+            statuses=[CandidateStatus.NEW, CandidateStatus.SCRAPE_FAILED],
+            backfill_batch_id="batch-1",
+        )
+        == 5
+    )
+    assert store.count_backfill_batch_candidates(
+        batch_id="batch-1",
+        scrapeable_statuses=[CandidateStatus.NEW, CandidateStatus.SCRAPE_FAILED],
+    ) == BackfillCandidateCounts(merged_candidate_count=12, queued_for_scrape_count=5)
+    assert store.count_candidates(backfill_batch_id="batch-1") == 1
+
+    first_call = client.calls[0]
+    assert first_call["params"] == {
+        "select": "candidate_id",
+        "limit": "1",
+        "backfill_batch_id": "eq.batch-1",
+    }
+    first_headers = first_call["headers"]
+    assert isinstance(first_headers, dict)
+    assert first_headers["Prefer"] == "count=exact"
+    second_params = client.calls[1]["params"]
+    assert isinstance(second_params, dict)
+    assert second_params["candidate_status"] == "in.(new,scrape_failed)"
+
+
 def test_supabase_discovery_persistence_handles_empty_payload_shapes() -> None:
     """Non-list responses should degrade to empty reads rather than crashing."""
     client = FakeHttpClient(
@@ -652,11 +752,12 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
         )
     )
     mirror = RecordingPersistence()
+    count_source = RecordingPersistence()
     batch = build_backfill_batch()
     candidate = build_candidate(backfill_batch_id=batch.batch_id)
     provenance = build_provenance()
     attempt = build_attempt()
-    composite = CompositeDiscoveryPersistence(primary, [mirror])
+    composite = CompositeDiscoveryPersistence(primary, [mirror], count_source=count_source)
 
     composite.write_run(DiscoveryRun(run_id="run-1"))
     composite.upsert_candidates([candidate])
@@ -670,6 +771,11 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
     assert composite.list_candidates(backfill_batch_id=batch.batch_id, limit=1)[0].candidate_id == (
         candidate.candidate_id
     )
+    assert composite.count_candidates(backfill_batch_id=batch.batch_id) == 11
+    assert composite.count_backfill_batch_candidates(
+        batch_id=batch.batch_id,
+        scrapeable_statuses=[CandidateStatus.NEW],
+    ) == BackfillCandidateCounts(merged_candidate_count=13, queued_for_scrape_count=7)
     assert composite.list_backfill_batches(limit=1)[0].batch_id == batch.batch_id
     assert (
         composite.find_candidate_by_urls(
@@ -689,6 +795,8 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
     assert mirror.written_run is not None
     assert mirror.candidates[0].candidate_id == candidate.candidate_id
     assert mirror.provenance[0].candidate_id == candidate.candidate_id
+    assert count_source.count_calls == 1
+    assert count_source.aggregate_count_calls == 1
     composite.close()
 
 
@@ -711,4 +819,5 @@ def test_create_discovery_persistence_selects_state_or_composite(
     assert isinstance(composite, CompositeDiscoveryPersistence)
     assert isinstance(composite.primary, StateRepoDiscoveryPersistence)
     assert isinstance(composite.mirrors[0], SupabaseDiscoveryPersistence)
+    assert isinstance(composite.count_source, SupabaseDiscoveryPersistence)
     composite.close()
