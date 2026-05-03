@@ -94,6 +94,37 @@ This confirms #71/#74 are stale/duplicate Mako runtime hygiene after Chromium-ba
 No scraper behavior, selector rewrite, retry path, or live-network-dependent regression test is
 needed for their closure.
 
+## Post-#108 Planning Reset
+
+- PR #108 was squash-merged into `main` as `dea6406` and closed #71/#74.
+- A fresh 2026-05-03 GitHub issue search through the repo connector returned zero open issues.
+- Artifact-only diagnostics were rerun under
+  `data/may_26_followup/20260503T134102Z/state`:
+  - `diagnose-discovery` found no persisted candidates, scrape attempts, or operational records.
+  - `diagnose-sources --artifacts-only` skipped all six configured sources because no ingest debug
+    summary existed under the isolated state root.
+- Durable evidence summary:
+  - open GitHub issues: `0`;
+  - discovery candidate files: absent under the isolated state root;
+  - queue-health candidate counts: all `0`;
+  - scrape-failure diagnostic groups: none;
+  - source artifact results: six `skip` results because no ingest debug summary exists.
+- Recommendation: do not open another implementation PR from this empty-state evidence alone. The
+  next bounded task should produce `reports/candidate_drain_summary.md` from a fresh ignored state
+  root after running `discover`, `scrape_candidates`, `diagnose-discovery`, and
+  `diagnose-sources --artifacts-only` against all sources in `agents/news/local.yaml`. Add one
+  latest-seven-complete-UTC-days backfill discover/scrape window only if that first pass produces no
+  scrapeable candidates.
+
+Use this triage matrix for the next implementation choice:
+
+| Evidence outcome | Next PR |
+|---|---|
+| Any Mako browser/runtime failure mode, any hard source fetch/parse/stale failure for a configured source, or `source_zero_summary.systemic_source_zero_suspected = true` | Source-health reliability PR scoped to the failing source or guardrail |
+| Source health has no hard failures, but scrape-eligible or retry backlog is present and batch status refresh timing is the bottleneck or noisy part of the run | Backfill/queue reliability PR scoped to the measured bottleneck |
+| `scrape_failed_candidates >= 10`, or at least 25% of attempted candidates fail, and `self_heal_eligible_candidates > 0` in repeated structured failure groups across at least two domains | Self-healing selection/orchestration PR, still without AI repair or selector rewriting |
+| No candidates, no hard source failures, and no scrape-failure groups | Evidence gap only: adjust the evidence run design or source/search inputs before opening an implementation PR |
+
 ## Validation
 
 - `.venv/bin/python scripts/validate_agent_plan.py`
