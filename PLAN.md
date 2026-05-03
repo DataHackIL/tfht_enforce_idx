@@ -26,7 +26,7 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: Post-#108 Phase C Evidence Gate
+## Current Next Focus: Post-#109 Phase C Queue-Drain Follow-Up
 
 PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
 local validation data problems and Anthropic provider failures fail visibly before operators trust
@@ -86,6 +86,18 @@ used `data/may_26_followup/20260503T134102Z/state` and ran artifact-only diagnos
 summary. That is useful isolation evidence, but it does not identify a source-health, backfill, or
 self-healing code defect by itself.
 
+PR `#109` was squash-merged into `main` as `201c247`. A fresh 2026-05-03 GitHub issue check returned
+zero open issues. The bounded candidate-drain evidence pass under
+`data/may_26_followup/20260503T153123Z/state` ran `discover`, `scrape_candidates`,
+`diagnose-discovery`, and `diagnose-sources --artifacts-only` against `agents/news/local.yaml`.
+The first `scrape_candidates` command failed fast because the Anthropic key was not in the shell
+environment; rerunning with the local `.env.local` environment completed. The pass persisted 63
+latest candidates, recorded 30 scrape attempts, marked 30 ICE candidates as `scrape_succeeded`, and
+left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla as never scraped. It produced no
+scrape-failure groups, retry backlog, self-heal-eligible candidates, hard source-zero summary, or
+relevant classified items. Because the first pass produced scrapeable candidates, the conditional
+latest-seven-complete-UTC-days backfill window was not used.
+
 Durable reset summary:
 
 | Signal | Value |
@@ -96,6 +108,21 @@ Durable reset summary:
 | `diagnose-discovery` scrape failures | no failure groups |
 | `diagnose-sources --artifacts-only` source results | six `skip` results because no ingest debug summary exists |
 | Implementation recommendation | no code PR from empty-state evidence alone |
+
+Candidate-drain summary:
+
+| Signal | Value |
+|---|---:|
+| Open GitHub issues | `0` |
+| Evidence root | `data/may_26_followup/20260503T153123Z/` |
+| Persisted latest candidates | `63` |
+| Scrape attempts | `30` |
+| Scrape-succeeded candidates | `30`, all from `ice` |
+| Never-scraped candidates | `33` across `haaretz`, `ice`, `maariv`, `mako`, and `walla` |
+| Scrape failures / retry backlog / self-heal eligible | `0` / `0` / `0` |
+| `diagnose-sources --artifacts-only` source results | six `skip` results because this path expects ingest debug summaries, while the run produced `scrape_candidates` debug summaries |
+| Conditional backfill window | not used because the first pass produced scrapeable candidates |
+| Implementation recommendation | backfill/queue reliability PR scoped to candidate-drain selection visibility or fairness |
 
 ### What is already in place
 
@@ -138,14 +165,10 @@ Durable reset summary:
 
 1. Treat #71/#74 as closed stale/duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
-2. Produce a bounded candidate-drain evidence bundle from a fresh local or CI run before selecting
-   another source-health, backfill, or self-healing implementation PR. The required first pass is:
-   `discover`, `scrape_candidates`, `diagnose-discovery`, and
-   `diagnose-sources --artifacts-only` under `data/may_26_followup/<timestamp>/state` against all
-   sources in `agents/news/local.yaml`. Add one latest-seven-complete-UTC-days backfill
-   discover/scrape window only if the first pass produces no scrapeable candidates. Summarize the
-   bundle in `reports/candidate_drain_summary.md` with queue-health counts, source-health artifact
-   results, scrape-failure groups, optional backfill timing, and a triage-matrix outcome.
+2. Implement a narrow backfill/queue reliability follow-up from the candidate-drain evidence. The
+   first target should be candidate-drain selection visibility or fairness so bounded drains do not
+   silently spend the full scrape budget on one source while other configured-source candidates
+   remain pending.
 3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
    self-heal implementation PR has fresh failure evidence.
 

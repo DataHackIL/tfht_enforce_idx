@@ -144,11 +144,15 @@ After PR #108 was squash-merged as `dea6406`, the 2026-05-03T13:41:02Z planning 
 root, `denbust diagnose-discovery` reported no persisted candidates, scrape attempts, or
 operational records, and `denbust diagnose-sources --artifacts-only` skipped all configured sources
 because no ingest debug summary existed under that root. Treat this as a clean empty-state baseline,
-not as source-health evidence. The next evidence gate should run `discover`, `scrape_candidates`,
-`diagnose-discovery`, and `diagnose-sources --artifacts-only` under a fresh ignored state root and
-write `reports/candidate_drain_summary.md`. If that first pass produces no scrapeable candidates,
-add one latest-seven-complete-UTC-days `backfill_discover` / `backfill_scrape` window before
-proposing more source-health, backfill, or self-healing code.
+not as source-health evidence.
+
+After PR #109 was squash-merged as `201c247`, the 2026-05-03T15:31:23Z candidate-drain evidence
+pass used `data/may_26_followup/20260503T153123Z/state`. It persisted 63 candidates, recorded 30
+successful ICE scrape attempts, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never
+scraped, and produced no scrape failures, retry backlog, self-heal backlog, or hard source-zero
+summary. Because the first pass produced scrapeable candidates, no latest-seven-complete-UTC-days
+backfill window was added. Treat the next narrow follow-up as backfill/queue reliability work
+focused on candidate-drain selection visibility or fairness, not source-health or self-healing.
 
 ## GitHub Actions Run Path
 

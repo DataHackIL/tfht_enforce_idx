@@ -498,11 +498,12 @@ The recommended order is:
   GitHub issues, and an isolated artifact-only diagnostic reset under
   `data/may_26_followup/20260503T134102Z/state` showed an empty state baseline rather than a new
   implementation defect
-- the next narrow implementation PR should be chosen only after `discover`, `scrape_candidates`,
-  `diagnose-discovery`, and `diagnose-sources --artifacts-only` produce a bounded candidate-drain
-  bundle under a fresh ignored state root; add one latest-seven-complete-UTC-days backfill window
-  only if the first pass produces no scrapeable candidates, then use the triage matrix in the Phase
-  C evidence note to justify the change
+- PR #109 was squash-merged as `201c247`; the bounded candidate-drain evidence pass under
+  `data/may_26_followup/20260503T153123Z/state` persisted 63 candidates, scraped 30 ICE candidates
+  successfully, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never scraped, and
+  produced no scrape failures, self-heal backlog, or hard source-zero summary
+- the next narrow implementation PR should use that evidence for a backfill/queue reliability
+  follow-up focused on candidate-drain selection visibility or fairness
 - full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
   remain out of scope until a later repair PR has fresh evidence
 

@@ -365,11 +365,15 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
 - the 2026-05-03T13:13:10Z source-specific Mako follow-up reran the Chromium-backed probe under
   `data/may_26_followup/20260503T131309Z/state`; Mako again returned `ok`, so #71/#74 are closed as
   stale/duplicate runtime hygiene without changing scraper behavior
-- PR #108 was squash-merged as `dea6406` and left no open GitHub issue backlog; the next Phase C
-  step is a bounded candidate-drain evidence bundle using `discover`, `scrape_candidates`,
-  `diagnose-discovery`, and `diagnose-sources --artifacts-only`, because the fresh artifact-only
-  reset under `data/may_26_followup/20260503T134102Z/state` correctly showed an empty isolated
-  diagnostics baseline rather than a new code defect
+- PR #108 was squash-merged as `dea6406` and left no open GitHub issue backlog; the post-#108
+  artifact-only reset under `data/may_26_followup/20260503T134102Z/state` correctly showed an empty
+  isolated diagnostics baseline rather than a new code defect
+- PR #109 was squash-merged as `201c247`; the 2026-05-03 candidate-drain evidence pass under
+  `data/may_26_followup/20260503T153123Z/state` persisted 63 candidates, spent all 30 scrape
+  attempts on ICE, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never scraped, and
+  produced no scrape failures, retry backlog, self-heal backlog, or hard source-zero summary. The
+  next narrow implementation target is backfill/queue reliability focused on drain selection
+  visibility or fairness
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable
