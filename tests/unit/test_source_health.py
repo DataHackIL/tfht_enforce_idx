@@ -468,9 +468,12 @@ def test_build_source_zero_summary_flags_systemic_source_zero_for_hard_buckets()
     assert summary.enabled_source_count == 6
     assert summary.selected_source_count == 6
     assert summary.affected_sources == ["ynet", "walla", "mako", "maariv"]
+    assert summary.keyword_zero_source_count == 0
+    assert summary.keyword_zero_sources == []
+    assert summary.systemic_keyword_zero_suspected is False
 
 
-def test_build_source_zero_summary_keeps_keyword_zero_out_of_systemic_guardrail() -> None:
+def test_build_source_zero_summary_keeps_keyword_zero_as_separate_recall_signal() -> None:
     summary = source_health._build_source_zero_summary(
         [
             SourceDiagnosticResult(
@@ -497,6 +500,16 @@ def test_build_source_zero_summary_keeps_keyword_zero_out_of_systemic_guardrail(
                 live_status=DiagnosticStatus.WARN,
                 failure_bucket=FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
             ),
+            SourceDiagnosticResult(
+                source_name="mako",
+                status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.OK,
+            ),
+            SourceDiagnosticResult(
+                source_name="haaretz",
+                status=DiagnosticStatus.OK,
+                live_status=DiagnosticStatus.OK,
+            ),
         ],
         enabled_source_count=6,
     )
@@ -504,6 +517,9 @@ def test_build_source_zero_summary_keeps_keyword_zero_out_of_systemic_guardrail(
     assert summary.affected_sources == []
     assert summary.affected_source_count == 0
     assert summary.systemic_source_zero_suspected is False
+    assert summary.keyword_zero_sources == ["ynet", "walla", "maariv", "ice"]
+    assert summary.keyword_zero_source_count == 4
+    assert summary.systemic_keyword_zero_suspected is True
 
 
 def test_build_source_zero_summary_ignores_generic_warns_without_source_zero_bucket() -> None:
@@ -1373,10 +1389,11 @@ async def test_probe_ice_reports_successful_page(monkeypatch: pytest.MonkeyPatch
 
     assert result.live_status == DiagnosticStatus.OK
     assert result.failure_bucket is None
+    assert result.checks[0].details["probe_phase"] == "sampled_keywords"
 
 
 @pytest.mark.asyncio
-async def test_probe_ice_queries_supplemental_search_terms(
+async def test_probe_ice_skips_supplemental_terms_when_sampled_keywords_return_articles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requested_urls: list[str] = []
@@ -1413,9 +1430,64 @@ async def test_probe_ice_queries_supplemental_search_terms(
     result = await source_health._probe_ice(days=21, sample_keywords=["זנות"])
 
     assert result.live_status == DiagnosticStatus.OK
+    assert build_ice_search_url("זנות") in requested_urls
+    assert build_ice_search_url("חשד לבית בושת") not in requested_urls
+    assert all(check.details["probe_phase"] == "sampled_keywords" for check in result.checks)
+
+
+@pytest.mark.asyncio
+async def test_probe_ice_queries_supplemental_terms_after_sampled_keywords_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_urls: list[str] = []
+
+    async def fake_fetch(
+        url: str, *, user_agent: str, client: httpx.AsyncClient | None = None
+    ) -> _FetchResult:
+        del user_agent, client
+        requested_urls.append(url)
+        html = """
+        <html>
+          <body>
+            <h1>תוצאות חיפוש</h1>
+            <article><ul><li><div>missing article link</div></li></ul></article>
+          </body>
+        </html>
+        """
+        if url == build_ice_search_url("חשד לבית בושת"):
+            html = """
+            <html>
+              <body>
+                <h1>תוצאות חיפוש</h1>
+                <article>
+                  <ul>
+                    <li>
+                      <a href="/article/123">בית בושת אותר</a>
+                      <span>01/01/2099 12:00</span>
+                    </li>
+                  </ul>
+                </article>
+              </body>
+            </html>
+            """
+        return _FetchResult(
+            requested_url=url,
+            final_url=url,
+            status_code=200,
+            content_type="text/html",
+            text=html,
+        )
+
+    monkeypatch.setattr(source_health, "_fetch_text", fake_fetch)
+
+    result = await source_health._probe_ice(days=21, sample_keywords=["זנות"])
+
+    assert result.live_status == DiagnosticStatus.OK
     assert build_ice_search_url("חשד לבית בושת") in requested_urls
     assert result.checks[0].details["sample_keyword_count"] == 1
-    assert result.checks[0].details["effective_search_term_count"] > 1
+    assert result.checks[0].details["supplemental_search_term_count"] > 1
+    assert result.checks[0].details["probe_phase"] == "sampled_keywords"
+    assert any(check.details["probe_phase"] == "supplemental_fallback" for check in result.checks)
 
 
 @pytest.mark.asyncio

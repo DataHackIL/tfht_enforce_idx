@@ -488,7 +488,8 @@ The recommended order is:
 - Haaretz passes live diagnostics
 - #72 is addressed narrowly: Walla archive filtering and ICE search use targeted supplemental
   Hebrew recall terms, and `source_zero_summary.systemic_source_zero_suspected` now counts hard
-  source-zero/stale/fetch/parse failures rather than keyword-zero warnings alone
+  source-zero/stale/fetch/parse failures while keyword-zero recall gaps remain visible through
+  separate summary fields
 - full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
   remain out of scope until a later repair PR has fresh evidence
 

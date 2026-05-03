@@ -269,9 +269,9 @@ repair automation without fresh failure evidence. The 2026-05-03 Chromium-backed
 Mako and Haaretz live probes healthy while Ynet, Walla, Maariv, and ICE triggered the then-current
 zero/stale/keyword-zero guardrail. The #72 follow-up keeps source-native reliability narrow by
 expanding Walla/ICE targeted recall terms and by reserving the report-level hard source-zero
-guardrail for fetch/feed/stale/parse failures rather than keyword-zero warnings alone. Full AI
-repair, selector rewriting, automatic source creation, and live-network-dependent CI tests remain
-outside this narrow source-health path.
+guardrail for fetch/feed/stale/parse failures while keeping keyword-zero recall gaps visible through
+separate summary fields. Full AI repair, selector rewriting, automatic source creation, and
+live-network-dependent CI tests remain outside this narrow source-health path.
 
 ---
 

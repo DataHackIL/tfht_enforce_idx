@@ -349,9 +349,10 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
 - Ynet source-health diagnostics now report separate RSS and category-page checks, distinguishing
   RSS low coverage, category HTTP failure, category parse-zero, and category keyword-zero cases
 - source-health diagnostics now include a report-level `source_zero_summary` for the Phase C
-  4+ hard affected-source guardrail, keep keyword-zero outcomes visible as per-source warnings, and
-  include Mako `failure_mode` details for missing Chromium, navigation timeout, context teardown,
-  redirect/anti-bot, selector drift, parse-zero, and stale/keyword-zero outcomes
+  4+ hard affected-source guardrail, keep keyword-zero outcomes visible through separate
+  report-level counts and per-source warnings, and include Mako `failure_mode` details for missing
+  Chromium, navigation timeout, context teardown, redirect/anti-bot, selector drift, parse-zero, and
+  stale/keyword-zero outcomes
 - the 2026-05-03 Phase C source-health triage pass, run with an isolated
   `DENBUST_STATE_ROOT` and Chromium installed before Mako probing, showed Mako and Haaretz healthy
   while the then-current 4-source guardrail still fired for Ynet, Walla, Maariv, and ICE; the #72

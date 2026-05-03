@@ -46,10 +46,11 @@ self-heal-eligible failed candidates without running AI repair.
 
 The #72 source-native reliability follow-through keeps the fix intentionally narrow. Walla archive
 filtering and ICE search now use targeted supplemental Hebrew recall terms, matching the
-source-native relaxation already present for Ynet and Maariv. Source-health diagnostics still report
-keyword-zero as a per-source warning, but the report-level `source_zero_summary` guardrail now
-counts hard source-zero/stale/fetch/parse failures only, so healthy pages with no sampled keyword
-hit no longer masquerade as systemic source outage evidence.
+source-native relaxation already present for Ynet and Maariv. Source-health diagnostics now keep
+keyword-zero visible both per source and in separate report-level keyword-zero counts, while
+`source_zero_summary.systemic_source_zero_suspected` is reserved for hard
+source-zero/stale/fetch/parse failures so healthy pages with no sampled keyword hit no longer
+masquerade as systemic source outage evidence.
 
 A fresh Phase C source-health triage pass on 2026-05-03 used an isolated
 `data/may_26_followup/20260503T074131Z/state` root and Chromium installed through Playwright before
@@ -72,7 +73,8 @@ checked in at
   cases.
 - Source-health diagnostics include a `source_zero_summary` that flags the 4+ hard affected-source
   guardrail used to decide whether a run is systemic rather than source-specific; keyword-zero
-  outcomes stay visible on individual source checks without counting as hard source-zero evidence.
+  outcomes stay visible through separate report-level keyword-zero counts and individual source
+  checks without counting as hard source-zero evidence.
 - Discovery diagnostics include structured scrape-failure groups keyed by attempt kind, fetch
   status, error code, source adapter, and domain, including self-heal-eligible counts.
 - Candidate scrape failures mark durable candidates as `self_heal_eligible`, and the candidate queue

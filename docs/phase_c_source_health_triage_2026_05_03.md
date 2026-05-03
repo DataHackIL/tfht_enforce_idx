@@ -58,9 +58,8 @@ Affected sources: `ynet`, `walla`, `maariv`, `ice`.
   Chromium-backed Mako probe regresses.
 - #74: recommend closing as duplicate or stale with #71 unless a future Chromium-backed Mako probe
   regresses.
-- #72: addressed by the narrow source-native reliability follow-up that expands Walla/ICE targeted
-  recall terms and refines the report-level guardrail so keyword-zero remains visible per source
-  without counting as hard systemic source-zero evidence.
+- #72: keep active and use as the next narrow source-native reliability follow-up because the
+  4-source guardrail still fires for Ynet, Walla, Maariv, and ICE.
 - #88: keep as later optimization; this source-health triage did not exercise or expose backfill
   aggregate-count slowness.
 
