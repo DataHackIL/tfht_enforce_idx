@@ -33,6 +33,10 @@ denbust run --dataset news_items --job backfill_scrape --config agents/news/loca
 `discover` writes into the candidate-layer namespace under `news_items/discover/`.
 `ingest` remains the article-processing job and still owns `news_items/ingest/`.
 Backfill jobs also read and write the shared `news_items/discover/` candidate-layer state.
+Backfill batch status updates refresh merged and scrape-eligible candidate counts through the
+discovery persistence layer; Supabase-backed runs use server-side exact-count metadata, while
+state-repo runs stream the candidate JSONL count fields without hydrating full candidate models for
+that aggregate path.
 The search-engine side of `discover` and `backfill_discover` now emits `taxonomy_targeted` queries
 from the packaged TFHT taxonomy in addition to the coarse operator keyword list.
 When source-targeted taxonomy expansion is enabled for backfill, each window is capped by
@@ -123,8 +127,9 @@ true because Ynet, Walla, Maariv, and ICE were affected by zero, stale, or keywo
 After the #72 follow-up, keyword-zero remains a per-source warning but no longer counts toward the
 report-level hard source-zero guardrail; it is tracked separately in the source-zero summary as
 keyword-zero recall evidence. Operators should treat #71/#74 as duplicate or stale Mako runtime
-hygiene unless a Chromium-backed Mako probe regresses, and leave #88 as a later optimization unless
-backfill aggregation is observed as a real bottleneck. The durable evidence summary is checked in at
+hygiene unless a Chromium-backed Mako probe regresses. The #88 aggregate-count path is addressed by
+the narrow persistence count API; choose further backfill work only from fresh bottleneck evidence.
+The durable evidence summary is checked in at
 [phase_c_source_health_triage_2026_05_03.md](phase_c_source_health_triage_2026_05_03.md).
 
 ## GitHub Actions Run Path

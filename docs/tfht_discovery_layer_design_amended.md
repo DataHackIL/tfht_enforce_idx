@@ -868,6 +868,11 @@ state repo, with `news_items / backfill_discover` reading
 invocation. Historical source-native discovery is capability-based and records warnings for sources
 that do not implement explicit window fetching.
 
+Backfill batch aggregate refreshes now read merged and scrape-eligible candidate counts through the
+discovery persistence boundary. Supabase-backed runs use exact-count metadata instead of downloading
+candidate rows for those totals, and state-repo runs stream the candidate JSONL count fields while
+preserving the existing batch status/count semantics.
+
 ---
 
 ## Self-healing support

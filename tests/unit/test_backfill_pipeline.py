@@ -24,10 +24,11 @@ from denbust.discovery.models import (
     DiscoveryRunStatus,
     PersistentCandidate,
 )
+from denbust.discovery.persistence import BackfillCandidateCounts
 from denbust.discovery.scrape_queue import CandidateScrapeBatch
 from denbust.discovery.source_native import PersistedSourceDiscovery
 from denbust.discovery.state_paths import resolve_discovery_state_paths
-from denbust.discovery.storage import StateRepoDiscoveryPersistence
+from denbust.discovery.storage import NullDiscoveryPersistence, StateRepoDiscoveryPersistence
 from denbust.models.common import DatasetName, JobName
 from denbust.models.runs import RunSnapshot
 from denbust.pipeline import run_news_backfill_discover_job, run_news_backfill_scrape_job
@@ -193,6 +194,41 @@ def select_stub(
     return persistence.list_candidates(limit=limit)
 
 
+class CountingOnlyPersistence(NullDiscoveryPersistence):
+    """Persistence fixture that exposes counts but fails if rows are listed."""
+
+    def __init__(self) -> None:
+        self.aggregate_calls: list[tuple[str, tuple[CandidateStatus, ...]]] = []
+
+    def count_backfill_batch_candidates(
+        self,
+        *,
+        batch_id: str,
+        scrapeable_statuses: list[CandidateStatus] | tuple[CandidateStatus, ...],
+    ) -> BackfillCandidateCounts:
+        self.aggregate_calls.append((batch_id, tuple(scrapeable_statuses)))
+        return BackfillCandidateCounts(merged_candidate_count=8, queued_for_scrape_count=5)
+
+    def count_candidates(
+        self,
+        *,
+        statuses: list[CandidateStatus] | tuple[CandidateStatus, ...] | None = None,
+        backfill_batch_id: str | None = None,
+    ) -> int:
+        del statuses, backfill_batch_id
+        raise AssertionError("aggregate counts should not use separate candidate counts")
+
+    def list_candidates(
+        self,
+        *,
+        statuses: list[CandidateStatus] | tuple[CandidateStatus, ...] | None = None,
+        backfill_batch_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[PersistentCandidate]:
+        del statuses, backfill_batch_id, limit
+        raise AssertionError("aggregate counts should not materialize candidate rows")
+
+
 @pytest.mark.asyncio
 async def test_tag_backfill_discovered_candidates_adds_metadata() -> None:
     """Backfill tagging should merge existing metadata with batch window metadata."""
@@ -283,6 +319,19 @@ def test_batch_candidate_counts_uses_batch_filter(tmp_path: Path) -> None:
 
     assert merged_count == 2
     assert queued_count == 2
+
+
+def test_batch_candidate_counts_uses_persistence_count_api() -> None:
+    """Aggregate refresh should use one persistence aggregate instead of listing rows."""
+    store = CountingOnlyPersistence()
+
+    merged_count, queued_count = pipeline_module._batch_candidate_counts(store, batch_id="batch-1")
+
+    assert merged_count == 8
+    assert queued_count == 5
+    assert store.aggregate_calls == [
+        ("batch-1", pipeline_module.SCRAPEABLE_CANDIDATE_STATUSES),
+    ]
 
 
 @pytest.mark.asyncio

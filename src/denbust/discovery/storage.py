@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from denbust.discovery.models import (
 )
 from denbust.discovery.persistence import (
     BackfillBatchStore,
+    BackfillCandidateCounts,
     CandidateStore,
     DiscoveryRunStore,
     ProvenanceStore,
@@ -70,6 +72,24 @@ class NullDiscoveryPersistence(DiscoveryPersistence):
     ) -> list[PersistentCandidate]:
         del statuses, backfill_batch_id, limit
         return []
+
+    def count_candidates(
+        self,
+        *,
+        statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
+    ) -> int:
+        del statuses, backfill_batch_id
+        return 0
+
+    def count_backfill_batch_candidates(
+        self,
+        *,
+        batch_id: str,
+        scrapeable_statuses: Sequence[CandidateStatus],
+    ) -> BackfillCandidateCounts:
+        del batch_id, scrapeable_statuses
+        return BackfillCandidateCounts(merged_candidate_count=0, queued_for_scrape_count=0)
 
     def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
         del batches
@@ -244,6 +264,69 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         if limit is not None:
             return candidates[:limit]
         return candidates
+
+    def count_candidates(
+        self,
+        *,
+        statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
+    ) -> int:
+        allowed_statuses = {status.value for status in statuses} if statuses is not None else None
+        candidate_path = (
+            self.paths.backfill_queue_path
+            if backfill_batch_id is not None
+            else self.paths.latest_candidates_path
+        )
+        if not candidate_path.exists():
+            return 0
+
+        count = 0
+        with open(candidate_path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if (
+                    backfill_batch_id is not None
+                    and row.get("backfill_batch_id") != backfill_batch_id
+                ):
+                    continue
+                if (
+                    allowed_statuses is not None
+                    and row.get("candidate_status") not in allowed_statuses
+                ):
+                    continue
+                count += 1
+        return count
+
+    def count_backfill_batch_candidates(
+        self,
+        *,
+        batch_id: str,
+        scrapeable_statuses: Sequence[CandidateStatus],
+    ) -> BackfillCandidateCounts:
+        scrapeable_status_values = {status.value for status in scrapeable_statuses}
+        if not self.paths.backfill_queue_path.exists():
+            return BackfillCandidateCounts(merged_candidate_count=0, queued_for_scrape_count=0)
+
+        merged_candidate_count = 0
+        queued_for_scrape_count = 0
+        with open(self.paths.backfill_queue_path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if row.get("backfill_batch_id") != batch_id:
+                    continue
+                merged_candidate_count += 1
+                if row.get("candidate_status") in scrapeable_status_values:
+                    queued_for_scrape_count += 1
+        return BackfillCandidateCounts(
+            merged_candidate_count=merged_candidate_count,
+            queued_for_scrape_count=queued_for_scrape_count,
+        )
 
     def find_candidate_by_urls(
         self,
@@ -436,6 +519,44 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
             return [PersistentCandidate.model_validate(item) for item in payload]
         return []
 
+    def count_candidates(
+        self,
+        *,
+        statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
+    ) -> int:
+        params: dict[str, str] = {"select": "candidate_id", "limit": "1"}
+        if statuses:
+            joined = ",".join(status.value for status in statuses)
+            params["candidate_status"] = f"in.({joined})"
+        if backfill_batch_id is not None:
+            params["backfill_batch_id"] = f"eq.{backfill_batch_id}"
+        response = self._request(
+            "GET",
+            self._table_names["persistent_candidates"],
+            params=params,
+            extra_headers={"Prefer": "count=exact"},
+        )
+        content_range = response.headers.get("content-range")
+        if content_range is not None and "/" in content_range:
+            return int(content_range.rsplit("/", 1)[1])
+        payload = response.json()
+        return len(payload) if isinstance(payload, list) else 0
+
+    def count_backfill_batch_candidates(
+        self,
+        *,
+        batch_id: str,
+        scrapeable_statuses: Sequence[CandidateStatus],
+    ) -> BackfillCandidateCounts:
+        return BackfillCandidateCounts(
+            merged_candidate_count=self.count_candidates(backfill_batch_id=batch_id),
+            queued_for_scrape_count=self.count_candidates(
+                statuses=scrapeable_statuses,
+                backfill_batch_id=batch_id,
+            ),
+        )
+
     def find_candidate_by_urls(
         self,
         *,
@@ -557,9 +678,11 @@ class CompositeDiscoveryPersistence(DiscoveryPersistence):
         self,
         primary: DiscoveryPersistence,
         mirrors: Sequence[DiscoveryPersistence],
+        count_source: DiscoveryPersistence | None = None,
     ) -> None:
         self.primary = primary
         self.mirrors = list(mirrors)
+        self.count_source = count_source or primary
 
     def close(self) -> None:
         self.primary.close()
@@ -598,6 +721,28 @@ class CompositeDiscoveryPersistence(DiscoveryPersistence):
             statuses=statuses,
             backfill_batch_id=backfill_batch_id,
             limit=limit,
+        )
+
+    def count_candidates(
+        self,
+        *,
+        statuses: Sequence[CandidateStatus] | None = None,
+        backfill_batch_id: str | None = None,
+    ) -> int:
+        return self.count_source.count_candidates(
+            statuses=statuses,
+            backfill_batch_id=backfill_batch_id,
+        )
+
+    def count_backfill_batch_candidates(
+        self,
+        *,
+        batch_id: str,
+        scrapeable_statuses: Sequence[CandidateStatus],
+    ) -> BackfillCandidateCounts:
+        return self.count_source.count_backfill_batch_candidates(
+            batch_id=batch_id,
+            scrapeable_statuses=scrapeable_statuses,
         )
 
     def list_backfill_batches(
@@ -666,5 +811,9 @@ def create_discovery_persistence(config: Config) -> DiscoveryPersistence:
                 "scrape_attempts": config.candidates.scrape_attempts_table,
             },
         )
-        return CompositeDiscoveryPersistence(state_store, [supabase_store])
+        return CompositeDiscoveryPersistence(
+            state_store,
+            [supabase_store],
+            count_source=supabase_store,
+        )
     return state_store

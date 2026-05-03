@@ -503,13 +503,11 @@ def _batch_candidate_counts(
     batch_id: str,
 ) -> tuple[int, int]:
     """Return merged-candidate and queued-for-scrape counts for one backfill batch."""
-    batch_candidates = persistence.list_candidates(backfill_batch_id=batch_id)
-    queued_for_scrape_count = sum(
-        1
-        for candidate in batch_candidates
-        if candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES
+    counts = persistence.count_backfill_batch_candidates(
+        batch_id=batch_id,
+        scrapeable_statuses=SCRAPEABLE_CANDIDATE_STATUSES,
     )
-    return len(batch_candidates), queued_for_scrape_count
+    return counts.merged_candidate_count, counts.queued_for_scrape_count
 
 
 def _update_backfill_batch_state(
