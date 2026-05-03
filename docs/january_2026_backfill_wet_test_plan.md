@@ -50,14 +50,15 @@ Create one timestamped follow-up root:
 ```bash
 export FOLLOWUP_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 export FOLLOWUP_ROOT="data/may_26_followup/${FOLLOWUP_ID}"
-export DENBUST_STATE_ROOT="${FOLLOWUP_ROOT}/state"
-export DENBUST_BROWSER_MODE=chrome_cdp
-export DENBUST_CHROME_CDP_URL=http://127.0.0.1:9222
 mkdir -p "${FOLLOWUP_ROOT}"/{logs,artifacts,reports,summaries}
 ```
 
 Every command should write stdout/stderr to `logs/` and machine-readable output to `artifacts/`
 where supported. Do not commit the generated `data/` bundle.
+
+Do not export the wet-test `DENBUST_STATE_ROOT` until Phase 1. Phase 0 runs tests that intentionally
+write fixture candidate state, and exporting the wet-test state root too early can pollute the
+empty-state baseline.
 
 `DENBUST_BROWSER_MODE=chrome_cdp` applies only to browser-backed source scrapers such as Mako and
 Haaretz. HTTP fallback fetching and API-backed discovery/search engines continue to use their
@@ -86,6 +87,10 @@ Stop if any static guardrail fails.
 Capture diagnostics before writing January candidates:
 
 ```bash
+export DENBUST_STATE_ROOT="${FOLLOWUP_ROOT}/state"
+export DENBUST_BROWSER_MODE=chrome_cdp
+export DENBUST_CHROME_CDP_URL=http://127.0.0.1:9222
+
 .venv/bin/denbust diagnose-discovery \
   --config agents/news/local.yaml \
   --format json \
