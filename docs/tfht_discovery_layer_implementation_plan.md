@@ -494,6 +494,13 @@ The recommended order is:
   Hebrew recall terms, and `source_zero_summary.systemic_source_zero_suspected` now counts hard
   source-zero/stale/fetch/parse failures while keyword-zero recall gaps remain visible through
   separate summary fields
+- PR #108 was squash-merged as `dea6406`; after that merge, the repo connector returned zero open
+  GitHub issues, and an isolated artifact-only diagnostic reset under
+  `data/may_26_followup/20260503T134102Z/state` showed an empty state baseline rather than a new
+  implementation defect
+- the next narrow implementation PR should be chosen only after a bounded candidate-drain evidence
+  bundle reports queue health, source-health artifact output, scrape-failure groups, and any
+  backfill status timing needed to justify the change
 - full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
   remain out of scope until a later repair PR has fresh evidence
 

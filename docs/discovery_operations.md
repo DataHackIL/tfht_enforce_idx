@@ -139,6 +139,14 @@ keyword-matching search results for `זנות` and `בית בושת`; the select
 `source_zero_summary` had zero affected sources. That closes #71/#74 as stale/duplicate Mako
 runtime hygiene unless a later Chromium-backed probe regresses.
 
+After PR #108 was squash-merged as `dea6406`, the 2026-05-03T13:41:02Z planning reset used
+`data/may_26_followup/20260503T134102Z/state` for artifact-only diagnostics. With a fresh isolated
+root, `denbust diagnose-discovery` reported no persisted candidates, scrape attempts, or
+operational records, and `denbust diagnose-sources --artifacts-only` skipped all configured sources
+because no ingest debug summary existed under that root. Treat this as a clean empty-state baseline,
+not as source-health evidence. The next evidence gate should run a bounded candidate-drain path
+before proposing more source-health, backfill, or self-healing code.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:

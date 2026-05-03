@@ -484,6 +484,12 @@ of `DL-PR-09`, which shipped in PR `#87` on 2026-04-21. That sequencing question
 closed: `C-8` shipped after the full `DL-PR-*` discovery rollout, including `DL-PR-10` and
 `DL-PR-11`.
 
+Post-#108 planning note: PR `#108` was squash-merged as `dea6406` and closed the Mako runtime
+hygiene issues #71/#74. A fresh repo-connector issue search on 2026-05-03 returned no open issues.
+The next Phase C step is therefore not another speculative implementation PR; it is a bounded
+candidate-drain evidence bundle that can identify whether the next narrow change belongs in
+source-health, backfill, or self-healing scaffolding follow-through.
+
 ---
 
 ## Ordering and dependencies

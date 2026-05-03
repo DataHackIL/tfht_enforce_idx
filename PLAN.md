@@ -26,7 +26,7 @@ This repo currently has one main plan and two important sub-plans.
 2. Read `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` when working specifically on Milestone 3 validation follow-through.
 3. Read `docs/tfht_discovery_layer_implementation_plan.md` when advancing the discovery/candidacy architecture work in the `DL-PR-*` series.
 
-## Current Next Focus: Post-Mako Runtime Hygiene Follow-Through
+## Current Next Focus: Post-#108 Phase C Evidence Gate
 
 PR `#95` added the May 2026 local experiment plan. PR `#96` hardened that plan's execution path so
 local validation data problems and Anthropic provider failures fail visibly before operators trust
@@ -78,6 +78,14 @@ Chromium-backed diagnostic path. #71/#74 are therefore closed as stale/duplicate
 hygiene; no scraper behavior, selector rewrite, retry path, or live-network-dependent test is added
 for that closure.
 
+PR `#108` was squash-merged into `main` as `dea6406` and closed #71/#74. A fresh 2026-05-03 GitHub
+issue search through the repo connector returned no open issues. The post-#108 local evidence reset
+used `data/may_26_followup/20260503T134102Z/state` and ran artifact-only diagnostics there:
+`diagnose-discovery` found no persisted candidates or scrape attempts, and `diagnose-sources
+--artifacts-only` skipped every configured source because the isolated root had no ingest debug
+summary. That is useful isolation evidence, but it does not identify a source-health, backfill, or
+self-healing code defect by itself.
+
 ### What is already in place
 
 - Candidate persistence, scrape attempts, queue state, fallback retention, and backfill jobs already
@@ -119,8 +127,10 @@ for that closure.
 
 1. Treat #71/#74 as closed stale/duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
-2. Wait for fresh bounded evidence before selecting another Mako runtime, source-health, backfill,
-   or self-healing follow-up.
+2. Produce a bounded candidate-drain evidence bundle from a fresh local or CI run before selecting
+   another source-health, backfill, or self-healing implementation PR. The bundle should include
+   discovery queue health, source-health artifact output, scrape-failure groups, and any backfill
+   status timing needed to justify the next narrow code change.
 3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
    self-heal implementation PR has fresh failure evidence.
 

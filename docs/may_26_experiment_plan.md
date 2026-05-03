@@ -42,7 +42,10 @@ next PR.
 
 ### Issue survey
 
-The repo currently has 21 issues returned by the repo-specific GitHub MCP. Seven are open.
+The original May 2026 survey found 21 issues through the repo-specific GitHub MCP, with seven open
+at that time. After PR #108 was squash-merged into `main` as `dea6406`, a fresh 2026-05-03 GitHub
+issue search returned zero open issues. The historical table below is retained as provenance for
+how the experiment selected #71/#72/#74/#88/#97 follow-ups, not as the current issue backlog.
 
 | Issue | State | Experiment treatment |
 |---|---:|---|
@@ -63,10 +66,10 @@ The repo currently has 21 issues returned by the repo-specific GitHub MCP. Seven
 | #53 Expose diagnostic-safe public probe helpers for ICE scraper | Treated | PR #96 added public ICE diagnostic helpers; close or update the issue with that evidence if it remains open. |
 | #65 Add Ynet category-page backstop for משפט ופלילים discovery | Treated | The source-recall follow-up keeps Ynet RSS primary and adds the non-browser category-page backstop with separate source-health signals. |
 | #66 Add fixture-based Ynet end-to-end regression test after web-search source exists | Converted to test | Fixture-backed coverage now protects the Ynet source-targeted taxonomy search path for the known February 12, 2026 article through candidate normalization, provenance, source-adapter materialization, and pre-classification ingest handoff. |
-| #71 Mako source completely failing due to browser navigation issues | Open | Phase C triage recommends closing as duplicate/stale Mako runtime hygiene: the 2026-05-03 Chromium-backed Mako all-source and source-specific probes passed. |
-| #72 Major Israeli news sources returning zero results | Open | Active system-level health issue. The 2026-05-03 all-source diagnostic still fired the 4-source guardrail for Ynet, Walla, Maariv, and ICE while Mako and Haaretz passed. |
-| #74 Mako source experiencing complete failure with browser navigation | Open | Phase C triage recommends closing as duplicate/stale with #71 unless a future Chromium-backed Mako probe regresses. |
-| #88 Optimize backfill batch aggregate counts in discovery persistence | Open | Active optimization, not a correctness blocker. The 2026-05-03 source-health triage did not exercise or expose batch aggregation slowness, so keep it later. |
+| #71 Mako source completely failing due to browser navigation issues | Closed | Closed by PR #108 after the 2026-05-03 Chromium-backed Mako all-source and source-specific probes passed. |
+| #72 Major Israeli news sources returning zero results | Closed | Addressed by the narrow source-native reliability follow-up that expanded Walla/ICE recall terms and separated keyword-zero from hard systemic source-zero evidence. |
+| #74 Mako source experiencing complete failure with browser navigation | Closed | Closed by PR #108 as duplicate/stale with #71 unless a future Chromium-backed Mako probe regresses. |
+| #88 Optimize backfill batch aggregate counts in discovery persistence | Closed | Addressed by PR #107, which moved aggregate candidate counts behind the discovery persistence boundary. |
 | #97 Share validation taxonomy rules between lint and finalize | Treated | The validation follow-up now routes taxonomy pair/version, legacy category compatibility, and `index_relevant` row checks through shared validation code used by both lint and reviewed-row finalize/import. |
 
 ### Initial local-state warning

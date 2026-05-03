@@ -94,6 +94,20 @@ This confirms #71/#74 are stale/duplicate Mako runtime hygiene after Chromium-ba
 No scraper behavior, selector rewrite, retry path, or live-network-dependent regression test is
 needed for their closure.
 
+## Post-#108 Planning Reset
+
+- PR #108 was squash-merged into `main` as `dea6406` and closed #71/#74.
+- A fresh 2026-05-03 GitHub issue search through the repo connector returned zero open issues.
+- Artifact-only diagnostics were rerun under
+  `data/may_26_followup/20260503T134102Z/state`:
+  - `diagnose-discovery` found no persisted candidates, scrape attempts, or operational records.
+  - `diagnose-sources --artifacts-only` skipped all six configured sources because no ingest debug
+    summary existed under the isolated state root.
+- Recommendation: do not open another implementation PR from this empty-state evidence alone. The
+  next bounded task should produce candidate-drain evidence with queue health, source-health
+  artifact output, scrape-failure groups, and backfill status timing before choosing a source-health,
+  backfill, or self-healing code change.
+
 ## Validation
 
 - `.venv/bin/python scripts/validate_agent_plan.py`
