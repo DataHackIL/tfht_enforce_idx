@@ -94,9 +94,11 @@ The first `scrape_candidates` command failed fast because the Anthropic key was 
 environment; rerunning with the local `.env.local` environment completed. The pass persisted 63
 latest candidates, recorded 30 scrape attempts, marked 30 ICE candidates as `scrape_succeeded`, and
 left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla as never scraped. It produced no
-scrape-failure groups, retry backlog, self-heal-eligible candidates, hard source-zero summary, or
-relevant classified items. Because the first pass produced scrapeable candidates, the conditional
-latest-seven-complete-UTC-days backfill window was not used.
+scrape-failure groups, retry backlog, self-heal-eligible candidates, or relevant classified items.
+`diagnose-sources --artifacts-only` was inconclusive for source health because that diagnostic path
+expects ingest debug summaries and this run produced `scrape_candidates` debug summaries. Because
+the first pass produced scrapeable candidates, the conditional latest-seven-complete-UTC-days
+backfill window was not used.
 
 Durable reset summary:
 
@@ -120,9 +122,9 @@ Candidate-drain summary:
 | Scrape-succeeded candidates | `30`, all from `ice` |
 | Never-scraped candidates | `33` across `haaretz`, `ice`, `maariv`, `mako`, and `walla` |
 | Scrape failures / retry backlog / self-heal eligible | `0` / `0` / `0` |
-| `diagnose-sources --artifacts-only` source results | six `skip` results because this path expects ingest debug summaries, while the run produced `scrape_candidates` debug summaries |
+| `diagnose-sources --artifacts-only` source results | inconclusive: six `skip` results because this path expects ingest debug summaries, while the run produced `scrape_candidates` debug summaries |
 | Conditional backfill window | not used because the first pass produced scrapeable candidates |
-| Implementation recommendation | backfill/queue reliability PR scoped to candidate-drain selection visibility or fairness |
+| Implementation recommendation | queue-drain diagnostic PR scoped to candidate selection visibility and contract validation |
 
 ### What is already in place
 
@@ -165,10 +167,10 @@ Candidate-drain summary:
 
 1. Treat #71/#74 as closed stale/duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
-2. Implement a narrow backfill/queue reliability follow-up from the candidate-drain evidence. The
-   first target should be candidate-drain selection visibility or fairness so bounded drains do not
-   silently spend the full scrape budget on one source while other configured-source candidates
-   remain pending.
+2. Implement a narrow queue-drain diagnostic follow-up from the candidate-drain evidence. The first
+   target should report candidate selection order, source mix, and budget-cap behavior so operators
+   can validate whether the current queue contract is behaving as intended before changing
+   prioritization or fairness behavior.
 3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
    self-heal implementation PR has fresh failure evidence.
 

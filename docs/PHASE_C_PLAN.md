@@ -489,9 +489,10 @@ hygiene issues #71/#74. A fresh repo-connector issue search on 2026-05-03 return
 PR `#109` was then squash-merged as `201c247`. The bounded candidate-drain evidence pass under
 `data/may_26_followup/20260503T153123Z/state` persisted 63 candidates, recorded 30 successful ICE
 scrape attempts, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never scraped, and
-produced no scrape failures, self-heal backlog, or hard source-zero summary. The next narrow Phase C
-change belongs in backfill/queue reliability and should focus on candidate-drain selection
-visibility or fairness.
+produced no scrape failures or self-heal backlog. Artifact-only source-health was inconclusive
+because the diagnostic path skipped `scrape_candidates` debug summaries. The next narrow Phase C
+change should add queue-drain diagnostics for candidate selection order, source mix, and budget-cap
+behavior before changing prioritization or fairness behavior.
 
 ---
 

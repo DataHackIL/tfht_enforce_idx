@@ -149,10 +149,12 @@ not as source-health evidence.
 After PR #109 was squash-merged as `201c247`, the 2026-05-03T15:31:23Z candidate-drain evidence
 pass used `data/may_26_followup/20260503T153123Z/state`. It persisted 63 candidates, recorded 30
 successful ICE scrape attempts, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never
-scraped, and produced no scrape failures, retry backlog, self-heal backlog, or hard source-zero
-summary. Because the first pass produced scrapeable candidates, no latest-seven-complete-UTC-days
-backfill window was added. Treat the next narrow follow-up as backfill/queue reliability work
-focused on candidate-drain selection visibility or fairness, not source-health or self-healing.
+scraped, and produced no scrape failures, retry backlog, or self-heal backlog. Artifact-only
+source-health was inconclusive because the diagnostic path skipped the `scrape_candidates` debug
+summaries. Because the first pass produced scrapeable candidates, no latest-seven-complete-UTC-days
+backfill window was added. Treat the next narrow follow-up as queue-drain diagnostic work: report
+candidate selection order, source mix, and budget-cap behavior before changing queue prioritization
+or fairness behavior.
 
 ## GitHub Actions Run Path
 

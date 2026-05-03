@@ -138,14 +138,14 @@ needed for their closure.
   producing no unified items.
 - `diagnose-sources --artifacts-only` returned six `skip` results because this diagnostic path
   looks for ingest debug summaries, while the bounded pass produced `scrape_candidates` debug
-  summaries. Its report-level `source_zero_summary` did not trigger:
-  `affected_source_count = 0`, `keyword_zero_source_count = 0`, and
-  `systemic_source_zero_suspected = false`.
+  summaries. Treat source-health artifact diagnosis as inconclusive for this run; the zero-valued
+  report-level `source_zero_summary` reflects skipped source checks, not a clean source-health pass.
 - The latest-seven-complete-UTC-days backfill window was not run because the first pass produced
   scrapeable candidates and successful scrape attempts.
 - Triage outcome: do not open a source-health reliability PR or self-healing orchestration PR from
-  this evidence. The next narrow implementation PR should be a backfill/queue reliability follow-up
-  focused on candidate-drain selection visibility or fairness.
+  this evidence alone. The next narrow implementation PR should be a queue-drain diagnostic
+  follow-up that reports candidate selection order, source mix, and budget-cap behavior before
+  changing queue prioritization or fairness behavior.
 
 Use this triage matrix for the next implementation choice:
 

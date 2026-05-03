@@ -501,9 +501,11 @@ The recommended order is:
 - PR #109 was squash-merged as `201c247`; the bounded candidate-drain evidence pass under
   `data/may_26_followup/20260503T153123Z/state` persisted 63 candidates, scraped 30 ICE candidates
   successfully, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never scraped, and
-  produced no scrape failures, self-heal backlog, or hard source-zero summary
-- the next narrow implementation PR should use that evidence for a backfill/queue reliability
-  follow-up focused on candidate-drain selection visibility or fairness
+  produced no scrape failures or self-heal backlog; artifact-only source-health was inconclusive
+  because that diagnostic path skipped `scrape_candidates` debug summaries
+- the next narrow implementation PR should use that evidence for queue-drain diagnostics that report
+  candidate selection order, source mix, and budget-cap behavior before changing prioritization or
+  fairness behavior
 - full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
   remain out of scope until a later repair PR has fresh evidence
 
