@@ -73,9 +73,10 @@ A fresh source-specific Mako follow-up on 2026-05-03T13:13:10Z used
 `data/may_26_followup/20260503T131309Z/state`, installed Chromium through Playwright first, and
 reran the same sampled Mako diagnostic probe. Mako again returned `ok`, with parsed
 keyword-matching search results for `זנות` and `בית בושת`, zero affected sources in the
-source-zero summary, and no runtime/navigation regression. #71/#74 are therefore closed as
-stale/duplicate Mako runtime hygiene; no scraper behavior, selector rewrite, retry path, or
-live-network-dependent test is added for that closure.
+source-zero summary, and no reproduction of the original runtime/navigation failures in the local
+Chromium-backed diagnostic path. #71/#74 are therefore closed as stale/duplicate Mako runtime
+hygiene; no scraper behavior, selector rewrite, retry path, or live-network-dependent test is added
+for that closure.
 
 ### What is already in place
 

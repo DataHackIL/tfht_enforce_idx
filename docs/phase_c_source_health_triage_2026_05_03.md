@@ -57,10 +57,11 @@ Affected sources: `ynet`, `walla`, `maariv`, `ice`.
 - #71: close as duplicate or stale Mako runtime hygiene unless a future Chromium-backed Mako probe
   regresses.
 - #74: close as duplicate or stale with #71 unless a future Chromium-backed Mako probe regresses.
-- #72: keep active and use as the next narrow source-native reliability follow-up because the
-  4-source guardrail still fires for Ynet, Walla, Maariv, and ICE.
-- #88: keep as later optimization; this source-health triage did not exercise or expose backfill
-  aggregate-count slowness.
+- #72: addressed by the later source-native reliability follow-up, which expanded Walla/ICE recall
+  terms and narrowed the hard source-zero guardrail so keyword-zero evidence stays visible without
+  counting as systemic source outage evidence.
+- #88: addressed by PR #107, which moved backfill aggregate candidate counts behind the discovery
+  persistence boundary.
 
 ## Mako Runtime Hygiene Follow-Up
 
