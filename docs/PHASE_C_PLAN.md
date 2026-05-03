@@ -484,15 +484,18 @@ of `DL-PR-09`, which shipped in PR `#87` on 2026-04-21. That sequencing question
 closed: `C-8` shipped after the full `DL-PR-*` discovery rollout, including `DL-PR-10` and
 `DL-PR-11`.
 
-Post-#109 planning note: PR `#108` was squash-merged as `dea6406` and closed the Mako runtime
+Post-#110 planning note: PR `#108` was squash-merged as `dea6406` and closed the Mako runtime
 hygiene issues #71/#74. A fresh repo-connector issue search on 2026-05-03 returned no open issues.
 PR `#109` was then squash-merged as `201c247`. The bounded candidate-drain evidence pass under
 `data/may_26_followup/20260503T153123Z/state` persisted 63 candidates, recorded 30 successful ICE
 scrape attempts, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never scraped, and
 produced no scrape failures or self-heal backlog. Artifact-only source-health was inconclusive
-because the diagnostic path skipped `scrape_candidates` debug summaries. The next narrow Phase C
-change should add queue-drain diagnostics for candidate selection order, source mix, and budget-cap
-behavior before changing prioritization or fairness behavior.
+because the diagnostic path skipped `scrape_candidates` debug summaries. PR `#110` was then
+squash-merged as `8c89d91` and added queue-drain diagnostics for candidate selection order,
+attempted/remaining source mix, configured candidate cap, persisted scrape-attempt count, and
+inferred stop reason without changing prioritization or fairness behavior.
+The next Phase C decision should come from another bounded candidate-drain evidence pass using those
+diagnostics.
 
 ---
 

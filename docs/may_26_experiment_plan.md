@@ -46,6 +46,9 @@ The original May 2026 survey found 21 issues through the repo-specific GitHub MC
 at that time. After PR #108 was squash-merged into `main` as `dea6406`, a fresh 2026-05-03 GitHub
 issue search returned zero open issues. The historical table below is retained as provenance for
 how the experiment selected #71/#72/#74/#88/#97 follow-ups, not as the current issue backlog.
+After PR #110 was squash-merged as `8c89d91`, the next experiment pass should use
+`diagnose-discovery` queue-drain diagnostics to distinguish budget-cap behavior from a source
+prioritization or fairness defect before changing queue ordering.
 
 | Issue | State | Experiment treatment |
 |---|---:|---|
