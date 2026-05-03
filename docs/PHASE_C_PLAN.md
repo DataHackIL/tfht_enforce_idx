@@ -484,14 +484,15 @@ of `DL-PR-09`, which shipped in PR `#87` on 2026-04-21. That sequencing question
 closed: `C-8` shipped after the full `DL-PR-*` discovery rollout, including `DL-PR-10` and
 `DL-PR-11`.
 
-Post-#108 planning note: PR `#108` was squash-merged as `dea6406` and closed the Mako runtime
+Post-#109 planning note: PR `#108` was squash-merged as `dea6406` and closed the Mako runtime
 hygiene issues #71/#74. A fresh repo-connector issue search on 2026-05-03 returned no open issues.
-The next Phase C step is therefore not another speculative implementation PR; it is a bounded
-candidate-drain evidence bundle. Run `discover`, `scrape_candidates`, `diagnose-discovery`, and
-`diagnose-sources --artifacts-only` under a fresh ignored state root, add one latest-seven-complete
-UTC days backfill window only if the first pass produces no scrapeable candidates, then use the
-triage matrix in the source-health evidence note to choose whether the next narrow change belongs in
-source-health, backfill, or self-healing scaffolding follow-through.
+PR `#109` was then squash-merged as `201c247`. The bounded candidate-drain evidence pass under
+`data/may_26_followup/20260503T153123Z/state` persisted 63 candidates, recorded 30 successful ICE
+scrape attempts, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never scraped, and
+produced no scrape failures or self-heal backlog. Artifact-only source-health was inconclusive
+because the diagnostic path skipped `scrape_candidates` debug summaries. The next narrow Phase C
+change should add queue-drain diagnostics for candidate selection order, source mix, and budget-cap
+behavior before changing prioritization or fairness behavior.
 
 ---
 

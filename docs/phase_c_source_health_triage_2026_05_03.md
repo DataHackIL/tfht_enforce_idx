@@ -116,6 +116,37 @@ needed for their closure.
   latest-seven-complete-UTC-days backfill discover/scrape window only if that first pass produces no
   scrapeable candidates.
 
+## Candidate-Drain Evidence Follow-Up
+
+- PR #109 was squash-merged into `main` as `201c247`.
+- A fresh 2026-05-03 GitHub issue check returned zero open issues.
+- Evidence root: `data/may_26_followup/20260503T153123Z/`.
+- Config: `agents/news/local.yaml`.
+- Commands run under `DENBUST_STATE_ROOT=data/may_26_followup/20260503T153123Z/state`:
+  - `discover`;
+  - `scrape_candidates`;
+  - `diagnose-discovery --format json`;
+  - `diagnose-sources --artifacts-only --format json`.
+- The first `scrape_candidates` command failed fast with `fatal: missing anthropic api key`; the
+  rerun sourced local `.env.local` variables inside the subprocess and completed.
+- `diagnose-discovery` reported 63 total candidates, 30 scrape-succeeded candidates, 33
+  never-scraped candidates, 0 scrape-failed candidates, 0 retry-backlog candidates, and 0
+  self-heal-eligible candidates.
+- The 30 scrape attempts all landed on ICE candidates; 33 candidates remained `new` /
+  `candidate_only`: 1 Haaretz, 11 ICE, 1 Maariv, 14 Mako, and 6 Walla.
+- `scrape_candidates` classified 30 unseen ICE articles and rejected all 30 as `not_relevant`,
+  producing no unified items.
+- `diagnose-sources --artifacts-only` returned six `skip` results because this diagnostic path
+  looks for ingest debug summaries, while the bounded pass produced `scrape_candidates` debug
+  summaries. Treat source-health artifact diagnosis as inconclusive for this run; the zero-valued
+  report-level `source_zero_summary` reflects skipped source checks, not a clean source-health pass.
+- The latest-seven-complete-UTC-days backfill window was not run because the first pass produced
+  scrapeable candidates and successful scrape attempts.
+- Triage outcome: do not open a source-health reliability PR or self-healing orchestration PR from
+  this evidence alone. The next narrow implementation PR should be a queue-drain diagnostic
+  follow-up that reports candidate selection order, source mix, and budget-cap behavior before
+  changing queue prioritization or fairness behavior.
+
 Use this triage matrix for the next implementation choice:
 
 | Evidence outcome | Next PR |
