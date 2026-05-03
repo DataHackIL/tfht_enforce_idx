@@ -89,9 +89,9 @@ export FOLLOWUP_ROOT="data/may_26_followup/${FOLLOWUP_ID}"
 export DENBUST_STATE_ROOT="${FOLLOWUP_ROOT}/state"
 mkdir -p "${FOLLOWUP_ROOT}"/{logs,artifacts}
 
-python -m playwright install chromium
+.venv/bin/python -m playwright install chromium
 
-denbust diagnose-sources \
+.venv/bin/denbust diagnose-sources \
   --config agents/news/local.yaml \
   --live-only \
   --sample-keyword "זנות" \
@@ -101,7 +101,7 @@ denbust diagnose-sources \
   --output "${FOLLOWUP_ROOT}/artifacts/diagnose_sources_live_all.json"
 
 for source in ynet walla mako maariv haaretz ice; do
-  denbust diagnose-sources \
+  .venv/bin/denbust diagnose-sources \
     --config agents/news/local.yaml \
     --live-only \
     --source "${source}" \
@@ -119,7 +119,8 @@ Haaretz passed, and `source_zero_summary.systemic_source_zero_suspected` stayed 
 Walla, Maariv, and ICE were affected. Operators should treat #71/#74 as duplicate or stale Mako
 runtime hygiene unless a Chromium-backed Mako probe regresses, keep #72 active for source-native
 reliability work, and leave #88 as a later optimization unless backfill aggregation is observed as a
-real bottleneck.
+real bottleneck. The durable evidence summary is checked in at
+[phase_c_source_health_triage_2026_05_03.md](phase_c_source_health_triage_2026_05_03.md).
 
 ## GitHub Actions Run Path
 

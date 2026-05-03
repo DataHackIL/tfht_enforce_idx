@@ -52,7 +52,8 @@ ICE still produced source-zero, stale-result, or keyword-zero diagnostics, so
 per-source Mako run also passed, which makes #71/#74 duplicate or stale Mako runtime hygiene rather
 than the next correctness fix. #72 remains active as the narrow source-native reliability follow-up.
 #88 remains a later persistence optimization because this diagnostic pass did not exercise or expose
-backfill aggregate-count slowness.
+backfill aggregate-count slowness. The auditable evidence summary is checked in at
+[`docs/phase_c_source_health_triage_2026_05_03.md`](docs/phase_c_source_health_triage_2026_05_03.md).
 
 ### What is already in place
 

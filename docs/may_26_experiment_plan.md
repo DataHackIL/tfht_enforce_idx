@@ -558,29 +558,35 @@ Create `reports/final_experiment_summary.md` with these sections:
 10. `Recommended Next PR`
    - one concrete next PR with labels/milestone suggestions and acceptance criteria.
 
+## Observed Phase C Source-Health Outcome
+
+The 2026-05-03 Phase C source-health triage used isolated state under
+`data/may_26_followup/20260503T074131Z/state`, installed Chromium before Mako probing, and found the
+existing diagnostics structured enough to make the issue decision without code changes. The durable
+evidence summary is checked in at
+[`phase_c_source_health_triage_2026_05_03.md`](phase_c_source_health_triage_2026_05_03.md).
+
+- Mako issues #71 and #74 are duplicates or near-duplicates unless a future Mako live probe fails
+  after `.venv/bin/python -m playwright install chromium`; the current Mako diagnostics are healthy
+  with the browser runtime installed.
+- #72 remains the central source-native reliability signal: the current evidence shows Ynet, Walla,
+  Maariv, and ICE remain affected by source-native zero/stale/keyword-zero patterns while Mako and
+  Haaretz pass, with search-backed fallback coverage now broadened for those domains.
+- #88 should stay lower priority unless bounded backfill demonstrates real local slowness.
+
 ## Likely Outcomes to Validate
 
 The experiment should not assume these are true, but these are the current hypotheses:
 
-1. The 2026-05-03 Phase C source-health triage used isolated state under
-   `data/may_26_followup/20260503T074131Z/state`, installed Chromium before Mako probing, and found
-   the existing diagnostics structured enough to make the issue decision without code changes.
-2. Mako issues #71 and #74 are duplicates or near-duplicates unless a future Mako live probe fails
-   after `python -m playwright install chromium`; the current Mako diagnostics are healthy with the
-   browser runtime installed.
-3. #72 remains the central source-native reliability signal: the current evidence shows Ynet, Walla,
-   Maariv, and ICE remain affected by source-native zero/stale/keyword-zero patterns while Mako and
-   Haaretz pass, with search-backed fallback coverage now broadened for those domains.
-4. `PLAN.md` and `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` likely need status updates after the
+1. `PLAN.md` and `docs/MILESTONE_3_VALIDATION_PR_BREAKDOWN.md` likely need status updates after the
    experiment, regardless of what implementation work comes next.
-5. #65 is treated by the Ynet category-page backstop, and #66 is converted to fixture-backed
+2. #65 is treated by the Ynet category-page backstop, and #66 is converted to fixture-backed
    coverage over the stable search-backed source-domain path.
-6. #52 and #53 appear treated by PR #96's public Maariv/ICE diagnostic helpers; close or update the
+3. #52 and #53 appear treated by PR #96's public Maariv/ICE diagnostic helpers; close or update the
    issues with that evidence if they remain open.
-7. #88 should stay lower priority unless bounded backfill demonstrates real local slowness.
-8. `DL-PR-12` provides structured scrape-failure diagnostics and self-heal eligibility hooks, but
+4. `DL-PR-12` provides structured scrape-failure diagnostics and self-heal eligibility hooks, but
    full AI repair remains future work.
-9. The repo needs a first-class experiment or live-check CLI if these checks are going to be run more
+5. The repo needs a first-class experiment or live-check CLI if these checks are going to be run more
    than once.
 
 ## Completion Criteria
