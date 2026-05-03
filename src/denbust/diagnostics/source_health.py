@@ -63,7 +63,6 @@ SOURCE_ZERO_GUARDRAIL_BUCKETS = {
     FailureBucket.FEED_FETCH_FAILED,
     FailureBucket.FEED_EMPTY_OR_STALE,
     FailureBucket.STALE_RESULTS,
-    FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS,
     FailureBucket.HTTP_FETCH_FAILED,
     FailureBucket.UNEXPECTED_REDIRECT,
     FailureBucket.SELECTOR_DRIFT_SUSPECTED,
@@ -113,7 +112,10 @@ class SourceZeroSummary(BaseModel):
     selected_source_count: int
     affected_source_count: int
     affected_sources: list[str] = Field(default_factory=list)
+    keyword_zero_source_count: int = 0
+    keyword_zero_sources: list[str] = Field(default_factory=list)
     systemic_source_zero_suspected: bool
+    systemic_keyword_zero_suspected: bool = False
 
 
 class SourceDiagnosticReport(BaseModel):
@@ -274,13 +276,20 @@ def render_source_diagnostic_report(report: SourceDiagnosticReport) -> str:
     if report.source_zero_summary is not None:
         summary = report.source_zero_summary
         sources = ", ".join(summary.affected_sources) if summary.affected_sources else "-"
+        keyword_zero_sources = (
+            ", ".join(summary.keyword_zero_sources) if summary.keyword_zero_sources else "-"
+        )
         lines.append(
             "Source-zero guardrail: "
             f"{summary.affected_source_count}/{summary.enabled_source_count} enabled affected "
             f"(threshold={summary.threshold}; "
             f"selected={summary.selected_source_count}; "
             f"systemic={str(summary.systemic_source_zero_suspected).lower()}; "
-            f"sources={sources})"
+            f"sources={sources}; "
+            f"keyword_zero={summary.keyword_zero_source_count}; "
+            f"systemic_keyword_zero="
+            f"{str(summary.systemic_keyword_zero_suspected).lower()}; "
+            f"keyword_zero_sources={keyword_zero_sources})"
         )
         lines.append("")
 
@@ -997,6 +1006,11 @@ async def _probe_ice(
     sample_keywords: list[str],
 ) -> SourceDiagnosticResult:
     cutoff = datetime.now(UTC) - timedelta(days=days)
+    supplemental_terms = [
+        term
+        for term in ice_source.effective_ice_search_terms(sample_keywords)
+        if term not in set(sample_keywords)
+    ]
     checks: list[ProbeCheck] = []
     saw_successful_page = False
     saw_results_container = False
@@ -1066,6 +1080,9 @@ async def _probe_ice(
                         "status_code": fetch_result.status_code,
                         "content_type": fetch_result.content_type,
                         "payload_length": len(fetch_result.text),
+                        "sample_keyword_count": len(sample_keywords),
+                        "supplemental_search_term_count": len(supplemental_terms),
+                        "probe_phase": "sampled_keywords",
                         "candidate_count": parsed.candidate_count,
                         "parsed_article_count": parsed.parsed_article_count,
                         "stale_candidate_count": parsed.stale_candidate_count,
@@ -1074,6 +1091,88 @@ async def _probe_ice(
                     },
                 )
             )
+
+        sampled_keyword_article_total = parsed_article_total
+        if sampled_keyword_article_total == 0:
+            for keyword in supplemental_terms:
+                page_url = ice_source.build_ice_search_url(keyword, page_number=1)
+                try:
+                    fetch_result = await _fetch_text(
+                        page_url,
+                        user_agent=ice_source.USER_AGENT,
+                        client=client,
+                    )
+                except Exception as exc:
+                    checks.append(
+                        ProbeCheck(
+                            name=f"supplemental_search:{keyword}",
+                            status=DiagnosticStatus.FAIL,
+                            summary=f"Supplemental search fetch failed: {exc}",
+                            details={
+                                "url": page_url,
+                                "probe_phase": "supplemental_fallback",
+                            },
+                        )
+                    )
+                    continue
+
+                saw_successful_page = True
+                if _is_unexpected_redirect(fetch_result.final_url, page_url):
+                    unexpected_redirect = True
+
+                parsed = ice_source.diagnose_ice_search_html(fetch_result.text, cutoff=cutoff)
+                if parsed.has_results_container:
+                    saw_results_container = True
+
+                parsed_article_total += parsed.parsed_article_count
+                stale_candidate_total += parsed.stale_candidate_count
+                if not parsed.has_results_container:
+                    status = DiagnosticStatus.FAIL
+                    summary = (
+                        "Supplemental search page did not expose the expected ICE results container"
+                    )
+                elif (
+                    parsed.parsed_article_count == 0
+                    and parsed.stale_candidate_count == parsed.candidate_count
+                    and parsed.candidate_count
+                ):
+                    status = DiagnosticStatus.WARN
+                    summary = (
+                        "Supplemental search page returned only stale candidates "
+                        "outside the cutoff window"
+                    )
+                elif parsed.parsed_article_count == 0:
+                    status = DiagnosticStatus.WARN
+                    summary = (
+                        "Supplemental search page contains candidates but parsing "
+                        "returned zero articles"
+                    )
+                else:
+                    status = DiagnosticStatus.OK
+                    summary = "Supplemental search page returned parsed articles"
+
+                checks.append(
+                    ProbeCheck(
+                        name=f"supplemental_search:{keyword}",
+                        status=status,
+                        summary=summary,
+                        details={
+                            "requested_url": page_url,
+                            "final_url": fetch_result.final_url,
+                            "status_code": fetch_result.status_code,
+                            "content_type": fetch_result.content_type,
+                            "payload_length": len(fetch_result.text),
+                            "sample_keyword_count": len(sample_keywords),
+                            "supplemental_search_term_count": len(supplemental_terms),
+                            "probe_phase": "supplemental_fallback",
+                            "candidate_count": parsed.candidate_count,
+                            "parsed_article_count": parsed.parsed_article_count,
+                            "stale_candidate_count": parsed.stale_candidate_count,
+                            "unparseable_date_count": parsed.unparseable_date_count,
+                            "has_results_container": parsed.has_results_container,
+                        },
+                    )
+                )
 
     if not saw_successful_page:
         return _live_result(
@@ -1139,6 +1238,7 @@ async def _probe_walla(
     entry_total = 0
     recent_entry_total = 0
     keyword_match_total = 0
+    effective_keywords = walla_source.effective_walla_keywords(sample_keywords)
 
     async with httpx.AsyncClient(
         timeout=30.0,
@@ -1175,7 +1275,7 @@ async def _probe_walla(
                 keyword_matches = [
                     entry
                     for entry in recent_entries
-                    if scraper._matches_keywords(entry, sample_keywords)
+                    if scraper._matches_keywords(entry, effective_keywords)
                 ]
 
                 entry_total += len(entries)
@@ -1206,6 +1306,8 @@ async def _probe_walla(
                             "status_code": fetch_result.status_code,
                             "content_type": fetch_result.content_type,
                             "payload_length": len(fetch_result.text),
+                            "sample_keyword_count": len(sample_keywords),
+                            "effective_keyword_count": len(effective_keywords),
                             "entry_count": len(entries),
                             "recent_entry_count": len(recent_entries),
                             "keyword_match_count": len(keyword_matches),
@@ -1536,6 +1638,11 @@ def _build_source_zero_summary(
         for result in results
         if result.failure_bucket in SOURCE_ZERO_GUARDRAIL_BUCKETS
     ]
+    keyword_zero_sources = [
+        result.source_name
+        for result in results
+        if result.failure_bucket is FailureBucket.KEYWORD_FILTER_ZEROED_RESULTS
+    ]
     selected_source_count = len(results)
     full_coverage = selected_source_count == enabled_source_count
     return SourceZeroSummary(
@@ -1544,7 +1651,10 @@ def _build_source_zero_summary(
         selected_source_count=selected_source_count,
         affected_source_count=len(affected_sources),
         affected_sources=affected_sources,
+        keyword_zero_source_count=len(keyword_zero_sources),
+        keyword_zero_sources=keyword_zero_sources,
         systemic_source_zero_suspected=full_coverage and len(affected_sources) >= threshold,
+        systemic_keyword_zero_suspected=full_coverage and len(keyword_zero_sources) >= threshold,
     )
 
 

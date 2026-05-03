@@ -49,6 +49,8 @@ Planned future datasets:
   search-engine recall
 - Adds source-targeted taxonomy queries for each configured news domain so search-backed discovery
   and capped historical backfill can compensate when source-native pages produce zero recent matches
+- Expands source-native recall terms for Walla archive filtering and ICE search so diagnostics and
+  discovery exercise targeted Hebrew phrases beyond the coarse operator keyword sample
 - Protects the Ynet source-targeted taxonomy search path with fixture-backed recall coverage for a
   known February 12, 2026 article, including candidate provenance and pre-classification handoff
 - Keeps Ynet RSS as the primary משפט ופלילים source while adding a non-browser category-page
@@ -347,13 +349,15 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
 - Ynet source-health diagnostics now report separate RSS and category-page checks, distinguishing
   RSS low coverage, category HTTP failure, category parse-zero, and category keyword-zero cases
 - source-health diagnostics now include a report-level `source_zero_summary` for the Phase C
-  4+ affected-source guardrail, plus Mako `failure_mode` details for missing Chromium, navigation
-  timeout, context teardown, redirect/anti-bot, selector drift, parse-zero, and stale/keyword-zero
-  outcomes
+  4+ hard affected-source guardrail, keep keyword-zero outcomes visible through separate
+  report-level counts and per-source warnings, and include Mako `failure_mode` details for missing
+  Chromium, navigation timeout, context teardown, redirect/anti-bot, selector drift, parse-zero, and
+  stale/keyword-zero outcomes
 - the 2026-05-03 Phase C source-health triage pass, run with an isolated
   `DENBUST_STATE_ROOT` and Chromium installed before Mako probing, showed Mako and Haaretz healthy
-  while the systemic 4-source guardrail still fired for Ynet, Walla, Maariv, and ICE; this keeps
-  #72 active and makes #71/#74 duplicate or stale Mako runtime hygiene unless Mako regresses again
+  while the then-current 4-source guardrail still fired for Ynet, Walla, Maariv, and ICE; the #72
+  follow-up narrows that guardrail to hard source failures and makes #71/#74 duplicate or stale Mako
+  runtime hygiene unless Mako regresses again
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable

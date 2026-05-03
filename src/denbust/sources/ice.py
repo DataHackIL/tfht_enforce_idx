@@ -23,6 +23,18 @@ ICE_BASE_URL = "https://www.ice.co.il"
 ICE_SEARCH_URL_PREFIX = f"{ICE_BASE_URL}/list/searchresult"
 MAX_SEARCH_PAGES = 5
 DEFAULT_RATE_LIMIT_DELAY_SECONDS = 1.5
+ICE_SUPPLEMENTAL_SEARCH_TERMS = [
+    "חשד לבית בושת",
+    "בית בושת אותר",
+    "חשד לזנות",
+    "שידול לזנות",
+    "סרסרות",
+    "סרסורות",
+    "סחר בנשים",
+    "סחר מיני",
+    "מכון עיסוי",
+    "מכון ליווי",
+]
 
 
 @dataclass(frozen=True)
@@ -44,6 +56,24 @@ def build_ice_search_url(keyword: str, page_number: int = 1) -> str:
     if page_number > 1:
         url = f"{url}/page-{page_number}"
     return url
+
+
+def effective_ice_search_terms(keywords: list[str]) -> list[str]:
+    """Return ICE search terms with targeted supplemental recall phrases."""
+    seen: set[str] = set()
+    values: list[str] = []
+
+    for keyword in [*keywords, *ICE_SUPPLEMENTAL_SEARCH_TERMS]:
+        candidate = " ".join(keyword.split()).strip()
+        if not candidate:
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(candidate)
+
+    return values
 
 
 def diagnose_ice_search_html(
@@ -99,6 +129,9 @@ class IceScraper(Source):
 
         articles: list[RawArticle] = []
         cutoff = datetime.now(UTC) - timedelta(days=days)
+        supplemental_terms = [
+            term for term in effective_ice_search_terms(keywords) if term not in set(keywords)
+        ]
 
         async with httpx.AsyncClient(
             timeout=30.0,
@@ -110,6 +143,11 @@ class IceScraper(Source):
             for keyword in keywords:
                 await self._rate_limit()
                 articles.extend(await self._search_keyword(keyword, cutoff))
+
+            if not articles:
+                for keyword in supplemental_terms:
+                    await self._rate_limit()
+                    articles.extend(await self._search_keyword(keyword, cutoff))
 
             self._client = None
 
