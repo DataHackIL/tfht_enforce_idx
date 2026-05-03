@@ -65,8 +65,9 @@ Planned future datasets:
   + Google CSE discovery experiments
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
-- Reports queue-drain selection order, selected and remaining eligible source mix, configured
-  candidate/scrape-attempt budget, and stop reason for bounded candidate scrape passes
+- Reports queue-drain selection order, attempted and remaining eligible source mix, configured
+  candidate cap, persisted scrape-attempt count, and inferred stop reason for bounded candidate
+  scrape passes
 - Reports self-heal-eligible candidate backlog and structured scrape-failure groups for future
   repair workflows, without running automatic AI repair or selector rewriting
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains
@@ -376,8 +377,9 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   produced no scrape failures, retry backlog, or self-heal backlog. Artifact-only source-health was
   inconclusive because that diagnostic path skipped `scrape_candidates` debug summaries
 - PR #110 was squash-merged as `8c89d91`; `diagnose-discovery` now emits `queue_drain` diagnostics
-  for bounded candidate scrape passes, including candidate order, source mix, configured cap fields,
-  and stop reason, without changing queue prioritization or fairness behavior
+  for bounded candidate scrape passes, including persisted attempted order, actual-attempt source
+  mix, remaining eligible order/source mix, configured candidate cap, persisted scrape-attempt
+  count, and inferred stop reason, without changing queue prioritization or fairness behavior
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable

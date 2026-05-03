@@ -127,12 +127,12 @@ Candidate-drain summary:
 | Implementation recommendation | addressed by PR #110 / `8c89d91`: queue-drain diagnostics scoped to candidate selection visibility and contract validation |
 
 PR `#110` was squash-merged into `main` as `8c89d91`. `denbust diagnose-discovery` now includes a
-`queue_drain` section with the configured candidate cap, matching scrape-attempt budget field,
-latest attempted candidate order inferred from persisted attempts, selected source mix, remaining
-eligible candidate order, remaining eligible source mix, and stop reason (`budget_cap_reached`,
-`no_eligible_candidates`, `no_scrape_attempts_recorded`, or `another_reason`). The implementation
-does not change candidate prioritization or fairness behavior; it only exposes enough evidence to
-validate the existing contract.
+`queue_drain` section with the configured candidate cap, persisted attempted-candidate order,
+persisted scrape-attempt count, attempted source mix derived from actual scrape attempts, remaining
+eligible candidate order, remaining eligible source mix, and inferred stop reason
+(`budget_cap_reached`, `no_eligible_candidates`, `no_scrape_attempts_recorded`, or
+`another_reason`). The implementation does not change candidate prioritization or fairness
+behavior; it only exposes enough evidence to validate the existing contract.
 
 ### What is already in place
 
@@ -142,8 +142,9 @@ validate the existing contract.
   batch candidates in the pipeline.
 - Discovery diagnostics already flow through `src/denbust/diagnostics/discovery.py` and
   `denbust diagnose-discovery`.
-- Discovery diagnostics now expose queue-drain selection order, selected/remaining source mix,
-  configured cap behavior, and stop reason for bounded `scrape_candidates` passes.
+- Discovery diagnostics now expose queue-drain selection order, attempted/remaining source mix,
+  configured candidate cap, persisted scrape-attempt count, and inferred stop reason for bounded
+  `scrape_candidates` passes.
 - Source-health diagnostics already cover selector drift, parse-zero, stale-result, and keyword-zero
   cases.
 - Source-health diagnostics include a `source_zero_summary` that flags the 4+ hard affected-source

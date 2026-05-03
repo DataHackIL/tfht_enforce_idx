@@ -144,22 +144,22 @@ needed for their closure.
   scrapeable candidates and successful scrape attempts.
 - Triage outcome: do not open a source-health reliability PR or self-healing orchestration PR from
   this evidence alone. PR #110 / `8c89d91` addresses the next narrow implementation step by adding
-  queue-drain diagnostics for candidate selection order, selected and remaining source mix,
-  configured budget fields, and stop reason before any queue prioritization or fairness behavior
-  change.
+  queue-drain diagnostics for candidate selection order, attempted and remaining source mix,
+  configured candidate cap, persisted scrape-attempt count, and inferred stop reason before any
+  queue prioritization or fairness behavior change.
 
 ## Queue-Drain Diagnostic Follow-Up
 
 - PR #110 was squash-merged into `main` as `8c89d91`.
 - `denbust diagnose-discovery` now emits a `queue_drain` section in JSON and text output.
 - The diagnostic reports:
-  - latest attempted candidate order inferred from persisted scrape attempts;
-  - source mix for attempted candidates;
+  - persisted attempted-candidate order inferred from scrape attempts;
+  - source mix for attempted candidates derived from actual scrape attempts;
   - remaining eligible candidate order under the existing queue contract;
   - source mix for remaining eligible candidates;
-  - configured candidate cap and matching scrape-attempt budget field;
-  - stop reason, including `budget_cap_reached` when a bounded pass hits the cap while eligible
-    candidates remain.
+  - configured candidate cap and persisted scrape-attempt count;
+  - inferred stop reason, including `budget_cap_reached` when persisted attempts meet the cap while
+    eligible candidates remain.
 - Candidate selection behavior is unchanged. The current contract still sorts eligible candidates
   by retry priority, due retry state/time, newest `last_seen_at`, and candidate id.
 - Next decision point: rerun a bounded candidate-drain pass with the new diagnostics. Implement

@@ -14,6 +14,7 @@ from denbust.diagnostics.discovery import (
     DiscoveryDiagnosticReport,
     _build_failure_summaries,
     _build_scrape_failure_diagnostics,
+    _candidate_source,
     _load_operational_record_urls,
     _normalize_domain,
     _read_jsonl,
@@ -261,19 +262,17 @@ def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(
     )
 
     assert report.queue_drain.max_candidate_budget == 2
-    assert report.queue_drain.max_scrape_attempt_budget == 2
-    assert report.queue_drain.latest_attempted_candidate_count == 2
-    assert report.queue_drain.latest_scrape_attempt_count == 2
+    assert report.queue_drain.persisted_attempted_candidate_count == 2
+    assert report.queue_drain.persisted_scrape_attempt_count == 2
     assert report.queue_drain.remaining_eligible_candidate_count == 2
-    assert report.queue_drain.stop_reason == "budget_cap_reached"
-    assert [item.candidate_id for item in report.queue_drain.latest_attempted_candidate_order] == [
-        "selected-ice-1",
-        "selected-ice-2",
-    ]
+    assert report.queue_drain.inferred_stop_reason == "budget_cap_reached"
+    assert [
+        item.candidate_id for item in report.queue_drain.persisted_attempted_candidate_order
+    ] == ["selected-ice-1", "selected-ice-2"]
     assert [
         item.candidate_id for item in report.queue_drain.remaining_eligible_candidate_order
     ] == ["pending-mako", "pending-haaretz"]
-    assert [item.model_dump(mode="json") for item in report.queue_drain.selected_source_mix] == [
+    assert [item.model_dump(mode="json") for item in report.queue_drain.attempted_source_mix] == [
         {"source": "ice", "candidate_count": 2}
     ]
     assert [
@@ -284,8 +283,158 @@ def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(
     ]
     rendered = render_discovery_diagnostic_report(report)
     assert "Queue drain" in rendered
-    assert "stop_reason=budget_cap_reached" in rendered
-    assert "selected_source_mix: ice=2" in rendered
+    assert "inferred_stop_reason=budget_cap_reached" in rendered
+    assert "attempted_source_mix: ice=2" in rendered
+
+
+def test_queue_drain_attempted_source_mix_uses_attempt_adapter_names(
+    tmp_path: Path,
+) -> None:
+    """Attempted source mix should prefer the source adapter that actually ran."""
+    now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
+    config = Config(store={"state_root": tmp_path}, max_articles=5)
+    candidate = _candidate(
+        "search-produced",
+        url="https://www.mako.co.il/news/article/search-produced",
+        discovered_via=["brave"],
+        status=CandidateStatus.SCRAPE_FAILED,
+        first_seen_at=now - timedelta(hours=1),
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": ["mako"]})
+    attempts = [
+        ScrapeAttempt(
+            candidate_id="search-produced",
+            started_at=now,
+            finished_at=now,
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.FAILED,
+            source_adapter_name="ynet",
+        ),
+        ScrapeAttempt(
+            candidate_id="search-produced",
+            started_at=now + timedelta(seconds=1),
+            finished_at=now + timedelta(seconds=1),
+            attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+            fetch_status=FetchStatus.FAILED,
+        ),
+    ]
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        candidates_override=[candidate],
+        attempts_override=attempts,
+        include_operational_matches=False,
+    )
+
+    assert [item.model_dump(mode="json") for item in report.queue_drain.attempted_source_mix] == [
+        {"source": "ynet", "candidate_count": 1}
+    ]
+
+
+def test_queue_drain_attempted_candidates_skip_duplicates_and_missing_candidates(
+    tmp_path: Path,
+) -> None:
+    """Persisted attempted order should count each known candidate once."""
+    now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
+    config = Config(store={"state_root": tmp_path}, max_articles=5)
+    candidate = _candidate(
+        "known",
+        url="https://www.walla.co.il/news/article/known",
+        discovered_via=["walla"],
+        status=CandidateStatus.SCRAPE_SUCCEEDED,
+        first_seen_at=now - timedelta(hours=1),
+        last_seen_at=now,
+    )
+    attempts = [
+        ScrapeAttempt(
+            candidate_id="known",
+            started_at=now,
+            finished_at=now,
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.SUCCESS,
+            source_adapter_name="walla",
+        ),
+        ScrapeAttempt(
+            candidate_id="known",
+            started_at=now + timedelta(seconds=1),
+            finished_at=now + timedelta(seconds=1),
+            attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+            fetch_status=FetchStatus.SUCCESS,
+        ),
+        ScrapeAttempt(
+            candidate_id="missing",
+            started_at=now + timedelta(seconds=2),
+            finished_at=now + timedelta(seconds=2),
+            attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            fetch_status=FetchStatus.SUCCESS,
+            source_adapter_name="mako",
+        ),
+    ]
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        candidates_override=[candidate],
+        attempts_override=attempts,
+        include_operational_matches=False,
+    )
+
+    assert report.queue_drain.persisted_attempted_candidate_count == 1
+    assert [
+        item.candidate_id for item in report.queue_drain.persisted_attempted_candidate_order
+    ] == ["known"]
+
+
+def test_candidate_source_falls_back_to_non_search_producer_then_domain() -> None:
+    """Candidate-source inference should cover non-search producers and domain fallback."""
+    now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
+    source_native = _candidate(
+        "source-native",
+        url="https://example.com/source-native",
+        discovered_via=["source_native"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
+    domain_only = _candidate(
+        "domain-only",
+        url="https://example.com/domain-only",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
+
+    assert _candidate_source(source_native) == "source_native"
+    assert _candidate_source(domain_only) == "example.com"
+
+
+def test_render_discovery_diagnostic_report_caps_queue_order_text(tmp_path: Path) -> None:
+    """Text diagnostics should summarize long orders without dumping the whole queue."""
+    now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
+    config = Config(store={"state_root": tmp_path}, max_articles=5)
+    candidates = [
+        _candidate(
+            f"pending-{index:02d}",
+            url=f"https://www.mako.co.il/news/article/pending-{index:02d}",
+            discovered_via=["mako"],
+            status=CandidateStatus.NEW,
+            first_seen_at=now - timedelta(hours=1),
+            last_seen_at=now - timedelta(minutes=index),
+        )
+        for index in range(12)
+    ]
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        candidates_override=candidates,
+        attempts_override=[],
+        include_operational_matches=False,
+    )
+    rendered = render_discovery_diagnostic_report(report)
+
+    assert "remaining_eligible_order: showing first 10 of 12" in rendered
+    assert "pending-00" in rendered
+    assert "pending-10" not in rendered
 
 
 def test_persist_discovery_diagnostic_artifacts_writes_latest_files(tmp_path: Path) -> None:

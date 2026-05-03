@@ -491,8 +491,9 @@ PR `#109` was then squash-merged as `201c247`. The bounded candidate-drain evide
 scrape attempts, left 33 candidates from Haaretz, ICE, Maariv, Mako, and Walla never scraped, and
 produced no scrape failures or self-heal backlog. Artifact-only source-health was inconclusive
 because the diagnostic path skipped `scrape_candidates` debug summaries. PR `#110` was then
-squash-merged as `8c89d91` and added queue-drain diagnostics for candidate selection order, source
-mix, configured cap behavior, and stop reason without changing prioritization or fairness behavior.
+squash-merged as `8c89d91` and added queue-drain diagnostics for candidate selection order,
+attempted/remaining source mix, configured candidate cap, persisted scrape-attempt count, and
+inferred stop reason without changing prioritization or fairness behavior.
 The next Phase C decision should come from another bounded candidate-drain evidence pass using those
 diagnostics.
 

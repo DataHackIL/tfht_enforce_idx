@@ -504,8 +504,9 @@ The recommended order is:
   produced no scrape failures or self-heal backlog; artifact-only source-health was inconclusive
   because that diagnostic path skipped `scrape_candidates` debug summaries
 - PR #110 was squash-merged as `8c89d91`; discovery diagnostics now report bounded queue-drain
-  selection order, selected and remaining source mix, configured cap behavior, and stop reason
-  without changing prioritization or fairness behavior
+  selection order, attempted and remaining source mix, configured candidate cap, persisted
+  scrape-attempt count, and inferred stop reason without changing prioritization or fairness
+  behavior
 - the next decision point is another bounded candidate-drain evidence pass using those diagnostics;
   prioritize or rebalance the queue only if that evidence shows the current contract is wrong or
   insufficient

@@ -45,6 +45,7 @@ _STALE_CANDIDATE_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.PARTIALLY_SCRAPED,
     CandidateStatus.UNSUPPORTED_SOURCE,
 )
+_QUEUE_DRAIN_TEXT_ORDER_LIMIT = 10
 
 
 class EngineOverlapMetrics(BaseModel):
@@ -176,14 +177,13 @@ class QueueDrainDiagnostics(BaseModel):
     """Selection-order, source-mix, and budget-cap diagnostics for bounded drains."""
 
     max_candidate_budget: int
-    max_scrape_attempt_budget: int
-    latest_attempted_candidate_count: int = 0
-    latest_scrape_attempt_count: int = 0
+    persisted_attempted_candidate_count: int = 0
+    persisted_scrape_attempt_count: int = 0
     remaining_eligible_candidate_count: int = 0
-    stop_reason: str = "no_eligible_candidates"
-    latest_attempted_candidate_order: list[QueueDrainCandidate] = Field(default_factory=list)
+    inferred_stop_reason: str = "no_eligible_candidates"
+    persisted_attempted_candidate_order: list[QueueDrainCandidate] = Field(default_factory=list)
     remaining_eligible_candidate_order: list[QueueDrainCandidate] = Field(default_factory=list)
-    selected_source_mix: list[SourceMixEntry] = Field(default_factory=list)
+    attempted_source_mix: list[SourceMixEntry] = Field(default_factory=list)
     remaining_eligible_source_mix: list[SourceMixEntry] = Field(default_factory=list)
 
 
@@ -233,10 +233,7 @@ class DiscoveryDiagnosticReport(BaseModel):
     top_failure_codes: list[FailureSummary] = Field(default_factory=list)
     scrape_failure_diagnostics: list[ScrapeFailureDiagnostic] = Field(default_factory=list)
     queue_drain: QueueDrainDiagnostics = Field(
-        default_factory=lambda: QueueDrainDiagnostics(
-            max_candidate_budget=0,
-            max_scrape_attempt_budget=0,
-        )
+        default_factory=lambda: QueueDrainDiagnostics(max_candidate_budget=0)
     )
     source_suggestions: SourceSuggestionReport = Field(default_factory=SourceSuggestionReport)
 
@@ -468,17 +465,16 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
     lines.append("Queue drain")
     lines.append(
         "  max_candidates={max_candidate_budget} "
-        "max_scrape_attempt_budget={max_scrape_attempt_budget} "
-        "latest_attempted_candidates={latest_attempted_candidate_count} "
-        "latest_scrape_attempts={latest_scrape_attempt_count} "
+        "persisted_attempted_candidates={persisted_attempted_candidate_count} "
+        "persisted_scrape_attempts={persisted_scrape_attempt_count} "
         "remaining_eligible={remaining_eligible_candidate_count} "
-        "stop_reason={stop_reason}".format(**drain.model_dump(mode="json"))
+        "inferred_stop_reason={inferred_stop_reason}".format(**drain.model_dump(mode="json"))
     )
-    if drain.selected_source_mix:
+    if drain.attempted_source_mix:
         lines.append(
-            "  selected_source_mix: "
+            "  attempted_source_mix: "
             + ", ".join(
-                f"{entry.source}={entry.candidate_count}" for entry in drain.selected_source_mix
+                f"{entry.source}={entry.candidate_count}" for entry in drain.attempted_source_mix
             )
         )
     if drain.remaining_eligible_source_mix:
@@ -489,20 +485,20 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
                 for entry in drain.remaining_eligible_source_mix
             )
         )
-    if drain.latest_attempted_candidate_order:
-        lines.append("  latest_attempted_order:")
-        for candidate in drain.latest_attempted_candidate_order:
-            lines.append(
-                "    {position}. {candidate_id} source={source} status={status} "
-                "priority={retry_priority}".format(**candidate.model_dump(mode="json"))
-            )
+    if drain.persisted_attempted_candidate_order:
+        _append_queue_drain_order_lines(
+            lines,
+            label="persisted_attempted_order",
+            candidates=drain.persisted_attempted_candidate_order,
+            total_count=drain.persisted_attempted_candidate_count,
+        )
     if drain.remaining_eligible_candidate_order:
-        lines.append("  remaining_eligible_order:")
-        for candidate in drain.remaining_eligible_candidate_order:
-            lines.append(
-                "    {position}. {candidate_id} source={source} status={status} "
-                "priority={retry_priority}".format(**candidate.model_dump(mode="json"))
-            )
+        _append_queue_drain_order_lines(
+            lines,
+            label="remaining_eligible_order",
+            candidates=drain.remaining_eligible_candidate_order,
+            total_count=drain.remaining_eligible_candidate_count,
+        )
     if report.source_suggestions.suggestions:
         lines.append("")
         lines.append("Source suggestions")
@@ -517,6 +513,23 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
         lines.append("Notes")
         lines.extend(f"  - {note}" for note in report.notes)
     return "\n".join(lines)
+
+
+def _append_queue_drain_order_lines(
+    lines: list[str],
+    *,
+    label: str,
+    candidates: list[QueueDrainCandidate],
+    total_count: int,
+) -> None:
+    shown = candidates[:_QUEUE_DRAIN_TEXT_ORDER_LIMIT]
+    suffix = f" showing first {len(shown)} of {total_count}" if total_count > len(shown) else ""
+    lines.append(f"  {label}:{suffix}")
+    for candidate in shown:
+        lines.append(
+            "    {position}. {candidate_id} source={source} status={status} "
+            "priority={retry_priority}".format(**candidate.model_dump(mode="json"))
+        )
 
 
 def _read_jsonl(
@@ -871,6 +884,27 @@ def _source_mix(candidates: list[PersistentCandidate]) -> list[SourceMixEntry]:
     ]
 
 
+def _attempted_source_mix(
+    candidates: list[PersistentCandidate],
+    attempts: list[ScrapeAttempt],
+) -> list[SourceMixEntry]:
+    candidate_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    source_by_candidate_id: dict[str, str] = {}
+    for attempt in sorted(attempts, key=lambda item: (item.started_at, item.attempt_id)):
+        if attempt.candidate_id not in candidate_by_id:
+            continue
+        if attempt.source_adapter_name is None and attempt.candidate_id in source_by_candidate_id:
+            continue
+        source_by_candidate_id[attempt.candidate_id] = (
+            attempt.source_adapter_name or _candidate_source(candidate_by_id[attempt.candidate_id])
+        )
+    counts = Counter(source_by_candidate_id.values())
+    return [
+        SourceMixEntry(source=source, candidate_count=count)
+        for source, count in sorted(counts.items())
+    ]
+
+
 def _queue_drain_candidate(
     candidate: PersistentCandidate,
     *,
@@ -888,7 +922,7 @@ def _queue_drain_candidate(
     )
 
 
-def _latest_attempted_candidates(
+def _persisted_attempted_candidates(
     candidates: list[PersistentCandidate],
     attempts: list[ScrapeAttempt],
 ) -> list[PersistentCandidate]:
@@ -916,19 +950,19 @@ def _latest_attempted_candidates(
 
 def _queue_drain_stop_reason(
     *,
-    latest_attempted_candidate_count: int,
+    persisted_attempted_candidate_count: int,
     remaining_eligible_candidate_count: int,
     max_candidate_budget: int,
 ) -> str:
     if (
         max_candidate_budget > 0
-        and latest_attempted_candidate_count >= max_candidate_budget
+        and persisted_attempted_candidate_count >= max_candidate_budget
         and remaining_eligible_candidate_count > 0
     ):
         return "budget_cap_reached"
     if remaining_eligible_candidate_count == 0:
         return "no_eligible_candidates"
-    if latest_attempted_candidate_count == 0:
+    if persisted_attempted_candidate_count == 0:
         return "no_scrape_attempts_recorded"
     return "another_reason"
 
@@ -946,28 +980,27 @@ def _build_queue_drain_diagnostics(
         if candidate.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES
     ]
     remaining_eligible = order_scrape_eligible_candidates(eligible_candidates, now=now)
-    latest_attempted = _latest_attempted_candidates(candidates, attempts)
+    persisted_attempted = _persisted_attempted_candidates(candidates, attempts)
     max_candidate_budget = config.max_articles
     return QueueDrainDiagnostics(
         max_candidate_budget=max_candidate_budget,
-        max_scrape_attempt_budget=max_candidate_budget,
-        latest_attempted_candidate_count=len(latest_attempted),
-        latest_scrape_attempt_count=len(attempts),
+        persisted_attempted_candidate_count=len(persisted_attempted),
+        persisted_scrape_attempt_count=len(attempts),
         remaining_eligible_candidate_count=len(remaining_eligible),
-        stop_reason=_queue_drain_stop_reason(
-            latest_attempted_candidate_count=len(latest_attempted),
+        inferred_stop_reason=_queue_drain_stop_reason(
+            persisted_attempted_candidate_count=len(persisted_attempted),
             remaining_eligible_candidate_count=len(remaining_eligible),
             max_candidate_budget=max_candidate_budget,
         ),
-        latest_attempted_candidate_order=[
+        persisted_attempted_candidate_order=[
             _queue_drain_candidate(candidate, position=index)
-            for index, candidate in enumerate(latest_attempted, start=1)
+            for index, candidate in enumerate(persisted_attempted, start=1)
         ],
         remaining_eligible_candidate_order=[
             _queue_drain_candidate(candidate, position=index)
             for index, candidate in enumerate(remaining_eligible, start=1)
         ],
-        selected_source_mix=_source_mix(latest_attempted),
+        attempted_source_mix=_attempted_source_mix(candidates, attempts),
         remaining_eligible_source_mix=_source_mix(remaining_eligible),
     )
 

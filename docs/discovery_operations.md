@@ -156,10 +156,10 @@ backfill window was added.
 
 After PR #110 was squash-merged as `8c89d91`, `denbust diagnose-discovery` reports bounded
 queue-drain diagnostics in its JSON and text output. The `queue_drain` section includes the
-configured candidate cap, matching scrape-attempt budget field, latest attempted candidate order,
-selected source mix, remaining eligible candidate order, remaining eligible source mix, and the
-inferred stop reason. Use those fields in the next bounded candidate-drain evidence pass before
-changing queue prioritization or fairness behavior.
+configured candidate cap, persisted attempted-candidate order, persisted scrape-attempt count,
+attempted source mix derived from actual scrape attempts, remaining eligible candidate order,
+remaining eligible source mix, and the inferred stop reason. Use those fields in the next bounded
+candidate-drain evidence pass before changing queue prioritization or fairness behavior.
 
 ## GitHub Actions Run Path
 
