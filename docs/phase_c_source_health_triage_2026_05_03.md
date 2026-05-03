@@ -6,15 +6,14 @@ Raw live diagnostic artifacts were generated under ignored `data/` paths and are
 ## Run Context
 
 - Timestamp: `2026-05-03T07:41:32.027408Z`
-- Branch: `codex/phase-c-source-health-triage`
 - Config: `agents/news/local.yaml`
 - Isolated state root: `data/may_26_followup/20260503T074131Z/state`
-- Browser setup: `.venv/bin/python -m playwright install chromium`
+- Browser setup: `python -m playwright install chromium`
 - All-source diagnostic command:
 
 ```bash
 DENBUST_STATE_ROOT="data/may_26_followup/20260503T074131Z/state" \
-.venv/bin/denbust diagnose-sources \
+denbust diagnose-sources \
   --config agents/news/local.yaml \
   --live-only \
   --sample-keyword "זנות" \
@@ -23,6 +22,9 @@ DENBUST_STATE_ROOT="data/may_26_followup/20260503T074131Z/state" \
   --format json \
   --output "data/may_26_followup/20260503T074131Z/artifacts/diagnose_sources_live_all.json"
 ```
+
+In the local shell used for this run, commands were invoked through `.venv/bin/...` because bare
+`python` was not on `PATH`. The portable commands above assume the project environment is activated.
 
 Source-specific diagnostics used the same state root and sample keywords with repeated
 `--source <source>` runs for `ynet`, `walla`, `mako`, `maariv`, `haaretz`, and `ice`.

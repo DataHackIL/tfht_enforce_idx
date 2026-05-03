@@ -80,8 +80,8 @@ denbust live-check \
 Generated `data/may_26_followup/` bundles are local experiment artifacts and should remain
 untracked.
 
-For Phase C source-health triage, install Chromium before probing Mako and isolate state under a
-fresh ignored follow-up root:
+For Phase C source-health triage, activate the project environment, install Chromium before probing
+Mako, and isolate state under a fresh ignored follow-up root:
 
 ```bash
 export FOLLOWUP_ID="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -89,9 +89,9 @@ export FOLLOWUP_ROOT="data/may_26_followup/${FOLLOWUP_ID}"
 export DENBUST_STATE_ROOT="${FOLLOWUP_ROOT}/state"
 mkdir -p "${FOLLOWUP_ROOT}"/{logs,artifacts}
 
-.venv/bin/python -m playwright install chromium
+python -m playwright install chromium
 
-.venv/bin/denbust diagnose-sources \
+denbust diagnose-sources \
   --config agents/news/local.yaml \
   --live-only \
   --sample-keyword "זנות" \
@@ -101,7 +101,7 @@ mkdir -p "${FOLLOWUP_ROOT}"/{logs,artifacts}
   --output "${FOLLOWUP_ROOT}/artifacts/diagnose_sources_live_all.json"
 
 for source in ynet walla mako maariv haaretz ice; do
-  .venv/bin/denbust diagnose-sources \
+  denbust diagnose-sources \
     --config agents/news/local.yaml \
     --live-only \
     --source "${source}" \
@@ -112,6 +112,9 @@ for source in ynet walla mako maariv haaretz ice; do
     --output "${FOLLOWUP_ROOT}/artifacts/diagnose_sources_live_${source}.json"
 done
 ```
+
+If the project environment is not activated but the repo-local `.venv` exists, prefix the commands
+with `.venv/bin/`.
 
 The 2026-05-03 triage run used this shape under
 `data/may_26_followup/20260503T074131Z/`. Mako passed in both all-source and source-specific runs,
