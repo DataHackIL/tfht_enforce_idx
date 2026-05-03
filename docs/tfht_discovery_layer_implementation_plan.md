@@ -498,9 +498,11 @@ The recommended order is:
   GitHub issues, and an isolated artifact-only diagnostic reset under
   `data/may_26_followup/20260503T134102Z/state` showed an empty state baseline rather than a new
   implementation defect
-- the next narrow implementation PR should be chosen only after a bounded candidate-drain evidence
-  bundle reports queue health, source-health artifact output, scrape-failure groups, and any
-  backfill status timing needed to justify the change
+- the next narrow implementation PR should be chosen only after `discover`, `scrape_candidates`,
+  `diagnose-discovery`, and `diagnose-sources --artifacts-only` produce a bounded candidate-drain
+  bundle under a fresh ignored state root; add one latest-seven-complete-UTC-days backfill window
+  only if the first pass produces no scrapeable candidates, then use the triage matrix in the Phase
+  C evidence note to justify the change
 - full AI repair, selector rewriting, automatic source creation, and live-network-dependent CI tests
   remain out of scope until a later repair PR has fresh evidence
 

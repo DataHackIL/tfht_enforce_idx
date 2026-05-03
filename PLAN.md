@@ -86,6 +86,17 @@ used `data/may_26_followup/20260503T134102Z/state` and ran artifact-only diagnos
 summary. That is useful isolation evidence, but it does not identify a source-health, backfill, or
 self-healing code defect by itself.
 
+Durable reset summary:
+
+| Signal | Value |
+|---|---|
+| Open GitHub issues | `0` from repo-connector search |
+| `diagnose-discovery` candidate files | absent under the isolated state root |
+| `diagnose-discovery` queue health | all candidate counts `0` |
+| `diagnose-discovery` scrape failures | no failure groups |
+| `diagnose-sources --artifacts-only` source results | six `skip` results because no ingest debug summary exists |
+| Implementation recommendation | no code PR from empty-state evidence alone |
+
 ### What is already in place
 
 - Candidate persistence, scrape attempts, queue state, fallback retention, and backfill jobs already
@@ -128,9 +139,13 @@ self-healing code defect by itself.
 1. Treat #71/#74 as closed stale/duplicate Mako runtime/navigation diagnostic hygiene unless a
    future live Mako run fails after Chromium is installed.
 2. Produce a bounded candidate-drain evidence bundle from a fresh local or CI run before selecting
-   another source-health, backfill, or self-healing implementation PR. The bundle should include
-   discovery queue health, source-health artifact output, scrape-failure groups, and any backfill
-   status timing needed to justify the next narrow code change.
+   another source-health, backfill, or self-healing implementation PR. The required first pass is:
+   `discover`, `scrape_candidates`, `diagnose-discovery`, and
+   `diagnose-sources --artifacts-only` under `data/may_26_followup/<timestamp>/state` against all
+   sources in `agents/news/local.yaml`. Add one latest-seven-complete-UTC-days backfill
+   discover/scrape window only if the first pass produces no scrapeable candidates. Summarize the
+   bundle in `reports/candidate_drain_summary.md` with queue-health counts, source-health artifact
+   results, scrape-failure groups, optional backfill timing, and a triage-matrix outcome.
 3. Keep full AI repair, selector rewriting, and automatic source creation out of scope until a later
    self-heal implementation PR has fresh failure evidence.
 

@@ -366,9 +366,10 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   `data/may_26_followup/20260503T131309Z/state`; Mako again returned `ok`, so #71/#74 are closed as
   stale/duplicate runtime hygiene without changing scraper behavior
 - PR #108 was squash-merged as `dea6406` and left no open GitHub issue backlog; the next Phase C
-  step is a bounded candidate-drain evidence bundle, because the fresh artifact-only reset under
-  `data/may_26_followup/20260503T134102Z/state` correctly showed an empty isolated diagnostics
-  baseline rather than a new code defect
+  step is a bounded candidate-drain evidence bundle using `discover`, `scrape_candidates`,
+  `diagnose-discovery`, and `diagnose-sources --artifacts-only`, because the fresh artifact-only
+  reset under `data/may_26_followup/20260503T134102Z/state` correctly showed an empty isolated
+  diagnostics baseline rather than a new code defect
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable
