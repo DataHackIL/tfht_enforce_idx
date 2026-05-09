@@ -4,7 +4,7 @@
 
 ## Repo Rules
 
-- Use the repo-specific GitHub MCP when available; use local `git` only if no MCP for this repo is exposed.
+- Use standard `git` and `gh` CLI first for repository and GitHub work; use git/GitHub MCP tools only for CLI gaps, unavailable CLI, or explicit user request.
 - Do not commit secrets, tokens, browser state, or personal config.
 - Keep `LOCAL_AGENTS.md` untracked; treat it as additive only.
 - Prefer editing checked-in agent context in `AGENTS.md`, `llms.txt`, and `.agent-plan.md`; do not move dynamic state back into `AGENTS.md`.
@@ -19,7 +19,7 @@
 - Opened PRs should include a detailed description that is ready for human review, not just a placeholder body.
 - The required PR closeout state is: branch pushed, non-draft PR open against `main`, detailed description present, appropriate labels applied, and a GitHub milestone assigned.
 - When opening a PR, apply appropriate GitHub labels for the workstream or tracked plan item and assign the PR to the relevant GitHub milestone.
-- Create missing labels or milestones when needed, preferring the repo-specific GitHub MCP over CLI fallbacks for those actions.
+- Create missing labels or milestones when needed, using `gh` first and git/GitHub MCP tools only for CLI gaps, unavailable CLI, or explicit user request.
 - When a PR is opened against a tracked plan item, update `.agent-plan.md`, `README.md`, and any relevant human-facing plan document in that same PR so they reflect the expected post-merge state.
 - `.agent-plan.md` must be written as mainline truth: on a feature branch it is a forward-looking merge contract, and on `main` the same text must read as present-tense fact after merge.
 - `.agent-plan.md` must keep these headings exactly:
