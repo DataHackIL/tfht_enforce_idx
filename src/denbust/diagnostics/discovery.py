@@ -17,6 +17,7 @@ from denbust.discovery.models import (
     FetchStatus,
     PersistentCandidate,
     ScrapeAttempt,
+    ScrapeAttemptKind,
 )
 from denbust.discovery.queries import enabled_source_domains
 from denbust.discovery.scrape_queue import (
@@ -26,6 +27,7 @@ from denbust.discovery.scrape_queue import (
 from denbust.discovery.state_paths import write_metrics_snapshot
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.ops.factory import create_operational_store
+from denbust.taxonomy import default_taxonomy
 
 _SEARCH_ENGINE_NAMES: tuple[str, ...] = ("brave", "exa", "google_cse")
 _SOURCE_SUGGESTION_EXCLUDED_DOMAINS: frozenset[str] = frozenset({"facebook.com"})
@@ -188,6 +190,41 @@ class QueueDrainDiagnostics(BaseModel):
     remaining_eligible_source_mix: list[SourceMixEntry] = Field(default_factory=list)
 
 
+class ClassifierWarningSignals(BaseModel):
+    """Classifier-related conversion signals visible from persisted operational rows."""
+
+    candidate_fallback_record_count: int = 0
+    partial_page_fallback_record_count: int = 0
+    search_result_only_fallback_record_count: int = 0
+    fallback_record_without_taxonomy_count: int = 0
+    partial_page_fallback_without_taxonomy_count: int = 0
+    low_confidence_fallback_record_count: int = 0
+    invalid_taxonomy_pair_record_count: int = 0
+
+
+class PartialPageDiagnostics(BaseModel):
+    """Detailed partial-page interpretation for candidate conversion diagnostics."""
+
+    partial_candidate_count: int = 0
+    retained_operational_record_candidate_count: int = 0
+    retained_operational_record_count: int = 0
+    metadata_only_partial_candidate_count: int = 0
+    search_result_only_candidate_count: int = 0
+    generic_fetch_partial_candidate_count: int = 0
+    source_adapter_partial_candidate_count: int = 0
+    blocked_generic_fetch_candidate_count: int = 0
+    failed_generic_fetch_candidate_count: int = 0
+    timeout_generic_fetch_candidate_count: int = 0
+    partial_candidates_by_domain: list[FailureSummary] = Field(default_factory=list)
+    partial_candidates_by_source: list[FailureSummary] = Field(default_factory=list)
+    partial_attempts_by_kind: list[FailureSummary] = Field(default_factory=list)
+    partial_attempts_by_source_adapter: list[FailureSummary] = Field(default_factory=list)
+    generic_fetch_error_code_counts: list[FailureSummary] = Field(default_factory=list)
+    classifier_warning_signals: ClassifierWarningSignals = Field(
+        default_factory=ClassifierWarningSignals
+    )
+
+
 class SourceSuggestion(BaseModel):
     """Advisory suggestion for a candidate-heavy unseen domain."""
 
@@ -236,6 +273,7 @@ class DiscoveryDiagnosticReport(BaseModel):
     queue_drain: QueueDrainDiagnostics = Field(
         default_factory=lambda: QueueDrainDiagnostics(max_candidate_budget=0)
     )
+    partial_page_diagnostics: PartialPageDiagnostics = Field(default_factory=PartialPageDiagnostics)
     source_suggestions: SourceSuggestionReport = Field(default_factory=SourceSuggestionReport)
 
 
@@ -283,9 +321,11 @@ def build_discovery_diagnostic_report(
     provenance = _read_jsonl(paths.candidate_provenance_path, CandidateProvenance)
     now = datetime.now(UTC)
     operational_urls: set[str] = set()
+    operational_rows: list[dict[str, Any]] = []
     operational_notes: list[str] = []
     if include_operational_matches:
-        operational_urls, operational_notes = _load_operational_record_urls(config)
+        operational_rows, operational_notes = _load_operational_records(config)
+        operational_urls = _operational_record_urls(operational_rows)
     elif config.operational.provider is not OperationalProvider.NONE:
         operational_notes.append(
             "Operational record matching was skipped for this diagnostics artifact."
@@ -317,6 +357,12 @@ def build_discovery_diagnostic_report(
             candidates=candidates,
             attempts=attempts,
             now=now,
+        ),
+        partial_page_diagnostics=_build_partial_page_diagnostics(
+            candidates=candidates,
+            attempts=attempts,
+            operational_rows=operational_rows,
+            operational_urls=operational_urls,
         ),
         source_suggestions=_build_source_suggestion_report(
             config=config,
@@ -507,6 +553,60 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
             label="remaining_eligible_order",
             candidates=drain.remaining_eligible_candidate_order,
             total_count=drain.remaining_eligible_candidate_count,
+        )
+    partials = report.partial_page_diagnostics
+    lines.append("")
+    lines.append("Partial pages")
+    lines.append(
+        "  partial_candidates={partial_candidate_count} "
+        "retained_operational_candidate_matches={retained_operational_record_candidate_count} "
+        "retained_operational_records={retained_operational_record_count} "
+        "metadata_only_partial_candidates={metadata_only_partial_candidate_count} "
+        "search_result_only_candidates={search_result_only_candidate_count}".format(
+            **partials.model_dump(mode="json")
+        )
+    )
+    lines.append(
+        "  generic_partial_candidates={generic_fetch_partial_candidate_count} "
+        "source_adapter_partial_candidates={source_adapter_partial_candidate_count} "
+        "blocked_generic_fetch_candidates={blocked_generic_fetch_candidate_count} "
+        "failed_generic_fetch_candidates={failed_generic_fetch_candidate_count} "
+        "timeout_generic_fetch_candidates={timeout_generic_fetch_candidate_count}".format(
+            **partials.model_dump(mode="json")
+        )
+    )
+    if partials.partial_candidates_by_domain:
+        lines.append(
+            "  partial_domains: "
+            + ", ".join(
+                f"{item.name}={item.count}" for item in partials.partial_candidates_by_domain
+            )
+        )
+    if partials.partial_candidates_by_source:
+        lines.append(
+            "  partial_sources: "
+            + ", ".join(
+                f"{item.name}={item.count}" for item in partials.partial_candidates_by_source
+            )
+        )
+    if partials.generic_fetch_error_code_counts:
+        lines.append(
+            "  generic_fetch_errors: "
+            + ", ".join(
+                f"{item.name}={item.count}" for item in partials.generic_fetch_error_code_counts
+            )
+        )
+    classifier = partials.classifier_warning_signals
+    if classifier.candidate_fallback_record_count:
+        lines.append(
+            "  classifier_signals candidate_fallback_records={candidate_fallback_record_count} "
+            "partial_fallback_records={partial_page_fallback_record_count} "
+            "fallback_without_taxonomy={fallback_record_without_taxonomy_count} "
+            "partial_without_taxonomy={partial_page_fallback_without_taxonomy_count} "
+            "low_confidence_fallback={low_confidence_fallback_record_count} "
+            "invalid_taxonomy_pairs={invalid_taxonomy_pair_record_count}".format(
+                **classifier.model_dump(mode="json")
+            )
         )
     if report.source_suggestions.suggestions:
         lines.append("")
@@ -714,24 +814,32 @@ def _candidate_identity_urls(candidate: PersistentCandidate) -> set[str]:
 
 
 def _load_operational_record_urls(config: Config) -> tuple[set[str], list[str]]:
+    rows, notes = _load_operational_records(config)
+    return _operational_record_urls(rows), notes
+
+
+def _load_operational_records(config: Config) -> tuple[list[dict[str, Any]], list[str]]:
     notes: list[str] = []
     try:
         store = create_operational_store(config)
     except Exception as exc:
-        return set(), [f"Operational store unavailable: {type(exc).__name__}: {exc}"]
+        return [], [f"Operational store unavailable: {type(exc).__name__}: {exc}"]
 
     try:
         rows = store.fetch_records(config.dataset_name.value)
     except Exception as exc:
         notes.append(f"Operational record fetch failed: {type(exc).__name__}: {exc}")
-        return set(), notes
+        return [], notes
     finally:
         store.close()
+    return [dict(row) for row in rows], notes
 
+
+def _operational_record_urls(rows: list[dict[str, Any]]) -> set[str]:
     urls = {
         canonicalize_news_url(str(row["canonical_url"])) for row in rows if row.get("canonical_url")
     }
-    return urls, notes
+    return urls
 
 
 def _build_candidate_conversion_metrics(
@@ -1034,6 +1142,239 @@ def _build_queue_drain_diagnostics(
         ],
         attempted_source_mix=_attempted_source_mix(candidates, attempts),
         remaining_eligible_source_mix=_source_mix(remaining_eligible),
+    )
+
+
+def _candidate_operational_record_matches(
+    *,
+    candidate: PersistentCandidate,
+    operational_rows: list[dict[str, Any]],
+    operational_urls: set[str],
+) -> list[dict[str, Any]]:
+    candidate_urls = _candidate_identity_urls(candidate)
+    url_matched = bool(operational_urls and candidate_urls & operational_urls)
+    matched_rows: list[dict[str, Any]] = []
+    for row in operational_rows:
+        event_candidate_ids = row.get("event_candidate_ids")
+        if isinstance(event_candidate_ids, list) and candidate.candidate_id in event_candidate_ids:
+            matched_rows.append(row)
+            continue
+        canonical_url = row.get("canonical_url")
+        if (
+            url_matched
+            and isinstance(canonical_url, str)
+            and canonicalize_news_url(canonical_url) in candidate_urls
+        ):
+            matched_rows.append(row)
+    return matched_rows
+
+
+def _candidate_attempts_by_id(
+    attempts: list[ScrapeAttempt],
+) -> dict[str, list[ScrapeAttempt]]:
+    attempts_by_candidate_id: dict[str, list[ScrapeAttempt]] = {}
+    for attempt in attempts:
+        attempts_by_candidate_id.setdefault(attempt.candidate_id, []).append(attempt)
+    return attempts_by_candidate_id
+
+
+def _candidate_has_attempt(
+    attempts: list[ScrapeAttempt],
+    *,
+    attempt_kind: ScrapeAttemptKind | None = None,
+    fetch_status: FetchStatus | None = None,
+) -> bool:
+    return any(
+        (attempt_kind is None or attempt.attempt_kind is attempt_kind)
+        and (fetch_status is None or attempt.fetch_status is fetch_status)
+        for attempt in attempts
+    )
+
+
+def _candidate_has_generic_fetch_status(
+    attempts: list[ScrapeAttempt],
+    statuses: set[FetchStatus],
+) -> bool:
+    return any(
+        attempt.attempt_kind is ScrapeAttemptKind.GENERIC_FETCH and attempt.fetch_status in statuses
+        for attempt in attempts
+    )
+
+
+def _failure_summaries_from_counter(
+    counts: Counter[str], *, limit: int = 5
+) -> list[FailureSummary]:
+    return [FailureSummary(name=name, count=count) for name, count in counts.most_common(limit)]
+
+
+def _record_content_basis(row: dict[str, Any]) -> str:
+    value = row.get("content_basis")
+    if isinstance(value, ContentBasis):
+        return value.value
+    if isinstance(value, str) and value:
+        return value
+    return ""
+
+
+def _record_is_candidate_fallback(row: dict[str, Any]) -> bool:
+    return row.get("annotation_source") == "candidate_fallback"
+
+
+def _record_has_taxonomy_pair(row: dict[str, Any]) -> bool:
+    return bool(row.get("taxonomy_category_id") and row.get("taxonomy_subcategory_id"))
+
+
+def _record_has_valid_taxonomy_pair(row: dict[str, Any]) -> bool:
+    category = row.get("taxonomy_category_id")
+    subcategory = row.get("taxonomy_subcategory_id")
+    if not isinstance(category, str) or not isinstance(subcategory, str):
+        return False
+    return default_taxonomy().has_pair(category, subcategory)
+
+
+def _build_classifier_warning_signals(
+    operational_rows: list[dict[str, Any]],
+) -> ClassifierWarningSignals:
+    fallback_rows = [row for row in operational_rows if _record_is_candidate_fallback(row)]
+    partial_rows = [
+        row
+        for row in fallback_rows
+        if _record_content_basis(row) == ContentBasis.PARTIAL_PAGE.value
+    ]
+    search_result_only_rows = [
+        row
+        for row in fallback_rows
+        if _record_content_basis(row) == ContentBasis.SEARCH_RESULT_ONLY.value
+    ]
+    fallback_without_taxonomy = [row for row in fallback_rows if not _record_has_taxonomy_pair(row)]
+    invalid_taxonomy_pairs = [
+        row
+        for row in fallback_rows
+        if _record_has_taxonomy_pair(row) and not _record_has_valid_taxonomy_pair(row)
+    ]
+    low_confidence_rows = [
+        row
+        for row in fallback_rows
+        if row.get("record_confidence") == "low" or row.get("classification_confidence") == "low"
+    ]
+    return ClassifierWarningSignals(
+        candidate_fallback_record_count=len(fallback_rows),
+        partial_page_fallback_record_count=len(partial_rows),
+        search_result_only_fallback_record_count=len(search_result_only_rows),
+        fallback_record_without_taxonomy_count=len(fallback_without_taxonomy),
+        partial_page_fallback_without_taxonomy_count=sum(
+            1 for row in partial_rows if not _record_has_taxonomy_pair(row)
+        ),
+        low_confidence_fallback_record_count=len(low_confidence_rows),
+        invalid_taxonomy_pair_record_count=len(invalid_taxonomy_pairs),
+    )
+
+
+def _build_partial_page_diagnostics(
+    *,
+    candidates: list[PersistentCandidate],
+    attempts: list[ScrapeAttempt],
+    operational_rows: list[dict[str, Any]],
+    operational_urls: set[str],
+) -> PartialPageDiagnostics:
+    attempts_by_candidate_id = _candidate_attempts_by_id(attempts)
+    partial_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.content_basis is ContentBasis.PARTIAL_PAGE
+        or candidate.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    ]
+    search_result_only_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.content_basis is ContentBasis.SEARCH_RESULT_ONLY
+    ]
+    matched_partial_candidate_ids: set[str] = set()
+    retained_record_count = 0
+    for candidate in partial_candidates:
+        matched_rows = _candidate_operational_record_matches(
+            candidate=candidate,
+            operational_rows=operational_rows,
+            operational_urls=operational_urls,
+        )
+        if matched_rows:
+            matched_partial_candidate_ids.add(candidate.candidate_id)
+            retained_record_count += len(matched_rows)
+
+    partial_attempts = [
+        attempt for attempt in attempts if attempt.fetch_status is FetchStatus.PARTIAL
+    ]
+    generic_fetch_error_code_counts = Counter(
+        attempt.error_code or "unknown"
+        for attempt in attempts
+        if attempt.attempt_kind is ScrapeAttemptKind.GENERIC_FETCH
+        and attempt.fetch_status in {FetchStatus.BLOCKED, FetchStatus.FAILED, FetchStatus.TIMEOUT}
+    )
+    return PartialPageDiagnostics(
+        partial_candidate_count=len(partial_candidates),
+        retained_operational_record_candidate_count=len(matched_partial_candidate_ids),
+        retained_operational_record_count=retained_record_count,
+        metadata_only_partial_candidate_count=len(partial_candidates)
+        - len(matched_partial_candidate_ids),
+        search_result_only_candidate_count=len(search_result_only_candidates),
+        generic_fetch_partial_candidate_count=sum(
+            1
+            for candidate in partial_candidates
+            if _candidate_has_attempt(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                fetch_status=FetchStatus.PARTIAL,
+            )
+        ),
+        source_adapter_partial_candidate_count=sum(
+            1
+            for candidate in partial_candidates
+            if _candidate_has_attempt(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.PARTIAL,
+            )
+        ),
+        blocked_generic_fetch_candidate_count=sum(
+            1
+            for candidate in candidates
+            if _candidate_has_generic_fetch_status(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                {FetchStatus.BLOCKED},
+            )
+        ),
+        failed_generic_fetch_candidate_count=sum(
+            1
+            for candidate in candidates
+            if _candidate_has_generic_fetch_status(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                {FetchStatus.FAILED},
+            )
+        ),
+        timeout_generic_fetch_candidate_count=sum(
+            1
+            for candidate in candidates
+            if _candidate_has_generic_fetch_status(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                {FetchStatus.TIMEOUT},
+            )
+        ),
+        partial_candidates_by_domain=_failure_summaries_from_counter(
+            Counter(candidate.domain or "unknown" for candidate in partial_candidates)
+        ),
+        partial_candidates_by_source=_failure_summaries_from_counter(
+            Counter(_candidate_source(candidate) for candidate in partial_candidates)
+        ),
+        partial_attempts_by_kind=_failure_summaries_from_counter(
+            Counter(attempt.attempt_kind.value for attempt in partial_attempts)
+        ),
+        partial_attempts_by_source_adapter=_failure_summaries_from_counter(
+            Counter(attempt.source_adapter_name or "generic_fetch" for attempt in partial_attempts)
+        ),
+        generic_fetch_error_code_counts=_failure_summaries_from_counter(
+            generic_fetch_error_code_counts
+        ),
+        classifier_warning_signals=_build_classifier_warning_signals(operational_rows),
     )
 
 

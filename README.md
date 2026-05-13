@@ -75,6 +75,10 @@ Planned future datasets:
 - Reports queue-drain selection order, attempted and remaining eligible source mix, configured
   candidate cap, persisted scrape-attempt count, and inferred stop reason for bounded candidate
   scrape passes
+- Breaks down partial-page diagnostics so operators can distinguish retained candidate-fallback
+  operational rows, metadata-only partials, search-result-only generic fetch failures, source vs
+  generic partial attempts, dominant partial domains/sources, and visible classifier/taxonomy risk
+  signals
 - Reports self-heal-eligible candidate backlog and structured scrape-failure groups for future
   repair workflows, without running automatic AI repair or selector rewriting
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains

@@ -363,8 +363,12 @@ PRs, for seven planned follow-ups total:
    URLs and non-app store paths remain scrape-eligible. Diagnostics expose durable reason counts,
    and queue fairness/prioritization intentionally remain unchanged.
 3. `SCRAPE-PR-PARTIAL-DIAGNOSTICS` - scrape interpretation.
-   Make partial-page diagnostics sharper so operators can distinguish retained provisional rows,
-   metadata-only partial pages, blocked generic fetches, and classifier parse/taxonomy warnings.
+   Implemented as a diagnostics-only `partial_page_diagnostics` section in
+   `denbust diagnose-discovery`. Operators can now separate retained candidate-fallback
+   operational rows from metadata-only partials, blocked/failed/time-out generic fetches from
+   usable generic metadata extraction, source-adapter partials from generic partials, dominant
+   partial domains/source hints, and persisted classifier/taxonomy warning signals. Queue fairness,
+   source prioritization, generic fetch behavior, and source-family scraper support are unchanged.
 4. `SRC-PR-GLOBES-THEMARKER` - source-family expansion.
    Add or improve source support for the Globes/TheMarker family if repeated diagnostics keep
    showing high-value unsupported or partial candidates.

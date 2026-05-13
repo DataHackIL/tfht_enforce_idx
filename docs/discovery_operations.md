@@ -247,6 +247,34 @@ candidate metadata stores `unsupported_source_filter=search_noise`,
 reports `queue_health.search_noise_filter_reason_counts` so operators can distinguish app-store,
 social-profile, and unsupported utility-domain noise.
 
+After `SCRAPE-PR-PARTIAL-DIAGNOSTICS`, `denbust diagnose-discovery` adds a
+`partial_page_diagnostics` JSON object and a matching text section. Use it when a wet test reports
+many `partial_page` candidates:
+
+- `partial_candidate_count` is the candidate-layer partial count. It includes candidates with
+  `content_basis=partial_page` or `candidate_status=partially_scraped`.
+- `retained_operational_record_candidate_count` and `retained_operational_record_count` show how
+  many partial candidates produced retained candidate-fallback operational rows.
+- `metadata_only_partial_candidate_count` is the partial-candidate count that did not match a
+  retained operational row, so those pages are still metadata-only from the operator perspective.
+- `search_result_only_candidate_count`, `blocked_generic_fetch_candidate_count`,
+  `failed_generic_fetch_candidate_count`, and `timeout_generic_fetch_candidate_count` separate
+  poor or blocked generic fetch outcomes from usable metadata extraction.
+- `generic_fetch_partial_candidate_count`, `source_adapter_partial_candidate_count`,
+  `partial_attempts_by_kind`, and `partial_attempts_by_source_adapter` show whether partials came
+  from generic fallback or a source adapter.
+- `partial_candidates_by_domain`, `partial_candidates_by_source`, and
+  `generic_fetch_error_code_counts` identify the domains, source hints, and generic fetch errors
+  dominating partial outcomes.
+- `classifier_warning_signals` summarizes what discovery diagnostics can infer from persisted
+  candidate-fallback operational rows: fallback rows, partial fallback rows, low-confidence
+  fallback rows, missing taxonomy pairs, and invalid taxonomy pairs. Run-level classifier parse
+  warnings that are not persisted in candidate or operational state still need the matching run log
+  or debug summary.
+
+This diagnostic slice is interpretation-only. It does not change queue fairness, source
+prioritization, scrape caps, generic fetch behavior, or source-family scraper support.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:
