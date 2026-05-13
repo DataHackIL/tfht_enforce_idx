@@ -18,6 +18,8 @@ from denbust.diagnostics.discovery import (
     _load_operational_record_urls,
     _normalize_domain,
     _read_jsonl,
+    _record_content_basis,
+    _record_has_valid_taxonomy_pair,
     build_discovery_diagnostic_report,
     persist_discovery_diagnostic_artifacts,
     render_discovery_diagnostic_report,
@@ -316,16 +318,23 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
                 fetch_status=FetchStatus.PARTIAL,
             ),
             ScrapeAttempt(
-                candidate_id="partial-metadata-only",
+                candidate_id="partial-retained",
                 started_at=now + timedelta(seconds=2),
                 finished_at=now + timedelta(seconds=2),
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.PARTIAL,
+            ),
+            ScrapeAttempt(
+                candidate_id="partial-metadata-only",
+                started_at=now + timedelta(seconds=3),
+                finished_at=now + timedelta(seconds=3),
                 attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
                 fetch_status=FetchStatus.PARTIAL,
             ),
             ScrapeAttempt(
                 candidate_id="blocked-search-result-only",
-                started_at=now + timedelta(seconds=3),
-                finished_at=now + timedelta(seconds=3),
+                started_at=now + timedelta(seconds=4),
+                finished_at=now + timedelta(seconds=4),
                 attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
                 fetch_status=FetchStatus.BLOCKED,
                 error_code="generic_fetch_http_403",
@@ -436,7 +445,7 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
     assert partials.metadata_only_partial_candidate_count == 1
     assert partials.search_result_only_candidate_count == 1
     assert partials.generic_fetch_partial_candidate_count == 2
-    assert partials.source_adapter_partial_candidate_count == 0
+    assert partials.source_adapter_partial_candidate_count == 1
     assert partials.partial_after_source_adapter_attempt_count == 1
     assert partials.partial_without_source_adapter_attempt_count == 1
     assert partials.blocked_generic_fetch_candidate_count == 1
@@ -455,8 +464,8 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
     assert "operational_matching=enabled" in rendered
     assert "metadata_only_partial_candidates=1" in rendered
     assert "partial_after_source_adapter_attempts=1" in rendered
-    assert "partial_attempt_kinds: generic_fetch=2" in rendered
-    assert "partial_attempt_sources: generic_fetch=2" in rendered
+    assert "partial_attempt_kinds: generic_fetch=2, source_adapter=1" in rendered
+    assert "partial_attempt_sources: generic_fetch=2, unknown_source_adapter=1" in rendered
     assert "classifier_signals candidate_fallback_records=3" in rendered
 
 
@@ -532,11 +541,25 @@ def test_discovery_diagnostic_report_treats_event_id_only_operational_rows_as_av
     )
 
     assert report.operational_records_available is True
+    assert report.candidate_conversion.operational_record_matches == 1
     assert report.partial_page_diagnostics.operational_records_available is True
     assert report.partial_page_diagnostics.retained_operational_record_candidate_count == 1
     assert (
         "No operational records were available for candidate-to-news-item matching."
         not in report.notes
+    )
+
+
+def test_record_helpers_handle_enum_blank_and_missing_taxonomy_values() -> None:
+    """Operational helper predicates should handle typed and incomplete rows."""
+    assert _record_content_basis({"content_basis": ContentBasis.PARTIAL_PAGE}) == "partial_page"
+    assert _record_content_basis({"content_basis": ""}) == ""
+    assert _record_content_basis({}) == ""
+    assert (
+        _record_has_valid_taxonomy_pair(
+            {"taxonomy_category_id": None, "taxonomy_subcategory_id": "missing"}
+        )
+        is False
     )
 
 

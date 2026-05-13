@@ -334,16 +334,15 @@ def build_discovery_diagnostic_report(
     )
     provenance = _read_jsonl(paths.candidate_provenance_path, CandidateProvenance)
     now = datetime.now(UTC)
-    operational_urls: set[str] = set()
     operational_rows: list[dict[str, Any]] = []
     operational_notes: list[str] = []
     if include_operational_matches:
         operational_rows, operational_notes = _load_operational_records(config)
-        operational_urls = _operational_record_urls(operational_rows)
     elif config.operational.provider is not OperationalProvider.NONE:
         operational_notes.append(
             "Operational record matching was skipped for this diagnostics artifact."
         )
+    operational_index = _build_operational_record_index(operational_rows)
     report = DiscoveryDiagnosticReport(
         config_path=str(config_path) if config_path is not None else "<in-memory-config>",
         dataset_name=config.dataset_name.value,
@@ -360,7 +359,7 @@ def build_discovery_diagnostic_report(
         ),
         candidate_conversion=_build_candidate_conversion_metrics(
             candidates,
-            operational_urls=operational_urls,
+            operational_index=operational_index,
         ),
         top_failure_sources=_build_failure_summaries(candidates, attempts, key="source"),
         top_failure_domains=_build_failure_summaries(candidates, attempts, key="domain"),
@@ -879,13 +878,16 @@ def _operational_record_urls(rows: list[dict[str, Any]]) -> set[str]:
 def _build_candidate_conversion_metrics(
     candidates: list[PersistentCandidate],
     *,
-    operational_urls: set[str],
+    operational_index: OperationalRecordIndex,
 ) -> CandidateConversionMetrics:
     total = len(candidates)
     matched_candidate_ids = {
         candidate.candidate_id
         for candidate in candidates
-        if operational_urls and _candidate_identity_urls(candidate) & operational_urls
+        if _candidate_operational_record_matches(
+            candidate=candidate,
+            operational_index=operational_index,
+        )
     }
     status_counts = Counter(candidate.candidate_status for candidate in candidates)
     basis_counts = Counter(candidate.content_basis for candidate in candidates)
@@ -1308,6 +1310,14 @@ def _record_has_valid_taxonomy_pair(row: dict[str, Any]) -> bool:
     return default_taxonomy().has_pair(category, subcategory)
 
 
+def _partial_attempt_source_label(attempt: ScrapeAttempt) -> str:
+    if attempt.source_adapter_name:
+        return attempt.source_adapter_name
+    if attempt.attempt_kind is ScrapeAttemptKind.SOURCE_ADAPTER:
+        return "unknown_source_adapter"
+    return "generic_fetch"
+
+
 def _candidate_scoped_operational_rows(
     *,
     candidates: list[PersistentCandidate],
@@ -1502,7 +1512,7 @@ def _build_partial_page_diagnostics(
             Counter(attempt.attempt_kind.value for attempt in partial_attempts)
         ),
         partial_attempts_by_source_adapter=_failure_summaries_from_counter(
-            Counter(attempt.source_adapter_name or "generic_fetch" for attempt in partial_attempts)
+            Counter(_partial_attempt_source_label(attempt) for attempt in partial_attempts)
         ),
         generic_fetch_error_code_counts=_failure_summaries_from_counter(
             generic_fetch_error_code_counts
