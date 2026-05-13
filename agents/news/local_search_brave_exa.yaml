@@ -1,0 +1,107 @@
+# Explicit local Brave+Exa search configuration for enforcement news experiments.
+#
+# Keep this file in sync with local_search.yaml except for `name` and
+# `discovery.engines.google_cse.enabled`. The duplication is intentional because
+# the runtime does not currently support YAML includes/overrides for local
+# operator configs.
+#
+# This variant intentionally disables Google CSE so local wet tests can proceed
+# when the operator's Google Programmable Search API setup returns
+# PERMISSION_DENIED.
+name: enforcement-news-local-search-brave-exa
+dataset_name: news_items
+job_name: ingest
+days: 21
+max_articles: 30
+
+sources:
+  - name: ynet
+    type: rss
+    url: https://www.ynet.co.il/Integration/StoryRss190.xml
+    enabled: true
+
+  - name: walla
+    type: scraper
+    enabled: true
+
+  - name: mako
+    type: scraper
+    enabled: true
+
+  - name: maariv
+    type: scraper
+    enabled: true
+
+  - name: haaretz
+    type: scraper
+    enabled: true
+
+  - name: ice
+    type: scraper
+    enabled: true
+
+keywords:
+  - זנות
+  - בית בושת
+  - סרסור
+  - סחר בבני אדם
+  - צו סגירה
+  - צו הגבלת שימוש
+  - ליווי
+  - נערות ליווי
+  - תעשיית המין
+  - עיסוי חשוד
+  - זירת זנות
+  - נישואין בכפייה
+  - עבדות מינית
+  - זנות מקוונת
+  - קנס צריכת זנות
+  - החזקת מקום לשם זנות
+  - השכרת מקום לשם זנות
+  - פרסום זנות
+
+classifier:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+
+dedup:
+  similarity_threshold: 0.7
+
+discovery:
+  enabled: true
+  persist_candidates: true
+  engines:
+    brave:
+      enabled: true
+      api_key_env: DENBUST_BRAVE_SEARCH_API_KEY
+      max_results_per_query: 20
+    exa:
+      enabled: true
+      api_key_env: DENBUST_EXA_API_KEY
+      max_results_per_query: 20
+      allow_find_similar: true
+    google_cse:
+      enabled: false
+      api_key_env: DENBUST_GOOGLE_CSE_API_KEY
+      cse_id_env: DENBUST_GOOGLE_CSE_ID
+      max_results_per_query: 10
+
+source_discovery:
+  enabled: true
+  persist_candidates: true
+
+backfill:
+  enabled: true
+  batch_window_days: 7
+  max_candidates_per_run: 500
+  max_scrape_attempts_per_run: 100
+
+output:
+  formats:
+    - cli
+
+store:
+  state_root: data
+
+operational:
+  provider: local_json
