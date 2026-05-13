@@ -209,10 +209,13 @@ def test_build_discovery_diagnostic_report_counts_search_noise_reasons(tmp_path:
                 first_seen_at=now - timedelta(days=1),
                 last_seen_at=now,
                 metadata={
+                    "unsupported_source_filter": "search_noise",
+                    "unsupported_source_reason": "social_profile",
+                    "unsupported_source_domain": "x.com",
                     "latest_discovery_metadata": {
-                        "search_noise_filter_reason": "unsupported_search_domain",
+                        "search_noise_filter_reason": "social_profile",
                         "search_noise_filter_domain": "x.com",
-                    }
+                    },
                 },
             ),
             _candidate(
@@ -223,10 +226,13 @@ def test_build_discovery_diagnostic_report_counts_search_noise_reasons(tmp_path:
                 first_seen_at=now - timedelta(days=1),
                 last_seen_at=now,
                 metadata={
+                    "unsupported_source_filter": "search_noise",
+                    "unsupported_source_reason": "social_profile",
+                    "unsupported_source_domain": "instagram.com",
                     "latest_discovery_metadata": {
                         "search_noise_filter_reason": "social_profile",
                         "search_noise_filter_domain": "instagram.com",
-                    }
+                    },
                 },
             ),
             _candidate(
@@ -245,10 +251,9 @@ def test_build_discovery_diagnostic_report_counts_search_noise_reasons(tmp_path:
 
     assert report.queue_health.unsupported_source_candidates == 3
     assert report.queue_health.search_noise_filter_reason_counts == {
-        "social_profile": 1,
-        "unsupported_search_domain": 1,
+        "social_profile": 2,
     }
-    assert "search_noise_filters social_profile=1, unsupported_search_domain=1" in rendered
+    assert "search_noise_filters social_profile=2" in rendered
 
 
 def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(

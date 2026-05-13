@@ -357,10 +357,11 @@ PRs, for seven planned follow-ups total:
    Implemented as a central persistence-time search-result noise filter: obvious non-article
    surfaces are retained with provenance but marked `unsupported_source` before scrape-drain budget
    can select them. Existing unattempted candidate-only noise is demoted on rediscovery; attempted
-   or content-bearing candidates keep their status. Covered classes include `x.com` / Twitter,
-   app-store links, social profiles, dictionary/translation/reference pages, and other
-   metadata-poor utility pages. Diagnostics expose reason counts, and queue fairness/prioritization
-   intentionally remain unchanged.
+   or content-bearing candidates keep their status. Covered classes include profile-like `x.com` /
+   Twitter and other social pages, Google Play / Apple app detail links,
+   dictionary/translation/reference pages, and other metadata-poor utility pages. Post-like social
+   URLs and non-app store paths remain scrape-eligible. Diagnostics expose durable reason counts,
+   and queue fairness/prioritization intentionally remain unchanged.
 3. `SCRAPE-PR-PARTIAL-DIAGNOSTICS` - scrape interpretation.
    Make partial-page diagnostics sharper so operators can distinguish retained provisional rows,
    metadata-only partial pages, blocked generic fetches, and classifier parse/taxonomy warnings.

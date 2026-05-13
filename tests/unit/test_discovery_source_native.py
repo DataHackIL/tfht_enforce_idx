@@ -162,10 +162,10 @@ def test_persist_discovered_candidates_marks_social_search_candidates_unsupporte
     assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
 
 
-def test_persist_discovered_candidates_marks_social_domains_unsupported_without_social_query_kind(
+def test_persist_discovered_candidates_keeps_social_posts_scrapeable_without_social_query_kind(
     tmp_path: Path,
 ) -> None:
-    """Configured social domains should remain reference-only even from broad discovery."""
+    """Broad social post-like URLs should not be suppressed as social profiles."""
     paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
     persistence = StateRepoDiscoveryPersistence(paths)
     discovery = DiscoveredCandidate(
@@ -189,23 +189,23 @@ def test_persist_discovered_candidates_marks_social_domains_unsupported_without_
 
     candidate = persisted.candidates[0]
     provenance = persisted.provenance[0]
-    assert candidate.candidate_status.value == "unsupported_source"
-    assert candidate.needs_review is True
-    assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
+    assert candidate.candidate_status.value == "new"
+    assert candidate.needs_review is False
+    assert provenance.producer_kind is ProducerKind.SEARCH_ENGINE
 
 
-def test_persist_discovered_candidates_marks_social_subdomains_unsupported(
+def test_persist_discovered_candidates_marks_social_profile_subdomains_unsupported(
     tmp_path: Path,
 ) -> None:
-    """Configured social subdomains should use the same non-scrapeable social handling."""
+    """Social profile subdomains should stay out of scrape eligibility."""
     paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
     persistence = StateRepoDiscoveryPersistence(paths)
     discovery = DiscoveredCandidate(
         producer_name="brave",
         producer_kind=ProducerKind.SEARCH_ENGINE,
         query_text="בית בושת",
-        candidate_url=HttpUrl("https://m.facebook.com/story.php?story_fbid=5&id=6"),
-        canonical_url=HttpUrl("https://m.facebook.com/story.php?story_fbid=5&id=6"),
+        candidate_url=HttpUrl("https://m.facebook.com/profile.php?id=6"),
+        canonical_url=HttpUrl("https://m.facebook.com/profile.php?id=6"),
         title="פוסט פייסבוק רחב",
         snippet="חשד לבית בושת",
         discovered_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
@@ -222,8 +222,11 @@ def test_persist_discovered_candidates_marks_social_subdomains_unsupported(
     candidate = persisted.candidates[0]
     provenance = persisted.provenance[0]
     assert candidate.candidate_status.value == "unsupported_source"
-    assert candidate.needs_review is True
-    assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
+    assert candidate.needs_review is False
+    assert candidate.metadata["unsupported_source_filter"] == "search_noise"
+    assert candidate.metadata["unsupported_source_reason"] == "social_profile"
+    assert candidate.metadata["unsupported_source_domain"] == "facebook.com"
+    assert provenance.producer_kind is ProducerKind.SEARCH_ENGINE
 
 
 def test_persist_discovered_candidates_marks_search_noise_unsupported(
@@ -265,12 +268,30 @@ def test_persist_discovered_candidates_marks_search_noise_unsupported(
     assert {candidate.candidate_status.value for candidate in persisted.candidates} == {
         "unsupported_source"
     }
-    assert all(candidate.needs_review for candidate in persisted.candidates)
+    assert all(not candidate.needs_review for candidate in persisted.candidates)
     assert {event.producer_kind for event in persisted.provenance} == {ProducerKind.SEARCH_ENGINE}
+    assert {
+        candidate.metadata["unsupported_source_filter"] for candidate in persisted.candidates
+    } == {"search_noise"}
+    assert {
+        candidate.metadata["unsupported_source_reason"] for candidate in persisted.candidates
+    } == {"app_store", "social_profile", "unsupported_search_domain"}
+    assert {
+        candidate.metadata["unsupported_source_domain"] for candidate in persisted.candidates
+    } == {
+        "x.com",
+        "play.google.com",
+        "apps.apple.com",
+        "morfix.co.il",
+        "context.reverso.net",
+        "wiktionary.org",
+        "linkedin.com",
+        "instagram.com",
+    }
     assert {
         candidate.metadata["latest_discovery_metadata"]["search_noise_filter_reason"]
         for candidate in persisted.candidates
-    } == {"unsupported_search_domain", "social_profile"}
+    } == {"app_store", "social_profile", "unsupported_search_domain"}
     assert {
         candidate.metadata["latest_discovery_metadata"]["search_noise_filter_domain"]
         for candidate in persisted.candidates
@@ -328,8 +349,11 @@ def test_persist_discovered_candidates_demotes_existing_unattempted_search_noise
     assert candidate.candidate_id == persisted_existing.candidate_id
     assert candidate.candidate_status is CandidateStatus.UNSUPPORTED_SOURCE
     assert candidate.scrape_attempt_count == 0
+    assert candidate.metadata["unsupported_source_filter"] == "search_noise"
+    assert candidate.metadata["unsupported_source_reason"] == "social_profile"
+    assert candidate.metadata["unsupported_source_domain"] == "x.com"
     assert candidate.metadata["latest_discovery_metadata"]["search_noise_filter_reason"] == (
-        "unsupported_search_domain"
+        "social_profile"
     )
 
 
@@ -384,6 +408,7 @@ def test_persist_discovered_candidates_preserves_attempted_existing_noise_status
     assert candidate.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
     assert candidate.content_basis is ContentBasis.PARTIAL_PAGE
     assert candidate.scrape_attempt_count == 1
+    assert "unsupported_source_reason" not in candidate.metadata
 
 
 def test_persist_discovered_candidates_keeps_supported_news_articles_scrapeable(

@@ -14,7 +14,6 @@ from denbust.discovery.base import SourceCandidateProducer, SourceDiscoveryConte
 from denbust.discovery.candidate_filters import (
     candidate_domain,
     classify_search_noise,
-    match_domain,
     normalize_domain,
 )
 from denbust.discovery.models import (
@@ -28,7 +27,6 @@ from denbust.discovery.models import (
     PersistentCandidate,
     ProducerKind,
 )
-from denbust.discovery.queries import SOCIAL_DISCOVERY_DOMAINS
 from denbust.discovery.scrape_queue import SCRAPEABLE_CANDIDATE_STATUSES
 from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
@@ -39,13 +37,6 @@ def _normalize_domain(domain: str | None) -> str | None:
     return normalize_domain(domain)
 
 
-_NORMALIZED_SOCIAL_DISCOVERY_DOMAINS = frozenset(
-    normalized
-    for domain in SOCIAL_DISCOVERY_DOMAINS
-    if (normalized := _normalize_domain(domain)) is not None
-)
-
-
 def _candidate_domain(discovered: DiscoveredCandidate) -> str | None:
     return candidate_domain(discovered)
 
@@ -53,10 +44,9 @@ def _candidate_domain(discovered: DiscoveredCandidate) -> str | None:
 def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> DiscoveredCandidate:
     """Normalize search-engine social results into the social-search producer family."""
     query_kind = discovered.metadata.get("query_kind")
-    if discovered.producer_kind is ProducerKind.SEARCH_ENGINE and (
-        query_kind == DiscoveryQueryKind.SOCIAL_TARGETED.value
-        or match_domain(_candidate_domain(discovered), _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS)
-        is not None
+    if (
+        discovered.producer_kind is ProducerKind.SEARCH_ENGINE
+        and query_kind == DiscoveryQueryKind.SOCIAL_TARGETED.value
     ):
         return discovered.model_copy(update={"producer_kind": ProducerKind.SOCIAL_SEARCH})
     return discovered
@@ -64,10 +54,6 @@ def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> Discover
 
 def _is_social_candidate(discovered: DiscoveredCandidate) -> bool:
     return discovered.producer_kind is ProducerKind.SOCIAL_SEARCH
-
-
-def _is_search_noise_candidate(discovered: DiscoveredCandidate) -> bool:
-    return classify_search_noise(discovered) is not None
 
 
 def _can_demote_existing_noise_candidate(existing: PersistentCandidate) -> bool:
@@ -179,7 +165,8 @@ def merge_discovered_candidate(
     if discovered.metadata:
         existing_metadata["latest_discovery_metadata"] = discovered.metadata
     is_social = _is_social_candidate(discovered)
-    is_search_noise = _is_search_noise_candidate(discovered)
+    search_noise_classification = classify_search_noise(discovered)
+    is_search_noise = search_noise_classification is not None
     candidate_status = existing.candidate_status if existing else CandidateStatus.NEW
     if (is_social or is_search_noise) and existing is None:
         candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
@@ -189,6 +176,13 @@ def merge_discovered_candidate(
         and _can_demote_existing_noise_candidate(existing)
     ):
         candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
+    if (
+        candidate_status is CandidateStatus.UNSUPPORTED_SOURCE
+        and search_noise_classification is not None
+    ):
+        existing_metadata["unsupported_source_filter"] = "search_noise"
+        existing_metadata["unsupported_source_reason"] = search_noise_classification.reason.value
+        existing_metadata["unsupported_source_domain"] = search_noise_classification.matched_domain
 
     return PersistentCandidate(
         candidate_id=existing.candidate_id
@@ -240,7 +234,7 @@ def merge_discovered_candidate(
         last_scrape_error_message=existing.last_scrape_error_message if existing else None,
         content_basis=existing.content_basis if existing else ContentBasis.CANDIDATE_ONLY,
         retry_priority=existing.retry_priority if existing else 0,
-        needs_review=(existing.needs_review if existing else False) or is_social or is_search_noise,
+        needs_review=(existing.needs_review if existing else False) or is_social,
         backfill_batch_id=backfill_batch_id or (existing.backfill_batch_id if existing else None),
         self_heal_eligible=existing.self_heal_eligible if existing else False,
         source_discovery_only=(
@@ -279,7 +273,7 @@ def persist_discovered_candidates(
                 update={
                     "metadata": {
                         **discovered.metadata,
-                        "search_noise_filter_reason": classification.reason,
+                        "search_noise_filter_reason": classification.reason.value,
                         "search_noise_filter_domain": classification.matched_domain,
                     }
                 }

@@ -691,11 +691,18 @@ def _build_queue_health_metrics(
 
 
 def _search_noise_filter_reason(candidate: PersistentCandidate) -> str | None:
+    reason = candidate.metadata.get("unsupported_source_reason")
+    if (
+        candidate.metadata.get("unsupported_source_filter") == "search_noise"
+        and isinstance(reason, str)
+        and reason
+    ):
+        return reason
     latest_discovery_metadata = candidate.metadata.get("latest_discovery_metadata")
     if not isinstance(latest_discovery_metadata, dict):
         return None
-    reason = latest_discovery_metadata.get("search_noise_filter_reason")
-    return reason if isinstance(reason, str) and reason else None
+    legacy_reason = latest_discovery_metadata.get("search_noise_filter_reason")
+    return legacy_reason if isinstance(legacy_reason, str) and legacy_reason else None
 
 
 def _candidate_identity_urls(candidate: PersistentCandidate) -> set[str]:

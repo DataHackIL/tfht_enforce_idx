@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from urllib.parse import urlparse
 
 from denbust.discovery.models import DiscoveredCandidate, ProducerKind
 
-_ALWAYS_UNSUPPORTED_SEARCH_DOMAINS: frozenset[str] = frozenset(
+_UTILITY_SEARCH_DOMAINS: frozenset[str] = frozenset(
     {
-        "x.com",
-        "twitter.com",
-        "play.google.com",
-        "apps.apple.com",
-        "itunes.apple.com",
         "morfix.co.il",
         "context.reverso.net",
         "dictionary.reverso.net",
@@ -22,11 +18,18 @@ _ALWAYS_UNSUPPORTED_SEARCH_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
+_APP_STORE_DOMAINS: frozenset[str] = frozenset(
+    {"play.google.com", "apps.apple.com", "itunes.apple.com"}
+)
+
 _SOCIAL_PROFILE_DOMAINS: frozenset[str] = frozenset(
     {
+        "facebook.com",
         "instagram.com",
         "linkedin.com",
         "tiktok.com",
+        "twitter.com",
+        "x.com",
         "youtube.com",
     }
 )
@@ -37,15 +40,26 @@ _SOCIAL_PROFILE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 
 _SOCIAL_POST_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "facebook.com": ("/permalink.php", "/posts/", "/share/", "/story.php", "/watch/"),
     "instagram.com": ("/p/", "/reel/", "/tv/"),
+    "linkedin.com": ("/feed/update/", "/posts/", "/pulse/"),
+    "youtube.com": ("/shorts/", "/watch"),
 }
+
+
+class SearchNoiseReason(StrEnum):
+    """Stable reason values for search-result noise classification."""
+
+    APP_STORE = "app_store"
+    SOCIAL_PROFILE = "social_profile"
+    UNSUPPORTED_SEARCH_DOMAIN = "unsupported_search_domain"
 
 
 @dataclass(frozen=True)
 class SearchNoiseClassification:
     """Classification for a retained but non-scrapeable search-result surface."""
 
-    reason: str
+    reason: SearchNoiseReason
     matched_domain: str
 
 
@@ -74,7 +88,7 @@ def candidate_domain(discovered: DiscoveredCandidate) -> str | None:
 def candidate_path(discovered: DiscoveredCandidate) -> str:
     """Return the path for the current candidate identity URL."""
     parsed = urlparse(str(discovered.canonical_url or discovered.candidate_url))
-    return parsed.path or "/"
+    return (parsed.path or "/").casefold()
 
 
 def match_domain(domain: str | None, configured_domains: frozenset[str]) -> str | None:
@@ -91,12 +105,50 @@ def match_domain(domain: str | None, configured_domains: frozenset[str]) -> str 
     )
 
 
+def _is_app_store_url(discovered: DiscoveredCandidate) -> bool:
+    domain = candidate_domain(discovered)
+    matched_domain = match_domain(domain, _APP_STORE_DOMAINS)
+    if matched_domain is None:
+        return False
+    path = candidate_path(discovered)
+    if matched_domain == "play.google.com":
+        return path.startswith("/store/apps/")
+    return path == "/app" or "/app/" in path
+
+
+def _is_x_or_twitter_post_path(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if segment]
+    return (
+        len(segments) >= 3 and segments[1] in {"status", "statuses"} and segments[2].isdigit()
+    ) or (
+        len(segments) >= 4
+        and segments[0] == "i"
+        and segments[1] == "web"
+        and segments[2] == "status"
+        and segments[3].isdigit()
+    )
+
+
+def _is_tiktok_video_path(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if segment]
+    return (
+        len(segments) >= 3
+        and segments[0].startswith("@")
+        and segments[1] == "video"
+        and segments[2].isdigit()
+    )
+
+
 def _is_social_profile_candidate(discovered: DiscoveredCandidate) -> bool:
     domain = candidate_domain(discovered)
     matched_domain = match_domain(domain, _SOCIAL_PROFILE_DOMAINS)
     if matched_domain is None:
         return False
     path = candidate_path(discovered)
+    if matched_domain in {"x.com", "twitter.com"}:
+        return not _is_x_or_twitter_post_path(path)
+    if matched_domain == "tiktok.com":
+        return not _is_tiktok_video_path(path)
     if matched_domain in _SOCIAL_PROFILE_PATH_PREFIXES:
         return any(
             path.startswith(prefix) for prefix in _SOCIAL_PROFILE_PATH_PREFIXES[matched_domain]
@@ -105,8 +157,6 @@ def _is_social_profile_candidate(discovered: DiscoveredCandidate) -> bool:
         return not any(
             path.startswith(prefix) for prefix in _SOCIAL_POST_PATH_PREFIXES[matched_domain]
         )
-    if matched_domain == "tiktok.com":
-        return "/video/" not in path
     return False
 
 
@@ -117,16 +167,23 @@ def classify_search_noise(
     if discovered.producer_kind is not ProducerKind.SEARCH_ENGINE:
         return None
     domain = candidate_domain(discovered)
-    if (matched_domain := match_domain(domain, _ALWAYS_UNSUPPORTED_SEARCH_DOMAINS)) is not None:
+    if _is_app_store_url(discovered):
+        matched_domain = match_domain(domain, _APP_STORE_DOMAINS)
+        if matched_domain is not None:
+            return SearchNoiseClassification(
+                reason=SearchNoiseReason.APP_STORE,
+                matched_domain=matched_domain,
+            )
+    if (matched_domain := match_domain(domain, _UTILITY_SEARCH_DOMAINS)) is not None:
         return SearchNoiseClassification(
-            reason="unsupported_search_domain",
+            reason=SearchNoiseReason.UNSUPPORTED_SEARCH_DOMAIN,
             matched_domain=matched_domain,
         )
     if _is_social_profile_candidate(discovered):
         matched_domain = match_domain(domain, _SOCIAL_PROFILE_DOMAINS)
         if matched_domain is not None:
             return SearchNoiseClassification(
-                reason="social_profile",
+                reason=SearchNoiseReason.SOCIAL_PROFILE,
                 matched_domain=matched_domain,
             )
     return None

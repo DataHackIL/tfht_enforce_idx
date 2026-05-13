@@ -66,10 +66,10 @@ Planned future datasets:
 - Provides `agents/news/local_search_brave_exa.yaml` for local Brave+Exa wet tests when Google CSE
   returns `403 PERMISSION_DENIED` / no API access; Google CSE remains supported in code and in the
   full local search config
-- Retains obvious non-article search-result noise as provenance while marking new `x.com` /
-  Twitter, app-store, social-profile, dictionary, translation, and reference-utility candidates
-  `unsupported_source` before they can consume scrape-drain budget, with diagnostics exposing the
-  filter reason counts
+- Retains obvious non-article search-result noise as provenance while marking social profiles,
+  app-store detail pages, dictionary, translation, and reference-utility candidates
+  `unsupported_source` before they can consume scrape-drain budget; post-like social URLs and
+  non-app store paths remain eligible, and diagnostics expose durable filter reason counts
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
 - Reports queue-drain selection order, attempted and remaining eligible source mix, configured
