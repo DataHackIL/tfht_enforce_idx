@@ -105,6 +105,7 @@ After `SCRAPE-PR-PARTIAL-DIAGNOSTICS`, future `denbust diagnose-discovery` artif
 `partial_page_diagnostics` for this exact interpretation gap. The original checked-in artifact still
 records only the older `queue_health.partial_page_candidates=88` figure, but fresh diagnostics over
 the same persisted state can now report how many partial candidates produced candidate-fallback
-operational rows, how many stayed metadata-only, whether partial extraction came from generic fetch
-or a source adapter, which domains/source hints dominate partials, and which persisted
-classifier/taxonomy warning signals affect conversion interpretation.
+operational rows, how many stayed metadata-only when operational matching is enabled, whether
+partial extraction came from generic fetch, a source adapter, or generic fallback after a
+source-adapter attempt, which domains/source hints dominate partials, and which persisted
+current-candidate classifier/taxonomy warning signals affect conversion interpretation.

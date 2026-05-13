@@ -366,9 +366,10 @@ PRs, for seven planned follow-ups total:
    Implemented as a diagnostics-only `partial_page_diagnostics` section in
    `denbust diagnose-discovery`. Operators can now separate retained candidate-fallback
    operational rows from metadata-only partials, blocked/failed/time-out generic fetches from
-   usable generic metadata extraction, source-adapter partials from generic partials, dominant
-   partial domains/source hints, and persisted classifier/taxonomy warning signals. Queue fairness,
-   source prioritization, generic fetch behavior, and source-family scraper support are unchanged.
+   usable generic metadata extraction, true source-adapter partial attempts from generic partials
+   after a source-adapter miss/failure, dominant partial domains/source hints, and persisted
+   current-candidate classifier/taxonomy warning signals. Queue fairness, source prioritization,
+   generic fetch behavior, and source-family scraper support are unchanged.
 4. `SRC-PR-GLOBES-THEMARKER` - source-family expansion.
    Add or improve source support for the Globes/TheMarker family if repeated diagnostics keep
    showing high-value unsupported or partial candidates.

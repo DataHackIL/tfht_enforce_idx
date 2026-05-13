@@ -253,24 +253,33 @@ many `partial_page` candidates:
 
 - `partial_candidate_count` is the candidate-layer partial count. It includes candidates with
   `content_basis=partial_page` or `candidate_status=partially_scraped`.
+- `operational_matching_enabled` and `operational_records_available` must be checked before
+  interpreting retained-row or metadata-only counts. If operational matching is skipped, retained
+  counts are zero and `metadata_only_partial_candidate_count` is intentionally zero because it was
+  not measured.
 - `retained_operational_record_candidate_count` and `retained_operational_record_count` show how
-  many partial candidates produced retained candidate-fallback operational rows.
+  many partial candidates produced retained `candidate_fallback` operational rows with
+  `content_basis=partial_page`; unrelated full-article rows with the same URL do not count as
+  partial fallback retention.
 - `metadata_only_partial_candidate_count` is the partial-candidate count that did not match a
-  retained operational row, so those pages are still metadata-only from the operator perspective.
+  retained fallback operational row when operational matching was enabled, so those pages are still
+  metadata-only from the operator perspective.
 - `search_result_only_candidate_count`, `blocked_generic_fetch_candidate_count`,
   `failed_generic_fetch_candidate_count`, and `timeout_generic_fetch_candidate_count` separate
   poor or blocked generic fetch outcomes from usable metadata extraction.
 - `generic_fetch_partial_candidate_count`, `source_adapter_partial_candidate_count`,
-  `partial_attempts_by_kind`, and `partial_attempts_by_source_adapter` show whether partials came
-  from generic fallback or a source adapter.
+  `partial_after_source_adapter_attempt_count`, `partial_without_source_adapter_attempt_count`,
+  `partial_attempts_by_kind`, and `partial_attempts_by_source_adapter` show whether usable partials
+  came directly from generic fallback, from a true source-adapter partial attempt, or from generic
+  fallback after a source-adapter attempt failed or missed the candidate.
 - `partial_candidates_by_domain`, `partial_candidates_by_source`, and
   `generic_fetch_error_code_counts` identify the domains, source hints, and generic fetch errors
   dominating partial outcomes.
 - `classifier_warning_signals` summarizes what discovery diagnostics can infer from persisted
-  candidate-fallback operational rows: fallback rows, partial fallback rows, low-confidence
-  fallback rows, missing taxonomy pairs, and invalid taxonomy pairs. Run-level classifier parse
-  warnings that are not persisted in candidate or operational state still need the matching run log
-  or debug summary.
+  current-candidate fallback operational rows: fallback rows, partial fallback rows, low-confidence
+  fallback rows, missing taxonomy pairs, and invalid taxonomy pairs. Unrelated historical fallback
+  rows in the operational store are ignored. Run-level classifier parse warnings that are not
+  persisted in candidate or operational state still need the matching run log or debug summary.
 
 This diagnostic slice is interpretation-only. It does not change queue fairness, source
 prioritization, scrape caps, generic fetch behavior, or source-family scraper support.

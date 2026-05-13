@@ -205,6 +205,8 @@ class ClassifierWarningSignals(BaseModel):
 class PartialPageDiagnostics(BaseModel):
     """Detailed partial-page interpretation for candidate conversion diagnostics."""
 
+    operational_matching_enabled: bool = False
+    operational_records_available: bool = False
     partial_candidate_count: int = 0
     retained_operational_record_candidate_count: int = 0
     retained_operational_record_count: int = 0
@@ -212,6 +214,8 @@ class PartialPageDiagnostics(BaseModel):
     search_result_only_candidate_count: int = 0
     generic_fetch_partial_candidate_count: int = 0
     source_adapter_partial_candidate_count: int = 0
+    partial_after_source_adapter_attempt_count: int = 0
+    partial_without_source_adapter_attempt_count: int = 0
     blocked_generic_fetch_candidate_count: int = 0
     failed_generic_fetch_candidate_count: int = 0
     timeout_generic_fetch_candidate_count: int = 0
@@ -363,6 +367,7 @@ def build_discovery_diagnostic_report(
             attempts=attempts,
             operational_rows=operational_rows,
             operational_urls=operational_urls,
+            operational_matching_enabled=include_operational_matches,
         ),
         source_suggestions=_build_source_suggestion_report(
             config=config,
@@ -558,6 +563,12 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
     lines.append("")
     lines.append("Partial pages")
     lines.append(
+        "  operational_matching={matching} operational_records_available={available}".format(
+            matching="enabled" if partials.operational_matching_enabled else "skipped",
+            available=str(partials.operational_records_available).lower(),
+        )
+    )
+    lines.append(
         "  partial_candidates={partial_candidate_count} "
         "retained_operational_candidate_matches={retained_operational_record_candidate_count} "
         "retained_operational_records={retained_operational_record_count} "
@@ -569,6 +580,8 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
     lines.append(
         "  generic_partial_candidates={generic_fetch_partial_candidate_count} "
         "source_adapter_partial_candidates={source_adapter_partial_candidate_count} "
+        "partial_after_source_adapter_attempts={partial_after_source_adapter_attempt_count} "
+        "partial_without_source_adapter_attempts={partial_without_source_adapter_attempt_count} "
         "blocked_generic_fetch_candidates={blocked_generic_fetch_candidate_count} "
         "failed_generic_fetch_candidates={failed_generic_fetch_candidate_count} "
         "timeout_generic_fetch_candidates={timeout_generic_fetch_candidate_count}".format(
@@ -1150,11 +1163,20 @@ def _candidate_operational_record_matches(
     candidate: PersistentCandidate,
     operational_rows: list[dict[str, Any]],
     operational_urls: set[str],
+    require_candidate_fallback: bool = False,
+    require_content_basis: ContentBasis | None = None,
 ) -> list[dict[str, Any]]:
     candidate_urls = _candidate_identity_urls(candidate)
     url_matched = bool(operational_urls and candidate_urls & operational_urls)
     matched_rows: list[dict[str, Any]] = []
     for row in operational_rows:
+        if require_candidate_fallback and not _record_is_candidate_fallback(row):
+            continue
+        if (
+            require_content_basis is not None
+            and _record_content_basis(row) != require_content_basis.value
+        ):
+            continue
         event_candidate_ids = row.get("event_candidate_ids")
         if isinstance(event_candidate_ids, list) and candidate.candidate_id in event_candidate_ids:
             matched_rows.append(row)
@@ -1232,6 +1254,24 @@ def _record_has_valid_taxonomy_pair(row: dict[str, Any]) -> bool:
     return default_taxonomy().has_pair(category, subcategory)
 
 
+def _candidate_scoped_operational_rows(
+    *,
+    candidates: list[PersistentCandidate],
+    operational_rows: list[dict[str, Any]],
+    operational_urls: set[str],
+) -> list[dict[str, Any]]:
+    scoped_rows_by_id_or_index: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        for row in _candidate_operational_record_matches(
+            candidate=candidate,
+            operational_rows=operational_rows,
+            operational_urls=operational_urls,
+        ):
+            key = str(row.get("id") or f"row-{len(scoped_rows_by_id_or_index)}")
+            scoped_rows_by_id_or_index[key] = row
+    return list(scoped_rows_by_id_or_index.values())
+
+
 def _build_classifier_warning_signals(
     operational_rows: list[dict[str, Any]],
 ) -> ClassifierWarningSignals:
@@ -1276,6 +1316,7 @@ def _build_partial_page_diagnostics(
     attempts: list[ScrapeAttempt],
     operational_rows: list[dict[str, Any]],
     operational_urls: set[str],
+    operational_matching_enabled: bool,
 ) -> PartialPageDiagnostics:
     attempts_by_candidate_id = _candidate_attempts_by_id(attempts)
     partial_candidates = [
@@ -1291,15 +1332,27 @@ def _build_partial_page_diagnostics(
     ]
     matched_partial_candidate_ids: set[str] = set()
     retained_record_count = 0
-    for candidate in partial_candidates:
-        matched_rows = _candidate_operational_record_matches(
-            candidate=candidate,
+    scoped_operational_rows = (
+        _candidate_scoped_operational_rows(
+            candidates=candidates,
             operational_rows=operational_rows,
             operational_urls=operational_urls,
         )
-        if matched_rows:
-            matched_partial_candidate_ids.add(candidate.candidate_id)
-            retained_record_count += len(matched_rows)
+        if operational_matching_enabled
+        else []
+    )
+    if operational_matching_enabled:
+        for candidate in partial_candidates:
+            matched_rows = _candidate_operational_record_matches(
+                candidate=candidate,
+                operational_rows=operational_rows,
+                operational_urls=operational_urls,
+                require_candidate_fallback=True,
+                require_content_basis=ContentBasis.PARTIAL_PAGE,
+            )
+            if matched_rows:
+                matched_partial_candidate_ids.add(candidate.candidate_id)
+                retained_record_count += len(matched_rows)
 
     partial_attempts = [
         attempt for attempt in attempts if attempt.fetch_status is FetchStatus.PARTIAL
@@ -1311,11 +1364,16 @@ def _build_partial_page_diagnostics(
         and attempt.fetch_status in {FetchStatus.BLOCKED, FetchStatus.FAILED, FetchStatus.TIMEOUT}
     )
     return PartialPageDiagnostics(
+        operational_matching_enabled=operational_matching_enabled,
+        operational_records_available=bool(operational_rows),
         partial_candidate_count=len(partial_candidates),
         retained_operational_record_candidate_count=len(matched_partial_candidate_ids),
         retained_operational_record_count=retained_record_count,
-        metadata_only_partial_candidate_count=len(partial_candidates)
-        - len(matched_partial_candidate_ids),
+        metadata_only_partial_candidate_count=(
+            len(partial_candidates) - len(matched_partial_candidate_ids)
+            if operational_matching_enabled
+            else 0
+        ),
         search_result_only_candidate_count=len(search_result_only_candidates),
         generic_fetch_partial_candidate_count=sum(
             1
@@ -1332,6 +1390,32 @@ def _build_partial_page_diagnostics(
             if _candidate_has_attempt(
                 attempts_by_candidate_id.get(candidate.candidate_id, []),
                 attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.PARTIAL,
+            )
+        ),
+        partial_after_source_adapter_attempt_count=sum(
+            1
+            for candidate in partial_candidates
+            if _candidate_has_attempt(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            )
+            and _candidate_has_attempt(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                fetch_status=FetchStatus.PARTIAL,
+            )
+        ),
+        partial_without_source_adapter_attempt_count=sum(
+            1
+            for candidate in partial_candidates
+            if not _candidate_has_attempt(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+            )
+            and _candidate_has_attempt(
+                attempts_by_candidate_id.get(candidate.candidate_id, []),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
                 fetch_status=FetchStatus.PARTIAL,
             )
         ),
@@ -1374,7 +1458,7 @@ def _build_partial_page_diagnostics(
         generic_fetch_error_code_counts=_failure_summaries_from_counter(
             generic_fetch_error_code_counts
         ),
-        classifier_warning_signals=_build_classifier_warning_signals(operational_rows),
+        classifier_warning_signals=_build_classifier_warning_signals(scoped_operational_rows),
     )
 
 

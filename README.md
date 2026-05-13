@@ -77,8 +77,8 @@ Planned future datasets:
   scrape passes
 - Breaks down partial-page diagnostics so operators can distinguish retained candidate-fallback
   operational rows, metadata-only partials, search-result-only generic fetch failures, source vs
-  generic partial attempts, dominant partial domains/sources, and visible classifier/taxonomy risk
-  signals
+  generic partial attempts, generic partials after source-adapter attempts, dominant partial
+  domains/sources, and visible current-candidate classifier/taxonomy risk signals
 - Reports self-heal-eligible candidate backlog and structured scrape-failure groups for future
   repair workflows, without running automatic AI repair or selector rewriting
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains

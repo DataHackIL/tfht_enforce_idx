@@ -353,7 +353,41 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
                 "content_basis": "partial_page",
                 "record_confidence": "low",
                 "classification_confidence": "low",
-            }
+            },
+            {
+                "id": "full-row-same-url",
+                "source_name": "themarker",
+                "source_domain": "themarker.com",
+                "url": "https://www.themarker.com/news/article-metadata-only",
+                "canonical_url": "https://www.themarker.com/news/article-metadata-only",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "full row should not count as fallback retention",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "full row",
+                "annotation_source": None,
+                "event_candidate_ids": [],
+                "content_basis": "full_article_page",
+                "record_confidence": "high",
+            },
+            {
+                "id": "unrelated-fallback",
+                "source_name": "globes",
+                "source_domain": "globes.co.il",
+                "url": "https://www.globes.co.il/news/unrelated",
+                "canonical_url": "https://www.globes.co.il/news/unrelated",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "unrelated fallback should not pollute current diagnostics",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "unrelated",
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": ["unrelated-candidate"],
+                "content_basis": "partial_page",
+                "record_confidence": "low",
+            },
         ],
     )
 
@@ -361,12 +395,16 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
     partials = report.partial_page_diagnostics
 
     assert partials.partial_candidate_count == 2
+    assert partials.operational_matching_enabled is True
+    assert partials.operational_records_available is True
     assert partials.retained_operational_record_candidate_count == 1
     assert partials.retained_operational_record_count == 1
     assert partials.metadata_only_partial_candidate_count == 1
     assert partials.search_result_only_candidate_count == 1
     assert partials.generic_fetch_partial_candidate_count == 2
     assert partials.source_adapter_partial_candidate_count == 0
+    assert partials.partial_after_source_adapter_attempt_count == 1
+    assert partials.partial_without_source_adapter_attempt_count == 1
     assert partials.blocked_generic_fetch_candidate_count == 1
     assert partials.generic_fetch_error_code_counts[0].model_dump(mode="json") == {
         "name": "generic_fetch_http_403",
@@ -377,8 +415,41 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
     assert partials.classifier_warning_signals.partial_page_fallback_without_taxonomy_count == 1
     rendered = render_discovery_diagnostic_report(report)
     assert "Partial pages" in rendered
+    assert "operational_matching=enabled" in rendered
     assert "metadata_only_partial_candidates=1" in rendered
+    assert "partial_after_source_adapter_attempts=1" in rendered
     assert "classifier_signals candidate_fallback_records=1" in rendered
+
+
+def test_partial_page_diagnostics_mark_operational_counts_as_unmeasured_when_skipped(
+    tmp_path: Path,
+) -> None:
+    """Skipped operational matching should not masquerade as metadata-only evidence."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    candidate = _candidate(
+        "partial-skipped",
+        url="https://www.globes.co.il/news/article-skipped",
+        discovered_via=["brave"],
+        status=CandidateStatus.PARTIALLY_SCRAPED,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now,
+        content_basis=ContentBasis.PARTIAL_PAGE,
+    )
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        candidates_override=[candidate],
+        attempts_override=[],
+        include_operational_matches=False,
+    )
+    partials = report.partial_page_diagnostics
+
+    assert partials.operational_matching_enabled is False
+    assert partials.retained_operational_record_candidate_count == 0
+    assert partials.retained_operational_record_count == 0
+    assert partials.metadata_only_partial_candidate_count == 0
+    assert "operational_matching=skipped" in render_discovery_diagnostic_report(report)
 
 
 def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(
