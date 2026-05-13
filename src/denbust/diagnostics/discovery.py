@@ -374,7 +374,7 @@ def build_discovery_diagnostic_report(
         partial_page_diagnostics=_build_partial_page_diagnostics(
             candidates=candidates,
             attempts=attempts,
-            operational_rows=operational_rows,
+            operational_index=operational_index,
             operational_matching_enabled=include_operational_matches,
         ),
         source_suggestions=_build_source_suggestion_report(
@@ -884,7 +884,7 @@ def _build_candidate_conversion_metrics(
     matched_candidate_ids = {
         candidate.candidate_id
         for candidate in candidates
-        if _candidate_operational_record_matches(
+        if _candidate_has_operational_record_match(
             candidate=candidate,
             operational_index=operational_index,
         )
@@ -1247,6 +1247,31 @@ def _candidate_operational_record_matches(
     return matched_rows
 
 
+def _candidate_has_operational_record_match(
+    *,
+    candidate: PersistentCandidate,
+    operational_index: OperationalRecordIndex,
+    require_candidate_fallback: bool = False,
+    require_content_basis: ContentBasis | None = None,
+) -> bool:
+    for row in operational_index.rows_by_candidate_id.get(candidate.candidate_id, []):
+        if _operational_record_matches_filter(
+            row,
+            require_candidate_fallback=require_candidate_fallback,
+            require_content_basis=require_content_basis,
+        ):
+            return True
+    for candidate_url in _candidate_identity_urls(candidate):
+        for row in operational_index.rows_by_canonical_url.get(candidate_url, []):
+            if _operational_record_matches_filter(
+                row,
+                require_candidate_fallback=require_candidate_fallback,
+                require_content_basis=require_content_basis,
+            ):
+                return True
+    return False
+
+
 def _candidate_attempts_by_id(
     attempts: list[ScrapeAttempt],
 ) -> dict[str, list[ScrapeAttempt]]:
@@ -1375,11 +1400,10 @@ def _build_partial_page_diagnostics(
     *,
     candidates: list[PersistentCandidate],
     attempts: list[ScrapeAttempt],
-    operational_rows: list[dict[str, Any]],
+    operational_index: OperationalRecordIndex,
     operational_matching_enabled: bool,
 ) -> PartialPageDiagnostics:
     attempts_by_candidate_id = _candidate_attempts_by_id(attempts)
-    operational_index = _build_operational_record_index(operational_rows)
     partial_candidates = [
         candidate
         for candidate in candidates
@@ -1424,7 +1448,7 @@ def _build_partial_page_diagnostics(
     )
     return PartialPageDiagnostics(
         operational_matching_enabled=operational_matching_enabled,
-        operational_records_available=bool(operational_rows),
+        operational_records_available=bool(operational_index.rows),
         partial_candidate_count=len(partial_candidates),
         retained_operational_record_candidate_count=len(matched_partial_candidate_ids),
         retained_operational_record_count=retained_record_count,
