@@ -68,7 +68,8 @@ Planned future datasets:
   full local search config
 - Retains obvious non-article search-result noise as provenance while marking new `x.com` /
   Twitter, app-store, social-profile, dictionary, translation, and reference-utility candidates
-  `unsupported_source` before they can consume scrape-drain budget
+  `unsupported_source` before they can consume scrape-drain budget, with diagnostics exposing the
+  filter reason counts
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
 - Reports queue-drain selection order, attempted and remaining eligible source mix, configured

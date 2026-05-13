@@ -99,6 +99,7 @@ class QueueHealthMetrics(BaseModel):
     stale_candidates: int = 0
     retry_backlog_candidates: int = 0
     self_heal_eligible_candidates: int = 0
+    search_noise_filter_reason_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class ProducerConversionMetrics(BaseModel):
@@ -416,6 +417,14 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
             **queue.model_dump(mode="json")
         )
     )
+    if queue.search_noise_filter_reason_counts:
+        lines.append(
+            "  search_noise_filters "
+            + ", ".join(
+                f"{reason}={count}"
+                for reason, count in queue.search_noise_filter_reason_counts.items()
+            )
+        )
     lines.append("")
     lines.append("Conversion")
     lines.append(
@@ -650,6 +659,13 @@ def _build_queue_health_metrics(
             stale += 1
     status_counts = Counter(candidate.candidate_status for candidate in candidates)
     basis_counts = Counter(candidate.content_basis for candidate in candidates)
+    search_noise_filter_reason_counts = Counter(
+        reason
+        for candidate in candidates
+        if candidate.candidate_status is CandidateStatus.UNSUPPORTED_SOURCE
+        for reason in [_search_noise_filter_reason(candidate)]
+        if reason is not None
+    )
     return QueueHealthMetrics(
         total_candidates=len(candidates),
         new_candidates=status_counts[CandidateStatus.NEW],
@@ -670,7 +686,16 @@ def _build_queue_health_metrics(
             if candidate.candidate_status is CandidateStatus.SCRAPE_FAILED
             and candidate.self_heal_eligible
         ),
+        search_noise_filter_reason_counts=dict(sorted(search_noise_filter_reason_counts.items())),
     )
+
+
+def _search_noise_filter_reason(candidate: PersistentCandidate) -> str | None:
+    latest_discovery_metadata = candidate.metadata.get("latest_discovery_metadata")
+    if not isinstance(latest_discovery_metadata, dict):
+        return None
+    reason = latest_discovery_metadata.get("search_noise_filter_reason")
+    return reason if isinstance(reason, str) and reason else None
 
 
 def _candidate_identity_urls(candidate: PersistentCandidate) -> set[str]:

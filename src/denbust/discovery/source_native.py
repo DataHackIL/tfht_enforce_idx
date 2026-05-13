@@ -6,12 +6,17 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
-from urllib.parse import urlparse
 
 from pydantic import HttpUrl
 
 from denbust.data_models import RawArticle
 from denbust.discovery.base import SourceCandidateProducer, SourceDiscoveryContext
+from denbust.discovery.candidate_filters import (
+    candidate_domain,
+    classify_search_noise,
+    match_domain,
+    normalize_domain,
+)
 from denbust.discovery.models import (
     CandidateProvenance,
     CandidateStatus,
@@ -24,20 +29,14 @@ from denbust.discovery.models import (
     ProducerKind,
 )
 from denbust.discovery.queries import SOCIAL_DISCOVERY_DOMAINS
+from denbust.discovery.scrape_queue import SCRAPEABLE_CANDIDATE_STATUSES
 from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.sources.base import HistoricalSource, Source
 
 
 def _normalize_domain(domain: str | None) -> str | None:
-    if domain is None:
-        return None
-    normalized = domain.strip().casefold()
-    if not normalized:
-        return None
-    if normalized.startswith("www."):
-        normalized = normalized[4:]
-    return normalized or None
+    return normalize_domain(domain)
 
 
 _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS = frozenset(
@@ -46,91 +45,9 @@ _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS = frozenset(
     if (normalized := _normalize_domain(domain)) is not None
 )
 
-_NORMALIZED_ALWAYS_UNSUPPORTED_SEARCH_DOMAINS = frozenset(
-    normalized
-    for domain in (
-        "x.com",
-        "twitter.com",
-        "play.google.com",
-        "apps.apple.com",
-        "itunes.apple.com",
-        "morfix.co.il",
-        "context.reverso.net",
-        "dictionary.reverso.net",
-        "wiktionary.org",
-        "pealim.com",
-    )
-    if (normalized := _normalize_domain(domain)) is not None
-)
-
-_NORMALIZED_SOCIAL_PROFILE_DOMAINS = frozenset(
-    normalized
-    for domain in (
-        "instagram.com",
-        "linkedin.com",
-        "tiktok.com",
-        "youtube.com",
-    )
-    if (normalized := _normalize_domain(domain)) is not None
-)
-
-_SOCIAL_PROFILE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
-    "linkedin.com": ("/company/", "/in/", "/school/", "/showcase/"),
-    "youtube.com": ("/@", "/channel/", "/c/", "/user/"),
-}
-
-_SOCIAL_POST_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
-    "instagram.com": ("/p/", "/reel/", "/tv/"),
-}
-
 
 def _candidate_domain(discovered: DiscoveredCandidate) -> str | None:
-    normalized_domain = _normalize_domain(discovered.domain)
-    if normalized_domain is not None:
-        return normalized_domain
-    return _normalize_domain(
-        urlparse(str(discovered.canonical_url or discovered.candidate_url)).netloc
-    )
-
-
-def _candidate_path(discovered: DiscoveredCandidate) -> str:
-    parsed = urlparse(str(discovered.canonical_url or discovered.candidate_url))
-    return parsed.path or "/"
-
-
-def _domain_matches(domain: str | None, configured_domains: frozenset[str]) -> bool:
-    if domain is None:
-        return False
-    return any(
-        domain == configured or domain.endswith(f".{configured}")
-        for configured in configured_domains
-    )
-
-
-def _is_social_profile_candidate(discovered: DiscoveredCandidate) -> bool:
-    domain = _candidate_domain(discovered)
-    if not _domain_matches(domain, _NORMALIZED_SOCIAL_PROFILE_DOMAINS):
-        return False
-    assert domain is not None
-    path = _candidate_path(discovered)
-    if domain in _SOCIAL_PROFILE_PATH_PREFIXES:
-        return any(path.startswith(prefix) for prefix in _SOCIAL_PROFILE_PATH_PREFIXES[domain])
-    if domain in _SOCIAL_POST_PATH_PREFIXES:
-        return not any(path.startswith(prefix) for prefix in _SOCIAL_POST_PATH_PREFIXES[domain])
-    if domain == "tiktok.com":
-        return "/video/" not in path
-    return False
-
-
-def _search_noise_filter_reason(discovered: DiscoveredCandidate) -> str | None:
-    if discovered.producer_kind is not ProducerKind.SEARCH_ENGINE:
-        return None
-    domain = _candidate_domain(discovered)
-    if _domain_matches(domain, _NORMALIZED_ALWAYS_UNSUPPORTED_SEARCH_DOMAINS):
-        return "unsupported_search_domain"
-    if _is_social_profile_candidate(discovered):
-        return "social_profile"
-    return None
+    return candidate_domain(discovered)
 
 
 def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> DiscoveredCandidate:
@@ -138,7 +55,8 @@ def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> Discover
     query_kind = discovered.metadata.get("query_kind")
     if discovered.producer_kind is ProducerKind.SEARCH_ENGINE and (
         query_kind == DiscoveryQueryKind.SOCIAL_TARGETED.value
-        or _candidate_domain(discovered) in _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS
+        or match_domain(_candidate_domain(discovered), _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS)
+        is not None
     ):
         return discovered.model_copy(update={"producer_kind": ProducerKind.SOCIAL_SEARCH})
     return discovered
@@ -149,7 +67,15 @@ def _is_social_candidate(discovered: DiscoveredCandidate) -> bool:
 
 
 def _is_search_noise_candidate(discovered: DiscoveredCandidate) -> bool:
-    return _search_noise_filter_reason(discovered) is not None
+    return classify_search_noise(discovered) is not None
+
+
+def _can_demote_existing_noise_candidate(existing: PersistentCandidate) -> bool:
+    return (
+        existing.candidate_status in SCRAPEABLE_CANDIDATE_STATUSES
+        and existing.scrape_attempt_count == 0
+        and existing.content_basis is ContentBasis.CANDIDATE_ONLY
+    )
 
 
 def build_candidate_id(identity_url: str) -> str:
@@ -257,6 +183,12 @@ def merge_discovered_candidate(
     candidate_status = existing.candidate_status if existing else CandidateStatus.NEW
     if (is_social or is_search_noise) and existing is None:
         candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
+    if (
+        (is_social or is_search_noise)
+        and existing is not None
+        and _can_demote_existing_noise_candidate(existing)
+    ):
+        candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
 
     return PersistentCandidate(
         candidate_id=existing.candidate_id
@@ -342,12 +274,13 @@ def persist_discovered_candidates(
 
     for discovered in discovered_candidates:
         discovered = _normalize_discovered_candidate(discovered)
-        if (noise_reason := _search_noise_filter_reason(discovered)) is not None:
+        if (classification := classify_search_noise(discovered)) is not None:
             discovered = discovered.model_copy(
                 update={
                     "metadata": {
                         **discovered.metadata,
-                        "search_noise_filter_reason": noise_reason,
+                        "search_noise_filter_reason": classification.reason,
+                        "search_noise_filter_domain": classification.matched_domain,
                     }
                 }
             )

@@ -9,7 +9,13 @@ from pathlib import Path
 from pydantic import HttpUrl
 
 from denbust.data_models import RawArticle
-from denbust.discovery.models import DiscoveredCandidate, DiscoveryRun, ProducerKind
+from denbust.discovery.models import (
+    CandidateStatus,
+    ContentBasis,
+    DiscoveredCandidate,
+    DiscoveryRun,
+    ProducerKind,
+)
 from denbust.discovery.source_native import (
     _candidate_domain,
     _normalize_domain,
@@ -188,6 +194,38 @@ def test_persist_discovered_candidates_marks_social_domains_unsupported_without_
     assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
 
 
+def test_persist_discovered_candidates_marks_social_subdomains_unsupported(
+    tmp_path: Path,
+) -> None:
+    """Configured social subdomains should use the same non-scrapeable social handling."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discovery = DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://m.facebook.com/story.php?story_fbid=5&id=6"),
+        canonical_url=HttpUrl("https://m.facebook.com/story.php?story_fbid=5&id=6"),
+        title="פוסט פייסבוק רחב",
+        snippet="חשד לבית בושת",
+        discovered_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+        source_hint="m.facebook.com",
+        metadata={"query_kind": "broad"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-social-subdomain"),
+        discovered_candidates=[discovery],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    provenance = persisted.provenance[0]
+    assert candidate.candidate_status.value == "unsupported_source"
+    assert candidate.needs_review is True
+    assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
+
+
 def test_persist_discovered_candidates_marks_search_noise_unsupported(
     tmp_path: Path,
 ) -> None:
@@ -233,6 +271,119 @@ def test_persist_discovered_candidates_marks_search_noise_unsupported(
         candidate.metadata["latest_discovery_metadata"]["search_noise_filter_reason"]
         for candidate in persisted.candidates
     } == {"unsupported_search_domain", "social_profile"}
+    assert {
+        candidate.metadata["latest_discovery_metadata"]["search_noise_filter_domain"]
+        for candidate in persisted.candidates
+    } == {
+        "x.com",
+        "play.google.com",
+        "apps.apple.com",
+        "morfix.co.il",
+        "context.reverso.net",
+        "wiktionary.org",
+        "linkedin.com",
+        "instagram.com",
+    }
+
+
+def test_persist_discovered_candidates_demotes_existing_unattempted_search_noise(
+    tmp_path: Path,
+) -> None:
+    """Existing scrapeable noise should be removed from scrape eligibility when rediscovered."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    existing = raw_article_to_discovered_candidate(
+        build_raw_article(
+            "https://x.com/example_profile",
+            source_name="brave",
+            title="profile",
+        )
+    )
+    persisted_existing = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-existing"),
+        discovered_candidates=[existing],
+        persistence=persistence,
+    ).candidates[0]
+    assert persisted_existing.candidate_status is CandidateStatus.NEW
+
+    rediscovered = DiscoveredCandidate(
+        producer_name="exa",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://x.com/example_profile"),
+        canonical_url=HttpUrl("https://x.com/example_profile"),
+        title="profile",
+        snippet="metadata-poor result",
+        discovered_at=datetime(2026, 4, 11, 10, 0, tzinfo=UTC),
+        metadata={"query_kind": "broad"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-existing-noise"),
+        discovered_candidates=[rediscovered],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    assert candidate.candidate_id == persisted_existing.candidate_id
+    assert candidate.candidate_status is CandidateStatus.UNSUPPORTED_SOURCE
+    assert candidate.scrape_attempt_count == 0
+    assert candidate.metadata["latest_discovery_metadata"]["search_noise_filter_reason"] == (
+        "unsupported_search_domain"
+    )
+
+
+def test_persist_discovered_candidates_preserves_attempted_existing_noise_status(
+    tmp_path: Path,
+) -> None:
+    """Noise rediscovery should not rewrite candidates with scrape history."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    existing = raw_article_to_discovered_candidate(
+        build_raw_article(
+            "https://x.com/example_profile",
+            source_name="brave",
+            title="profile",
+        )
+    )
+    persisted_existing = (
+        persist_discovered_candidates(
+            run=DiscoveryRun(run_id="run-existing-attempted"),
+            discovered_candidates=[existing],
+            persistence=persistence,
+        )
+        .candidates[0]
+        .model_copy(
+            update={
+                "candidate_status": CandidateStatus.PARTIALLY_SCRAPED,
+                "content_basis": ContentBasis.PARTIAL_PAGE,
+                "scrape_attempt_count": 1,
+            }
+        )
+    )
+    persistence.upsert_candidates([persisted_existing])
+    rediscovered = DiscoveredCandidate(
+        producer_name="exa",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://x.com/example_profile"),
+        canonical_url=HttpUrl("https://x.com/example_profile"),
+        title="profile",
+        snippet="metadata-poor result",
+        discovered_at=datetime(2026, 4, 11, 10, 0, tzinfo=UTC),
+        metadata={"query_kind": "broad"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-existing-attempted-noise"),
+        discovered_candidates=[rediscovered],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    assert candidate.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    assert candidate.content_basis is ContentBasis.PARTIAL_PAGE
+    assert candidate.scrape_attempt_count == 1
 
 
 def test_persist_discovered_candidates_keeps_supported_news_articles_scrapeable(
