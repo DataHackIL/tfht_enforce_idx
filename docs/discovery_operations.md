@@ -62,6 +62,43 @@ denbust run --dataset news_items --job backfill_discover --config agents/news/lo
 
 Missing search keys are surfaced by the discovery run errors. They are not hidden by the config.
 
+The local Google Programmable Search Engine backing `DENBUST_GOOGLE_CSE_ID` includes the current
+repo-supported sources, Facebook public search, and additional Israeli news domains that should be
+eligible for Google CSE-backed discovery. The current domain set is:
+
+- `www.ynet.co.il/*`
+- `news.walla.co.il/*`
+- `www.mako.co.il/*`
+- `www.maariv.co.il/*`
+- `www.haaretz.co.il/*`
+- `www.ice.co.il/*`
+- `www.facebook.com/*`
+- `www.kan.org.il/*`
+- `www.n12.co.il/*`
+- `www.13tv.co.il/*`
+- `www.calcalist.co.il/*`
+- `www.globes.co.il/*`
+- `www.themarker.com/*`
+- `www.israelhayom.co.il/*`
+- `www.jpost.com/*`
+- `www.timesofisrael.com/*`
+- `www.i24news.tv/*`
+- `www.0404.co.il/*`
+- `www.srugim.co.il/*`
+- `www.kikar.co.il/*`
+- `www.bhol.co.il/*`
+- `www.inn.co.il/*`
+- `www.davar1.co.il/*`
+- `www.zman.co.il/*`
+- `www.mekomit.co.il/*`
+- `www.ha-makom.co.il/*`
+- `shakuf.co.il/*`
+- `www.news1.co.il/*`
+
+The pipeline currently builds source-targeted Google CSE queries for configured source domains and
+Facebook social discovery. Future discovery expansion can and should use this same CSE to query the
+broader listed Israeli news domains through the API before adding new source-specific scrapers.
+
 Before model-backed validation, lint the tracked validation CSV without credentials:
 
 ```bash
