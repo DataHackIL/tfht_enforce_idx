@@ -310,3 +310,36 @@ Open a follow-up code PR only when the wet test shows one of these concrete defe
 
 Do not implement queue fairness, prioritization, selector repair, or AI self-healing from a single
 successful bounded wet test.
+
+## Follow-Up PR Map
+
+Use stable planning IDs for the post-wet-test slices so they are not confused with GitHub pull
+request numbers. The current map is three simple cross-cutting PRs followed by four source-family
+PRs, for seven planned follow-ups total:
+
+1. `WET-PR-EVIDENCE-CONFIG` - planning/config evidence only.
+   Add a tracked Brave+Exa/no-Google local search config, document that local operators may bypass
+   Google CSE when the API returns `403 PERMISSION_DENIED`, check in a concise January 1-7
+   Chrome-CDP wet-test evidence summary, and update `.agent-plan.md`.
+2. `DISC-PR-NOISE-FILTERS` - discovery candidate quality.
+   Filter or deprioritize obvious non-article search-result surfaces before they consume scrape
+   budget, including `x.com`, app-store links, social profiles, dictionary pages, and other
+   metadata-poor utility pages.
+3. `SCRAPE-PR-PARTIAL-DIAGNOSTICS` - scrape interpretation.
+   Make partial-page diagnostics sharper so operators can distinguish retained provisional rows,
+   metadata-only partial pages, blocked generic fetches, and classifier parse/taxonomy warnings.
+4. `SRC-PR-GLOBES-THEMARKER` - source-family expansion.
+   Add or improve source support for the Globes/TheMarker family if repeated diagnostics keep
+   showing high-value unsupported or partial candidates.
+5. `SRC-PR-ISRAELHAYOM` - source-family expansion.
+   Add or improve Israel Hayom support if bounded scrape diagnostics show enough high-value
+   unsupported or partial candidates.
+6. `SRC-PR-KAN` - source-family expansion.
+   Add or improve Kan support if the broader search corpus keeps surfacing relevant candidates that
+   current generic fetch cannot handle well.
+7. `SRC-PR-NEWS1` - source-family expansion.
+   Add or improve News1 support if repeated wet-test slices show relevant candidates and generic
+   fetch/metadata extraction is insufficient.
+
+Do not bundle the source-family work into one large scraper PR. Promote each source-family PR only
+after the latest diagnostics justify it.
