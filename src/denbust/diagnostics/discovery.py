@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,15 @@ _STALE_CANDIDATE_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.UNSUPPORTED_SOURCE,
 )
 _QUEUE_DRAIN_TEXT_ORDER_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class OperationalRecordIndex:
+    """Lookup tables for candidate-related operational records."""
+
+    rows: list[dict[str, Any]]
+    rows_by_candidate_id: dict[str, list[dict[str, Any]]]
+    rows_by_canonical_url: dict[str, list[dict[str, Any]]]
 
 
 class EngineOverlapMetrics(BaseModel):
@@ -341,7 +351,7 @@ def build_discovery_diagnostic_report(
         latest_candidates_path=str(paths.latest_candidates_path),
         scrape_attempts_path=str(paths.scrape_attempts_path),
         candidate_provenance_path=str(paths.candidate_provenance_path),
-        operational_records_available=bool(operational_urls),
+        operational_records_available=bool(operational_rows),
         notes=operational_notes,
         engine_overlap=_build_engine_overlap_metrics(overlap_candidates),
         source_search_coverage=_build_source_search_coverage(candidates),
@@ -366,7 +376,6 @@ def build_discovery_diagnostic_report(
             candidates=candidates,
             attempts=attempts,
             operational_rows=operational_rows,
-            operational_urls=operational_urls,
             operational_matching_enabled=include_operational_matches,
         ),
         source_suggestions=_build_source_suggestion_report(
@@ -382,7 +391,7 @@ def build_discovery_diagnostic_report(
         report.notes.append("No persisted scrape attempts were found.")
     if (
         include_operational_matches
-        and not operational_urls
+        and not operational_rows
         and config.operational.provider is not OperationalProvider.NONE
     ):
         report.notes.append(
@@ -600,6 +609,18 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
             "  partial_sources: "
             + ", ".join(
                 f"{item.name}={item.count}" for item in partials.partial_candidates_by_source
+            )
+        )
+    if partials.partial_attempts_by_kind:
+        lines.append(
+            "  partial_attempt_kinds: "
+            + ", ".join(f"{item.name}={item.count}" for item in partials.partial_attempts_by_kind)
+        )
+    if partials.partial_attempts_by_source_adapter:
+        lines.append(
+            "  partial_attempt_sources: "
+            + ", ".join(
+                f"{item.name}={item.count}" for item in partials.partial_attempts_by_source_adapter
             )
         )
     if partials.generic_fetch_error_code_counts:
@@ -1158,36 +1179,69 @@ def _build_queue_drain_diagnostics(
     )
 
 
+def _operational_row_key(row: dict[str, Any]) -> str:
+    raw_key = row.get("id") or row.get("canonical_url")
+    return str(raw_key) if raw_key else str(id(row))
+
+
+def _build_operational_record_index(rows: list[dict[str, Any]]) -> OperationalRecordIndex:
+    rows_by_candidate_id: dict[str, list[dict[str, Any]]] = {}
+    rows_by_canonical_url: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        event_candidate_ids = row.get("event_candidate_ids")
+        if isinstance(event_candidate_ids, list):
+            for candidate_id in event_candidate_ids:
+                if isinstance(candidate_id, str) and candidate_id:
+                    rows_by_candidate_id.setdefault(candidate_id, []).append(row)
+        canonical_url = row.get("canonical_url")
+        if isinstance(canonical_url, str) and canonical_url:
+            normalized_url = canonicalize_news_url(canonical_url)
+            rows_by_canonical_url.setdefault(normalized_url, []).append(row)
+    return OperationalRecordIndex(
+        rows=rows,
+        rows_by_candidate_id=rows_by_candidate_id,
+        rows_by_canonical_url=rows_by_canonical_url,
+    )
+
+
+def _operational_record_matches_filter(
+    row: dict[str, Any],
+    *,
+    require_candidate_fallback: bool,
+    require_content_basis: ContentBasis | None,
+) -> bool:
+    if require_candidate_fallback and not _record_is_candidate_fallback(row):
+        return False
+    return not (
+        require_content_basis is not None
+        and _record_content_basis(row) != require_content_basis.value
+    )
+
+
 def _candidate_operational_record_matches(
     *,
     candidate: PersistentCandidate,
-    operational_rows: list[dict[str, Any]],
-    operational_urls: set[str],
+    operational_index: OperationalRecordIndex,
     require_candidate_fallback: bool = False,
     require_content_basis: ContentBasis | None = None,
 ) -> list[dict[str, Any]]:
-    candidate_urls = _candidate_identity_urls(candidate)
-    url_matched = bool(operational_urls and candidate_urls & operational_urls)
-    matched_rows: list[dict[str, Any]] = []
-    for row in operational_rows:
-        if require_candidate_fallback and not _record_is_candidate_fallback(row):
-            continue
-        if (
-            require_content_basis is not None
-            and _record_content_basis(row) != require_content_basis.value
+    matched_by_key: dict[str, dict[str, Any]] = {}
+    for row in operational_index.rows_by_candidate_id.get(candidate.candidate_id, []):
+        if _operational_record_matches_filter(
+            row,
+            require_candidate_fallback=require_candidate_fallback,
+            require_content_basis=require_content_basis,
         ):
-            continue
-        event_candidate_ids = row.get("event_candidate_ids")
-        if isinstance(event_candidate_ids, list) and candidate.candidate_id in event_candidate_ids:
-            matched_rows.append(row)
-            continue
-        canonical_url = row.get("canonical_url")
-        if (
-            url_matched
-            and isinstance(canonical_url, str)
-            and canonicalize_news_url(canonical_url) in candidate_urls
-        ):
-            matched_rows.append(row)
+            matched_by_key[_operational_row_key(row)] = row
+    for candidate_url in _candidate_identity_urls(candidate):
+        for row in operational_index.rows_by_canonical_url.get(candidate_url, []):
+            if _operational_record_matches_filter(
+                row,
+                require_candidate_fallback=require_candidate_fallback,
+                require_content_basis=require_content_basis,
+            ):
+                matched_by_key[_operational_row_key(row)] = row
+    matched_rows = list(matched_by_key.values())
     return matched_rows
 
 
@@ -1257,18 +1311,15 @@ def _record_has_valid_taxonomy_pair(row: dict[str, Any]) -> bool:
 def _candidate_scoped_operational_rows(
     *,
     candidates: list[PersistentCandidate],
-    operational_rows: list[dict[str, Any]],
-    operational_urls: set[str],
+    operational_index: OperationalRecordIndex,
 ) -> list[dict[str, Any]]:
     scoped_rows_by_id_or_index: dict[str, dict[str, Any]] = {}
     for candidate in candidates:
         for row in _candidate_operational_record_matches(
             candidate=candidate,
-            operational_rows=operational_rows,
-            operational_urls=operational_urls,
+            operational_index=operational_index,
         ):
-            key = str(row.get("id") or f"row-{len(scoped_rows_by_id_or_index)}")
-            scoped_rows_by_id_or_index[key] = row
+            scoped_rows_by_id_or_index[_operational_row_key(row)] = row
     return list(scoped_rows_by_id_or_index.values())
 
 
@@ -1315,10 +1366,10 @@ def _build_partial_page_diagnostics(
     candidates: list[PersistentCandidate],
     attempts: list[ScrapeAttempt],
     operational_rows: list[dict[str, Any]],
-    operational_urls: set[str],
     operational_matching_enabled: bool,
 ) -> PartialPageDiagnostics:
     attempts_by_candidate_id = _candidate_attempts_by_id(attempts)
+    operational_index = _build_operational_record_index(operational_rows)
     partial_candidates = [
         candidate
         for candidate in candidates
@@ -1335,8 +1386,7 @@ def _build_partial_page_diagnostics(
     scoped_operational_rows = (
         _candidate_scoped_operational_rows(
             candidates=candidates,
-            operational_rows=operational_rows,
-            operational_urls=operational_urls,
+            operational_index=operational_index,
         )
         if operational_matching_enabled
         else []
@@ -1345,8 +1395,7 @@ def _build_partial_page_diagnostics(
         for candidate in partial_candidates:
             matched_rows = _candidate_operational_record_matches(
                 candidate=candidate,
-                operational_rows=operational_rows,
-                operational_urls=operational_urls,
+                operational_index=operational_index,
                 require_candidate_fallback=True,
                 require_content_basis=ContentBasis.PARTIAL_PAGE,
             )

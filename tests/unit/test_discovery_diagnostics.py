@@ -372,6 +372,21 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
                 "record_confidence": "high",
             },
             {
+                "id": "wrong-basis-fallback",
+                "source_name": "themarker",
+                "source_domain": "themarker.com",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "wrong-basis fallback should not count as partial retention",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "wrong basis",
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": ["partial-metadata-only"],
+                "content_basis": "search_result_only",
+                "record_confidence": "high",
+            },
+            {
                 "id": "unrelated-fallback",
                 "source_name": "globes",
                 "source_domain": "globes.co.il",
@@ -387,6 +402,25 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
                 "event_candidate_ids": ["unrelated-candidate"],
                 "content_basis": "partial_page",
                 "record_confidence": "low",
+            },
+            {
+                "id": "search-result-fallback",
+                "source_name": "globes",
+                "source_domain": "globes.co.il",
+                "url": "https://www.globes.co.il/news/article-blocked",
+                "canonical_url": "https://www.globes.co.il/news/article-blocked",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "search-result fallback should count classifier warning signals",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "search-result fallback",
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": ["blocked-search-result-only"],
+                "content_basis": "search_result_only",
+                "record_confidence": "low",
+                "taxonomy_category_id": "invalid_category",
+                "taxonomy_subcategory_id": "invalid_subcategory",
             },
         ],
     )
@@ -410,15 +444,20 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
         "name": "generic_fetch_http_403",
         "count": 1,
     }
-    assert partials.classifier_warning_signals.candidate_fallback_record_count == 1
+    assert partials.classifier_warning_signals.candidate_fallback_record_count == 3
     assert partials.classifier_warning_signals.partial_page_fallback_record_count == 1
+    assert partials.classifier_warning_signals.search_result_only_fallback_record_count == 2
+    assert partials.classifier_warning_signals.low_confidence_fallback_record_count == 2
+    assert partials.classifier_warning_signals.invalid_taxonomy_pair_record_count == 1
     assert partials.classifier_warning_signals.partial_page_fallback_without_taxonomy_count == 1
     rendered = render_discovery_diagnostic_report(report)
     assert "Partial pages" in rendered
     assert "operational_matching=enabled" in rendered
     assert "metadata_only_partial_candidates=1" in rendered
     assert "partial_after_source_adapter_attempts=1" in rendered
-    assert "classifier_signals candidate_fallback_records=1" in rendered
+    assert "partial_attempt_kinds: generic_fetch=2" in rendered
+    assert "partial_attempt_sources: generic_fetch=2" in rendered
+    assert "classifier_signals candidate_fallback_records=3" in rendered
 
 
 def test_partial_page_diagnostics_mark_operational_counts_as_unmeasured_when_skipped(
@@ -450,6 +489,55 @@ def test_partial_page_diagnostics_mark_operational_counts_as_unmeasured_when_ski
     assert partials.retained_operational_record_count == 0
     assert partials.metadata_only_partial_candidate_count == 0
     assert "operational_matching=skipped" in render_discovery_diagnostic_report(report)
+
+
+def test_discovery_diagnostic_report_treats_event_id_only_operational_rows_as_available(
+    tmp_path: Path,
+) -> None:
+    """Operational availability should not depend on canonical_url presence."""
+    now = datetime.now(UTC)
+    config = Config(
+        store={"state_root": tmp_path},
+        operational={
+            "provider": OperationalProvider.LOCAL_JSON,
+            "root_dir": tmp_path / "operational",
+        },
+    )
+    candidate = _candidate(
+        "event-id-only",
+        url="https://www.globes.co.il/news/event-id-only",
+        discovered_via=["brave"],
+        status=CandidateStatus.PARTIALLY_SCRAPED,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now,
+        content_basis=ContentBasis.PARTIAL_PAGE,
+    )
+    LocalJsonOperationalStore(tmp_path / "operational").upsert_records(
+        DatasetName.NEWS_ITEMS.value,
+        [
+            {
+                "id": "event-id-only-row",
+                "publication_datetime": now.isoformat(),
+                "event_candidate_ids": ["event-id-only"],
+                "annotation_source": "candidate_fallback",
+                "content_basis": "partial_page",
+            }
+        ],
+    )
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        candidates_override=[candidate],
+        attempts_override=[],
+    )
+
+    assert report.operational_records_available is True
+    assert report.partial_page_diagnostics.operational_records_available is True
+    assert report.partial_page_diagnostics.retained_operational_record_candidate_count == 1
+    assert (
+        "No operational records were available for candidate-to-news-item matching."
+        not in report.notes
+    )
 
 
 def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(
