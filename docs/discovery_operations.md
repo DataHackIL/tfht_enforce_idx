@@ -232,6 +232,13 @@ provisional operational rows, 88 partial pages, 12 scrape failures, 2,689 remain
 candidates, and `budget_cap_reached`. The first no-CDP scrape attempt was aborted/reset and should
 not be used as valid scrape evidence.
 
+After `DISC-PR-NOISE-FILTERS`, search-engine results that are obvious non-article surfaces are
+still retained with candidate provenance, but new matches are marked `unsupported_source` before
+they can consume scrape-drain budget. The filter covers `x.com` / Twitter, app-store URLs, social
+profile pages, and dictionary/translation/reference utility domains such as Morfix, Reverso,
+Wiktionary, and Pealim. Queue fairness and source prioritization are intentionally unchanged; the
+filter only removes known low-value search-result surfaces from scrape eligibility.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:

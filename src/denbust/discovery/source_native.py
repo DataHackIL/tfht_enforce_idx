@@ -46,6 +46,43 @@ _NORMALIZED_SOCIAL_DISCOVERY_DOMAINS = frozenset(
     if (normalized := _normalize_domain(domain)) is not None
 )
 
+_NORMALIZED_ALWAYS_UNSUPPORTED_SEARCH_DOMAINS = frozenset(
+    normalized
+    for domain in (
+        "x.com",
+        "twitter.com",
+        "play.google.com",
+        "apps.apple.com",
+        "itunes.apple.com",
+        "morfix.co.il",
+        "context.reverso.net",
+        "dictionary.reverso.net",
+        "wiktionary.org",
+        "pealim.com",
+    )
+    if (normalized := _normalize_domain(domain)) is not None
+)
+
+_NORMALIZED_SOCIAL_PROFILE_DOMAINS = frozenset(
+    normalized
+    for domain in (
+        "instagram.com",
+        "linkedin.com",
+        "tiktok.com",
+        "youtube.com",
+    )
+    if (normalized := _normalize_domain(domain)) is not None
+)
+
+_SOCIAL_PROFILE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "linkedin.com": ("/company/", "/in/", "/school/", "/showcase/"),
+    "youtube.com": ("/@", "/channel/", "/c/", "/user/"),
+}
+
+_SOCIAL_POST_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "instagram.com": ("/p/", "/reel/", "/tv/"),
+}
+
 
 def _candidate_domain(discovered: DiscoveredCandidate) -> str | None:
     normalized_domain = _normalize_domain(discovered.domain)
@@ -54,6 +91,46 @@ def _candidate_domain(discovered: DiscoveredCandidate) -> str | None:
     return _normalize_domain(
         urlparse(str(discovered.canonical_url or discovered.candidate_url)).netloc
     )
+
+
+def _candidate_path(discovered: DiscoveredCandidate) -> str:
+    parsed = urlparse(str(discovered.canonical_url or discovered.candidate_url))
+    return parsed.path or "/"
+
+
+def _domain_matches(domain: str | None, configured_domains: frozenset[str]) -> bool:
+    if domain is None:
+        return False
+    return any(
+        domain == configured or domain.endswith(f".{configured}")
+        for configured in configured_domains
+    )
+
+
+def _is_social_profile_candidate(discovered: DiscoveredCandidate) -> bool:
+    domain = _candidate_domain(discovered)
+    if not _domain_matches(domain, _NORMALIZED_SOCIAL_PROFILE_DOMAINS):
+        return False
+    assert domain is not None
+    path = _candidate_path(discovered)
+    if domain in _SOCIAL_PROFILE_PATH_PREFIXES:
+        return any(path.startswith(prefix) for prefix in _SOCIAL_PROFILE_PATH_PREFIXES[domain])
+    if domain in _SOCIAL_POST_PATH_PREFIXES:
+        return not any(path.startswith(prefix) for prefix in _SOCIAL_POST_PATH_PREFIXES[domain])
+    if domain == "tiktok.com":
+        return "/video/" not in path
+    return False
+
+
+def _search_noise_filter_reason(discovered: DiscoveredCandidate) -> str | None:
+    if discovered.producer_kind is not ProducerKind.SEARCH_ENGINE:
+        return None
+    domain = _candidate_domain(discovered)
+    if _domain_matches(domain, _NORMALIZED_ALWAYS_UNSUPPORTED_SEARCH_DOMAINS):
+        return "unsupported_search_domain"
+    if _is_social_profile_candidate(discovered):
+        return "social_profile"
+    return None
 
 
 def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> DiscoveredCandidate:
@@ -69,6 +146,10 @@ def _normalize_discovered_candidate(discovered: DiscoveredCandidate) -> Discover
 
 def _is_social_candidate(discovered: DiscoveredCandidate) -> bool:
     return discovered.producer_kind is ProducerKind.SOCIAL_SEARCH
+
+
+def _is_search_noise_candidate(discovered: DiscoveredCandidate) -> bool:
+    return _search_noise_filter_reason(discovered) is not None
 
 
 def build_candidate_id(identity_url: str) -> str:
@@ -172,8 +253,9 @@ def merge_discovered_candidate(
     if discovered.metadata:
         existing_metadata["latest_discovery_metadata"] = discovered.metadata
     is_social = _is_social_candidate(discovered)
+    is_search_noise = _is_search_noise_candidate(discovered)
     candidate_status = existing.candidate_status if existing else CandidateStatus.NEW
-    if is_social and existing is None:
+    if (is_social or is_search_noise) and existing is None:
         candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
 
     return PersistentCandidate(
@@ -226,7 +308,7 @@ def merge_discovered_candidate(
         last_scrape_error_message=existing.last_scrape_error_message if existing else None,
         content_basis=existing.content_basis if existing else ContentBasis.CANDIDATE_ONLY,
         retry_priority=existing.retry_priority if existing else 0,
-        needs_review=(existing.needs_review if existing else False) or is_social,
+        needs_review=(existing.needs_review if existing else False) or is_social or is_search_noise,
         backfill_batch_id=backfill_batch_id or (existing.backfill_batch_id if existing else None),
         self_heal_eligible=existing.self_heal_eligible if existing else False,
         source_discovery_only=(
@@ -260,6 +342,15 @@ def persist_discovered_candidates(
 
     for discovered in discovered_candidates:
         discovered = _normalize_discovered_candidate(discovered)
+        if (noise_reason := _search_noise_filter_reason(discovered)) is not None:
+            discovered = discovered.model_copy(
+                update={
+                    "metadata": {
+                        **discovered.metadata,
+                        "search_noise_filter_reason": noise_reason,
+                    }
+                }
+            )
         canonical_url = (
             str(discovered.canonical_url) if discovered.canonical_url is not None else None
         )

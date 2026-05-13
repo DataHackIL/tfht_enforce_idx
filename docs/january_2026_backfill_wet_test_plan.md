@@ -354,9 +354,11 @@ PRs, for seven planned follow-ups total:
    Google CSE when the API returns `403 PERMISSION_DENIED`, check in a concise January 1-7
    Chrome-CDP wet-test evidence summary, and update `.agent-plan.md`.
 2. `DISC-PR-NOISE-FILTERS` - discovery candidate quality.
-   Filter or deprioritize obvious non-article search-result surfaces before they consume scrape
-   budget, including `x.com`, app-store links, social profiles, dictionary pages, and other
-   metadata-poor utility pages.
+   Implemented as a central persistence-time search-result noise filter: obvious non-article
+   surfaces are retained with provenance but marked `unsupported_source` before scrape-drain budget
+   can select them. Covered classes include `x.com` / Twitter, app-store links, social profiles,
+   dictionary/translation/reference pages, and other metadata-poor utility pages. This intentionally
+   leaves queue fairness and prioritization unchanged.
 3. `SCRAPE-PR-PARTIAL-DIAGNOSTICS` - scrape interpretation.
    Make partial-page diagnostics sharper so operators can distinguish retained provisional rows,
    metadata-only partial pages, blocked generic fetches, and classifier parse/taxonomy warnings.

@@ -188,6 +188,84 @@ def test_persist_discovered_candidates_marks_social_domains_unsupported_without_
     assert provenance.producer_kind is ProducerKind.SOCIAL_SEARCH
 
 
+def test_persist_discovered_candidates_marks_search_noise_unsupported(
+    tmp_path: Path,
+) -> None:
+    """Obvious non-article search results should be retained but not scrape-eligible."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discoveries = [
+        DiscoveredCandidate(
+            producer_name="brave",
+            producer_kind=ProducerKind.SEARCH_ENGINE,
+            query_text="בית בושת",
+            candidate_url=HttpUrl(url),
+            canonical_url=HttpUrl(url),
+            title="noise",
+            snippet="metadata-poor result",
+            discovered_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+            metadata={"query_kind": "broad"},
+        )
+        for url in [
+            "https://x.com/example_profile",
+            "https://play.google.com/store/apps/details?id=com.example",
+            "https://apps.apple.com/il/app/example/id123456789",
+            "https://morfix.co.il/example",
+            "https://context.reverso.net/translation/hebrew-english/example",
+            "https://en.wiktionary.org/wiki/example",
+            "https://www.linkedin.com/company/example-org",
+            "https://www.instagram.com/example_profile/",
+        ]
+    ]
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-search-noise"),
+        discovered_candidates=discoveries,
+        persistence=persistence,
+    )
+
+    assert {candidate.candidate_status.value for candidate in persisted.candidates} == {
+        "unsupported_source"
+    }
+    assert all(candidate.needs_review for candidate in persisted.candidates)
+    assert {event.producer_kind for event in persisted.provenance} == {ProducerKind.SEARCH_ENGINE}
+    assert {
+        candidate.metadata["latest_discovery_metadata"]["search_noise_filter_reason"]
+        for candidate in persisted.candidates
+    } == {"unsupported_search_domain", "social_profile"}
+
+
+def test_persist_discovered_candidates_keeps_supported_news_articles_scrapeable(
+    tmp_path: Path,
+) -> None:
+    """Noise filtering should not suppress normal article URLs from supported news domains."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discovery = DiscoveredCandidate(
+        producer_name="exa",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://www.ynet.co.il/news/article/abc123"),
+        canonical_url=HttpUrl("https://www.ynet.co.il/news/article/abc123"),
+        title="כתבת חדשות רגילה",
+        snippet="חשד לבית בושת",
+        discovered_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+        source_hint="ynet",
+        metadata={"query_kind": "broad"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-supported-news"),
+        discovered_candidates=[discovery],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    assert candidate.candidate_status.value == "new"
+    assert candidate.needs_review is False
+    assert "search_noise_filter_reason" not in candidate.metadata["latest_discovery_metadata"]
+
+
 def test_source_native_domain_helpers_normalize_and_fallback() -> None:
     """Source-native social classification should use canonical host normalization."""
     discovered = DiscoveredCandidate(
