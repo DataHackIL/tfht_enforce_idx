@@ -236,3 +236,4 @@ agents/local/
 uv.lock
 
 .live_checks/
+.temp/
