@@ -17,6 +17,7 @@ from denbust.diagnostics.discovery import (
     _candidate_source,
     _load_operational_record_urls,
     _normalize_domain,
+    _partial_attempt_source_label,
     _read_jsonl,
     _record_content_basis,
     _record_has_valid_taxonomy_pair,
@@ -552,6 +553,8 @@ def test_discovery_diagnostic_report_treats_event_id_only_operational_rows_as_av
 
 def test_record_helpers_handle_enum_blank_and_missing_taxonomy_values() -> None:
     """Operational helper predicates should handle typed and incomplete rows."""
+    now = datetime.now(UTC)
+
     assert _record_content_basis({"content_basis": ContentBasis.PARTIAL_PAGE}) == "partial_page"
     assert _record_content_basis({"content_basis": ""}) == ""
     assert _record_content_basis({}) == ""
@@ -560,6 +563,19 @@ def test_record_helpers_handle_enum_blank_and_missing_taxonomy_values() -> None:
             {"taxonomy_category_id": None, "taxonomy_subcategory_id": "missing"}
         )
         is False
+    )
+    assert (
+        _partial_attempt_source_label(
+            ScrapeAttempt(
+                candidate_id="source-named",
+                started_at=now,
+                finished_at=now,
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.PARTIAL,
+                source_adapter_name="mako",
+            )
+        )
+        == "mako"
     )
 
 
