@@ -62,6 +62,24 @@ denbust run --dataset news_items --job backfill_discover --config agents/news/lo
 
 Missing search keys are surfaced by the discovery run errors. They are not hidden by the config.
 
+If local Google CSE setup returns `403 PERMISSION_DENIED` / no API access, use the tracked
+Brave+Exa/no-Google config instead of a one-off `/tmp` YAML file:
+
+```bash
+denbust run --dataset news_items --job discover --config agents/news/local_search_brave_exa.yaml
+DENBUST_BACKFILL_DATE_FROM=2026-01-01T00:00:00+00:00 \
+DENBUST_BACKFILL_DATE_TO=2026-01-07T23:59:59+00:00 \
+denbust run --dataset news_items --job backfill_discover --config agents/news/local_search_brave_exa.yaml
+```
+
+`local_search_brave_exa.yaml` keeps Brave and Exa enabled, disables Google CSE, and requires only:
+
+- `DENBUST_BRAVE_SEARCH_API_KEY`
+- `DENBUST_EXA_API_KEY`
+
+This is an operator-local wet-test mode. It does not remove Google CSE support from code or from
+`local_search.yaml`.
+
 The local Google Programmable Search Engine backing `DENBUST_GOOGLE_CSE_ID` includes the current
 repo-supported sources, Facebook public search, and additional Israeli news domains that should be
 eligible for Google CSE-backed discovery. The current domain set is:
@@ -197,6 +215,22 @@ configured candidate cap, persisted attempted-candidate order, persisted scrape-
 attempted source mix derived from actual scrape attempts, remaining eligible candidate order,
 remaining eligible source mix, and the inferred stop reason. Use those fields in the next bounded
 candidate-drain evidence pass before changing queue prioritization or fairness behavior.
+
+After PR #117 was squash-merged as `576e05f`, the January 1-7 wet-test follow-up used a local
+Brave+Exa/no-Google search mode because Google CSE returned `403 PERMISSION_DENIED` / no API access
+in local setup. The Chrome-CDP retry scrape used:
+
+```bash
+export DENBUST_BROWSER_MODE=chrome_cdp
+export DENBUST_CHROME_CDP_URL=http://127.0.0.1:9222
+```
+
+The durable checked-in evidence summary is
+[january_2026_backfill_wet_test_evidence_2026_05_13.md](january_2026_backfill_wet_test_evidence_2026_05_13.md).
+It records 3,116 persisted candidates, 100 attempted candidates, 189 scrape attempts, 28 retained
+provisional operational rows, 88 partial pages, 12 scrape failures, 2,689 remaining eligible
+candidates, and `budget_cap_reached`. The first no-CDP scrape attempt was aborted/reset and should
+not be used as valid scrape evidence.
 
 ## GitHub Actions Run Path
 

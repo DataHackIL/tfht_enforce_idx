@@ -63,6 +63,9 @@ Planned future datasets:
   Supabase exact-count requests, without materializing full candidate rows in the pipeline
 - Provides an opt-in `agents/news/local_search.yaml` config for local source-native + Brave + Exa
   + Google CSE discovery experiments
+- Provides `agents/news/local_search_brave_exa.yaml` for local Brave+Exa wet tests when Google CSE
+  returns `403 PERMISSION_DENIED` / no API access; Google CSE remains supported in code and in the
+  full local search config
 - Writes discovery overlap/queue/conversion diagnostics artifacts and exposes
   `denbust diagnose-discovery`
 - Reports queue-drain selection order, attempted and remaining eligible source mix, configured
@@ -343,6 +346,11 @@ DL-PR-06 now builds on the earlier discovery milestones:
 
 The current daily monitoring flow remains operational, and the durable candidate substrate now
 accepts source-native discovery plus Brave, Exa, and Google CSE search results.
+
+Local operators can use `agents/news/local_search_brave_exa.yaml` for wet tests when the Google
+Programmable Search API is unavailable locally. That config disables only the Google CSE engine and
+keeps Brave and Exa enabled; browser-backed scraping still uses `DENBUST_BROWSER_MODE=chrome_cdp`
+and `DENBUST_CHROME_CDP_URL=http://127.0.0.1:9222` when the run needs Chrome CDP.
 
 DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
 

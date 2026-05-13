@@ -64,6 +64,22 @@ empty-state baseline.
 Haaretz. HTTP fallback fetching and API-backed discovery/search engines continue to use their
 existing non-browser paths.
 
+Use one config path consistently across the run. The default source-native local path is:
+
+```bash
+export DENBUST_CONFIG=agents/news/local.yaml
+```
+
+When intentionally exercising local Brave+Exa search without Google CSE, use:
+
+```bash
+export DENBUST_CONFIG=agents/news/local_search_brave_exa.yaml
+```
+
+The Brave+Exa/no-Google config is for local wet tests where Google CSE returns
+`403 PERMISSION_DENIED` / no API access. It does not remove Google CSE support from code or from
+`agents/news/local_search.yaml`.
+
 ## Phase 0 - Static Guardrails
 
 Run the narrow static checks that prove the checked-out code and plan format are healthy before live
@@ -92,13 +108,13 @@ export DENBUST_BROWSER_MODE=chrome_cdp
 export DENBUST_CHROME_CDP_URL=http://127.0.0.1:9222
 
 .venv/bin/denbust diagnose-discovery \
-  --config agents/news/local.yaml \
+  --config "${DENBUST_CONFIG}" \
   --format json \
   --output "${FOLLOWUP_ROOT}/artifacts/diagnose_discovery_before.json" \
   2>&1 | tee "${FOLLOWUP_ROOT}/logs/03_diagnose_discovery_before.log"
 
 .venv/bin/denbust diagnose-sources \
-  --config agents/news/local.yaml \
+  --config "${DENBUST_CONFIG}" \
   --artifacts-only \
   --format json \
   --output "${FOLLOWUP_ROOT}/artifacts/diagnose_sources_artifact_only_before.json" \
@@ -122,7 +138,7 @@ export DENBUST_BACKFILL_DATE_TO=2026-01-07T23:59:59+00:00
 .venv/bin/denbust run \
   --dataset news_items \
   --job backfill_discover \
-  --config agents/news/local.yaml \
+  --config "${DENBUST_CONFIG}" \
   2>&1 | tee "${FOLLOWUP_ROOT}/logs/05_backfill_discover_2026_01_01_07.log"
 ```
 
@@ -130,7 +146,7 @@ Then capture discovery diagnostics:
 
 ```bash
 .venv/bin/denbust diagnose-discovery \
-  --config agents/news/local.yaml \
+  --config "${DENBUST_CONFIG}" \
   --format json \
   --output "${FOLLOWUP_ROOT}/artifacts/diagnose_discovery_after_discover.json" \
   2>&1 | tee "${FOLLOWUP_ROOT}/logs/06_diagnose_discovery_after_discover.log"
@@ -159,7 +175,7 @@ curl -fsS "${DENBUST_CHROME_CDP_URL}/json/version" \
 .venv/bin/denbust run \
   --dataset news_items \
   --job backfill_scrape \
-  --config agents/news/local.yaml \
+  --config "${DENBUST_CONFIG}" \
   2>&1 | tee "${FOLLOWUP_ROOT}/logs/07_backfill_scrape_2026_01_01_07.log"
 ```
 
@@ -167,7 +183,7 @@ Then capture the queue-drain diagnostics:
 
 ```bash
 .venv/bin/denbust diagnose-discovery \
-  --config agents/news/local.yaml \
+  --config "${DENBUST_CONFIG}" \
   --format json \
   --output "${FOLLOWUP_ROOT}/artifacts/diagnose_discovery_after_scrape.json" \
   2>&1 | tee "${FOLLOWUP_ROOT}/logs/08_diagnose_discovery_after_scrape.log"
@@ -191,7 +207,7 @@ Run artifact-only source diagnostics after the scrape pass:
 
 ```bash
 .venv/bin/denbust diagnose-sources \
-  --config agents/news/local.yaml \
+  --config "${DENBUST_CONFIG}" \
   --artifacts-only \
   --format json \
   --output "${FOLLOWUP_ROOT}/artifacts/diagnose_sources_artifact_only_after_scrape.json" \
@@ -275,17 +291,33 @@ Expand from the 7-day wet test to the full January 2026 window only if all of th
 - scrape failures are either low-volume or grouped into actionable diagnostics;
 - no self-heal or retry backlog pattern suggests a code fix should happen before more live work.
 
-If those conditions pass, run the full month:
+If those conditions pass, run the full month with the same config mode used for the 7-day pass.
+For the default source-native path:
 
 ```bash
+export DENBUST_CONFIG=agents/news/local.yaml
 export DENBUST_BACKFILL_DATE_FROM=2026-01-01T00:00:00+00:00
 export DENBUST_BACKFILL_DATE_TO=2026-01-31T23:59:59+00:00
 export DENBUST_BROWSER_MODE=chrome_cdp
 export DENBUST_CHROME_CDP_URL=http://127.0.0.1:9222
 
-.venv/bin/denbust run --dataset news_items --job backfill_discover --config agents/news/local.yaml
-.venv/bin/denbust run --dataset news_items --job backfill_scrape --config agents/news/local.yaml
-.venv/bin/denbust diagnose-discovery --config agents/news/local.yaml --format json
+.venv/bin/denbust run --dataset news_items --job backfill_discover --config "${DENBUST_CONFIG}"
+.venv/bin/denbust run --dataset news_items --job backfill_scrape --config "${DENBUST_CONFIG}"
+.venv/bin/denbust diagnose-discovery --config "${DENBUST_CONFIG}" --format json
+```
+
+For the Brave+Exa/no-Google local search fallback:
+
+```bash
+export DENBUST_CONFIG=agents/news/local_search_brave_exa.yaml
+export DENBUST_BACKFILL_DATE_FROM=2026-01-01T00:00:00+00:00
+export DENBUST_BACKFILL_DATE_TO=2026-01-31T23:59:59+00:00
+export DENBUST_BROWSER_MODE=chrome_cdp
+export DENBUST_CHROME_CDP_URL=http://127.0.0.1:9222
+
+.venv/bin/denbust run --dataset news_items --job backfill_discover --config "${DENBUST_CONFIG}"
+.venv/bin/denbust run --dataset news_items --job backfill_scrape --config "${DENBUST_CONFIG}"
+.venv/bin/denbust diagnose-discovery --config "${DENBUST_CONFIG}" --format json
 ```
 
 If the 7-day pass is ambiguous, run a second adjacent slice before changing code:
