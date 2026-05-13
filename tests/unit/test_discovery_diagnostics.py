@@ -49,6 +49,7 @@ def _candidate(
     next_scrape_attempt_at: datetime | None = None,
     content_basis: ContentBasis = ContentBasis.CANDIDATE_ONLY,
     self_heal_eligible: bool = False,
+    metadata: dict[str, object] | None = None,
 ) -> PersistentCandidate:
     return PersistentCandidate(
         candidate_id=candidate_id,
@@ -64,6 +65,7 @@ def _candidate(
         last_seen_at=last_seen_at,
         next_scrape_attempt_at=next_scrape_attempt_at,
         self_heal_eligible=self_heal_eligible,
+        metadata=metadata or {},
     )
 
 
@@ -190,6 +192,68 @@ def test_build_discovery_diagnostic_report_summarizes_state(tmp_path: Path) -> N
     assert report.scrape_failure_diagnostics[0].self_heal_eligible_count == 1
     assert "Overlap" in render_discovery_diagnostic_report(report)
     assert "Structured scrape failures" in render_discovery_diagnostic_report(report)
+
+
+def test_build_discovery_diagnostic_report_counts_search_noise_reasons(tmp_path: Path) -> None:
+    """Diagnostics should explain why unsupported search-result noise was filtered."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    persistence.upsert_candidates(
+        [
+            _candidate(
+                "candidate-x",
+                url="https://x.com/example_profile",
+                discovered_via=["brave"],
+                status=CandidateStatus.UNSUPPORTED_SOURCE,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now,
+                metadata={
+                    "unsupported_source_filter": "search_noise",
+                    "unsupported_source_reason": "social_profile",
+                    "unsupported_source_domain": "x.com",
+                    "latest_discovery_metadata": {
+                        "search_noise_filter_reason": "social_profile",
+                        "search_noise_filter_domain": "x.com",
+                    },
+                },
+            ),
+            _candidate(
+                "candidate-instagram",
+                url="https://www.instagram.com/example_profile/",
+                discovered_via=["exa"],
+                status=CandidateStatus.UNSUPPORTED_SOURCE,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now,
+                metadata={
+                    "unsupported_source_filter": "search_noise",
+                    "unsupported_source_reason": "social_profile",
+                    "unsupported_source_domain": "instagram.com",
+                    "latest_discovery_metadata": {
+                        "search_noise_filter_reason": "social_profile",
+                        "search_noise_filter_domain": "instagram.com",
+                    },
+                },
+            ),
+            _candidate(
+                "candidate-facebook",
+                url="https://facebook.com/story.php?story_fbid=3&id=4",
+                discovered_via=["brave"],
+                status=CandidateStatus.UNSUPPORTED_SOURCE,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now,
+            ),
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+    rendered = render_discovery_diagnostic_report(report)
+
+    assert report.queue_health.unsupported_source_candidates == 3
+    assert report.queue_health.search_noise_filter_reason_counts == {
+        "social_profile": 2,
+    }
+    assert "search_noise_filters social_profile=2" in rendered
 
 
 def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(

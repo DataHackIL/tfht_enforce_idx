@@ -232,6 +232,21 @@ provisional operational rows, 88 partial pages, 12 scrape failures, 2,689 remain
 candidates, and `budget_cap_reached`. The first no-CDP scrape attempt was aborted/reset and should
 not be used as valid scrape evidence.
 
+After `DISC-PR-NOISE-FILTERS`, search-engine results that are obvious non-article surfaces are
+still retained with candidate provenance, but new matches are marked `unsupported_source` before
+they can consume scrape-drain budget. Existing unattempted candidate-only matches are demoted the
+same way when they are rediscovered, while attempted or content-bearing candidates keep their
+current status. The filter covers profile-like `x.com` / Twitter, Facebook, Instagram, LinkedIn,
+TikTok, and YouTube pages; Google Play / Apple app detail pages; and
+dictionary/translation/reference utility domains such as Morfix, Reverso, Wiktionary, and Pealim.
+Post-like social URLs and non-app store paths are left scrape-eligible so the filter does not become
+a broad domain denylist. Queue fairness and source prioritization are intentionally unchanged; the
+filter only removes known low-value search-result surfaces from scrape eligibility. Durable
+candidate metadata stores `unsupported_source_filter=search_noise`,
+`unsupported_source_reason`, and `unsupported_source_domain`, and `denbust diagnose-discovery`
+reports `queue_health.search_noise_filter_reason_counts` so operators can distinguish app-store,
+social-profile, and unsupported utility-domain noise.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:

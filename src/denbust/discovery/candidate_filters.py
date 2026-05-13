@@ -1,0 +1,189 @@
+"""Candidate-level filtering policy for discovery search results."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+from urllib.parse import urlparse
+
+from denbust.discovery.models import DiscoveredCandidate, ProducerKind
+
+_UTILITY_SEARCH_DOMAINS: frozenset[str] = frozenset(
+    {
+        "morfix.co.il",
+        "context.reverso.net",
+        "dictionary.reverso.net",
+        "wiktionary.org",
+        "pealim.com",
+    }
+)
+
+_APP_STORE_DOMAINS: frozenset[str] = frozenset(
+    {"play.google.com", "apps.apple.com", "itunes.apple.com"}
+)
+
+_SOCIAL_PROFILE_DOMAINS: frozenset[str] = frozenset(
+    {
+        "facebook.com",
+        "instagram.com",
+        "linkedin.com",
+        "tiktok.com",
+        "twitter.com",
+        "x.com",
+        "youtube.com",
+    }
+)
+
+_SOCIAL_PROFILE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "linkedin.com": ("/company/", "/in/", "/school/", "/showcase/"),
+    "youtube.com": ("/@", "/channel/", "/c/", "/user/"),
+}
+
+_SOCIAL_POST_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "facebook.com": ("/permalink.php", "/posts/", "/share/", "/story.php", "/watch/"),
+    "instagram.com": ("/p/", "/reel/", "/tv/"),
+    "linkedin.com": ("/feed/update/", "/posts/", "/pulse/"),
+    "youtube.com": ("/shorts/", "/watch"),
+}
+
+
+class SearchNoiseReason(StrEnum):
+    """Stable reason values for search-result noise classification."""
+
+    APP_STORE = "app_store"
+    SOCIAL_PROFILE = "social_profile"
+    UNSUPPORTED_SEARCH_DOMAIN = "unsupported_search_domain"
+
+
+@dataclass(frozen=True)
+class SearchNoiseClassification:
+    """Classification for a retained but non-scrapeable search-result surface."""
+
+    reason: SearchNoiseReason
+    matched_domain: str
+
+
+def normalize_domain(domain: str | None) -> str | None:
+    """Normalize hosts for candidate-filter comparisons."""
+    if domain is None:
+        return None
+    normalized = domain.strip().casefold()
+    if not normalized:
+        return None
+    if normalized.startswith("www."):
+        normalized = normalized[4:]
+    return normalized or None
+
+
+def candidate_domain(discovered: DiscoveredCandidate) -> str | None:
+    """Return the normalized candidate host, preferring explicit model domain."""
+    normalized_domain = normalize_domain(discovered.domain)
+    if normalized_domain is not None:
+        return normalized_domain
+    return normalize_domain(
+        urlparse(str(discovered.canonical_url or discovered.candidate_url)).netloc
+    )
+
+
+def candidate_path(discovered: DiscoveredCandidate) -> str:
+    """Return the path for the current candidate identity URL."""
+    parsed = urlparse(str(discovered.canonical_url or discovered.candidate_url))
+    return (parsed.path or "/").casefold()
+
+
+def match_domain(domain: str | None, configured_domains: frozenset[str]) -> str | None:
+    """Return the configured base domain matched by a host, including subdomains."""
+    if domain is None:
+        return None
+    return next(
+        (
+            configured
+            for configured in sorted(configured_domains, key=len, reverse=True)
+            if domain == configured or domain.endswith(f".{configured}")
+        ),
+        None,
+    )
+
+
+def _is_app_store_url(discovered: DiscoveredCandidate) -> bool:
+    domain = candidate_domain(discovered)
+    matched_domain = match_domain(domain, _APP_STORE_DOMAINS)
+    if matched_domain is None:
+        return False
+    path = candidate_path(discovered)
+    if matched_domain == "play.google.com":
+        return path.startswith("/store/apps/")
+    return path == "/app" or "/app/" in path
+
+
+def _is_x_or_twitter_post_path(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if segment]
+    return (
+        len(segments) >= 3 and segments[1] in {"status", "statuses"} and segments[2].isdigit()
+    ) or (
+        len(segments) >= 4
+        and segments[0] == "i"
+        and segments[1] == "web"
+        and segments[2] == "status"
+        and segments[3].isdigit()
+    )
+
+
+def _is_tiktok_video_path(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if segment]
+    return (
+        len(segments) >= 3
+        and segments[0].startswith("@")
+        and segments[1] == "video"
+        and segments[2].isdigit()
+    )
+
+
+def _is_social_profile_candidate(discovered: DiscoveredCandidate) -> bool:
+    domain = candidate_domain(discovered)
+    matched_domain = match_domain(domain, _SOCIAL_PROFILE_DOMAINS)
+    if matched_domain is None:
+        return False
+    path = candidate_path(discovered)
+    if matched_domain in {"x.com", "twitter.com"}:
+        return not _is_x_or_twitter_post_path(path)
+    if matched_domain == "tiktok.com":
+        return not _is_tiktok_video_path(path)
+    if matched_domain in _SOCIAL_PROFILE_PATH_PREFIXES:
+        return any(
+            path.startswith(prefix) for prefix in _SOCIAL_PROFILE_PATH_PREFIXES[matched_domain]
+        )
+    if matched_domain in _SOCIAL_POST_PATH_PREFIXES:
+        return not any(
+            path.startswith(prefix) for prefix in _SOCIAL_POST_PATH_PREFIXES[matched_domain]
+        )
+    return False
+
+
+def classify_search_noise(
+    discovered: DiscoveredCandidate,
+) -> SearchNoiseClassification | None:
+    """Classify obvious non-article search-result surfaces before scrape selection."""
+    if discovered.producer_kind is not ProducerKind.SEARCH_ENGINE:
+        return None
+    domain = candidate_domain(discovered)
+    if _is_app_store_url(discovered):
+        matched_domain = match_domain(domain, _APP_STORE_DOMAINS)
+        if matched_domain is not None:
+            return SearchNoiseClassification(
+                reason=SearchNoiseReason.APP_STORE,
+                matched_domain=matched_domain,
+            )
+    if (matched_domain := match_domain(domain, _UTILITY_SEARCH_DOMAINS)) is not None:
+        return SearchNoiseClassification(
+            reason=SearchNoiseReason.UNSUPPORTED_SEARCH_DOMAIN,
+            matched_domain=matched_domain,
+        )
+    if _is_social_profile_candidate(discovered):
+        matched_domain = match_domain(domain, _SOCIAL_PROFILE_DOMAINS)
+        if matched_domain is not None:
+            return SearchNoiseClassification(
+                reason=SearchNoiseReason.SOCIAL_PROFILE,
+                matched_domain=matched_domain,
+            )
+    return None
