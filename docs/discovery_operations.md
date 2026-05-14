@@ -645,6 +645,55 @@ taxonomy-pair rejection remain unchanged. Do not broaden this into prompt change
 changes, queue behavior changes, scrape behavior changes, scrape-cap changes, or source-family
 expansion.
 
+After `CLASSIFIER-PR-PARSE-FAILURE-EVIDENCE-INTERPRETATION`, the first post-capture bounded Phase
+C January 1-7 evidence pass used the same operator-local Brave+Exa/no-Google config and the same
+Chrome-CDP scrape shape under
+`data/may_26_followup/20260514T202923Z/`. The inspected artifacts were:
+
+- `logs/backfill_discover_2026_01_01_07_brave_exa.log`
+- `artifacts/diagnose_discovery_after_discover_brave_exa.json`
+- `logs/backfill_scrape_2026_01_01_07_brave_exa_chrome_cdp.log`
+- `state/news_items/backfill_scrape/logs/2026-05-14T20-38-09-972334Z.json`
+- `state/news_items/backfill_scrape/logs/2026-05-14T20-38-09-972334Z.summary.json`
+- `artifacts/diagnose_discovery_after_scrape_brave_exa_chrome_cdp.json`
+
+The scrape drain selected 100 fallback candidates, recorded 158 scrape attempts, retained 26
+candidate-fallback operational rows, left 3,139 eligible candidates, and stopped at
+`budget_cap_reached`. For this backfill scrape job, the active selected-candidate budget was
+`backfill.max_scrape_attempts_per_run=100`; the discovery diagnostic's generic
+`queue_drain.max_candidate_budget=30` comes from `max_articles` and should not be read as the active
+backfill scrape-attempt cap. Both full and compact debug payloads reported identical classifier
+warning counts: `parse_failure_count=5`, `invalid_taxonomy_pair_count=2`,
+`invalid_legacy_pair_count=0`, and `relevant_without_usable_taxonomy_count=0` in both
+`classifier_summary.warning_counts` and `fallback_classifier_summary.warning_counts`.
+
+The warning counters also match the retained-row diagnostics: the post-scrape diagnostic reported
+26 retained candidate-fallback operational rows, all low-confidence fallback rows, with
+`invalid_taxonomy_pair_record_count=0` and no fallback rows missing taxonomy. The five parse
+failures and two invalid taxonomy warnings are therefore pre-retention classifier-output losses, not
+evidence that retained operational rows contain invalid taxonomy.
+
+The parse-failure diagnostics were also identical in both summary objects. All five failures were
+`object_like_non_json`; every sample was one line, had `starts_with_code_fence=false` and
+`ends_with_code_fence=false`, used `json_error_kind=missing_property_name`, and pointed to
+`json_error_position=1`, line 1, column 2. The bounded shape signatures all began with a
+double-opening object shape such as `{{"AAAAAAAA": ...`, which suggests an extra wrapper or
+duplicated opening brace pattern. The current sanitized evidence does not preserve a tail
+signature, brace-balance signal, or enough wrapper metadata to prove that simply trimming braces
+would always recover a valid classifier object without accepting ambiguous pseudo-JSON.
+
+Parser recovery therefore remains deferred. The observed category is not safely recoverable from
+the current artifact shape alone; it is also not evidence for prompt changes, taxonomy validity
+changes, legacy taxonomy changes, queue behavior changes, scrape candidate selection changes,
+generic fetch changes, browser/CDP scraper changes, scrape-cap changes, source-family support, or
+source-targeted query fanout. The next bounded PR should slightly broaden sanitized shape capture,
+for example with tail character-class signature and object-wrapper/balance indicators, before any
+fixture-backed parser recovery decision. That next PR should remain capture-only. A later
+interpretation can recommend parser recovery only if the added sanitized fields prove a balanced,
+consistently double-wrapped JSON object with a valid recoverable inner object; pseudo-JSON,
+unbalanced wrappers, mixed parse-failure categories, or no repeated parse failures should keep
+recovery deferred.
+
 ## One-Time 90-Day Re-Scan
 
 `C-8` does not add a dedicated workflow. The catch-up run uses the existing backfill jobs with the
