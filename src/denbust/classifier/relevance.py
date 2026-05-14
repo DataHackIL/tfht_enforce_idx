@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 
 import anthropic
 from anthropic.types import TextBlock
@@ -116,6 +117,25 @@ class ClassifierProviderError(RuntimeError):
     """Raised when the configured classifier provider fails before returning usable text."""
 
 
+@dataclass
+class ClassifierWarningCounts:
+    """Run-local classifier parser warning counters."""
+
+    parse_failure_count: int = 0
+    invalid_taxonomy_pair_count: int = 0
+    invalid_legacy_pair_count: int = 0
+    relevant_without_usable_taxonomy_count: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        """Return stable artifact fields for run/debug summaries."""
+        return {
+            "parse_failure_count": self.parse_failure_count,
+            "invalid_taxonomy_pair_count": self.invalid_taxonomy_pair_count,
+            "invalid_legacy_pair_count": self.invalid_legacy_pair_count,
+            "relevant_without_usable_taxonomy_count": self.relevant_without_usable_taxonomy_count,
+        }
+
+
 def sanitize_provider_error_message(error: BaseException | str) -> str:
     """Return compact provider error text safe for logs and artifacts."""
     raw_message = str(error) or type(error).__name__
@@ -159,6 +179,16 @@ class Classifier:
         self._system_prompt = system_prompt
         self._user_prompt_template = user_prompt_template or CLASSIFICATION_PROMPT
         self._taxonomy = default_taxonomy()
+        self._warning_counts = ClassifierWarningCounts()
+
+    @property
+    def warning_counts(self) -> dict[str, int]:
+        """Return run-local parser warning counters for diagnostic artifacts."""
+        return self._warning_counts.as_dict()
+
+    def reset_warning_counts(self) -> None:
+        """Reset parser warning counters at a pipeline run boundary."""
+        self._warning_counts = ClassifierWarningCounts()
 
     async def classify(self, article: RawArticle) -> ClassificationResult:
         """Classify a single article."""
@@ -207,6 +237,19 @@ class Classifier:
                 normalized_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
 
             data = json.loads(normalized_text)
+            if not isinstance(data, dict):
+                self._warning_counts.parse_failure_count += 1
+                logger.warning(
+                    "Failed to parse classification response: expected JSON object, got %s",
+                    type(data).__name__,
+                )
+                return ClassificationResult(
+                    relevant=False,
+                    enforcement_related=False,
+                    category=Category.NOT_RELEVANT,
+                    sub_category=None,
+                    confidence="low",
+                )
             relevant = bool(data.get("relevant", False))
             enforcement_related = bool(data.get("enforcement_related", False))
 
@@ -229,6 +272,7 @@ class Classifier:
                         taxonomy_subcategory_id,
                     )
                 else:
+                    self._warning_counts.invalid_taxonomy_pair_count += 1
                     logger.warning(
                         "Invalid taxonomy pair from classifier: %s / %s",
                         taxonomy_category_id,
@@ -254,6 +298,7 @@ class Classifier:
                 if sub_category is not None:
                     allowed_subcategories = ALLOWED_SUBCATEGORIES.get(category, set())
                     if sub_category not in allowed_subcategories:
+                        self._warning_counts.invalid_legacy_pair_count += 1
                         logger.warning(
                             "Invalid category/sub_category pair from classifier: %s / %s",
                             category,
@@ -261,6 +306,7 @@ class Classifier:
                         )
                         sub_category = None
                 if relevant and category == Category.NOT_RELEVANT:
+                    self._warning_counts.relevant_without_usable_taxonomy_count += 1
                     logger.warning(
                         "Classifier returned relevant=true without a usable taxonomy leaf or legacy category"
                     )
@@ -284,6 +330,7 @@ class Classifier:
             )
 
         except (json.JSONDecodeError, KeyError) as error:
+            self._warning_counts.parse_failure_count += 1
             logger.warning("Failed to parse classification response: %s", error)
             return ClassificationResult(
                 relevant=False,

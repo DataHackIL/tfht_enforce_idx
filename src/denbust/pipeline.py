@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,12 @@ _OPERATIONAL_STORE_JOBS = {
     JobName.RELEASE,
     JobName.BACKUP,
 }
+_CLASSIFIER_WARNING_COUNT_KEYS = (
+    "parse_failure_count",
+    "invalid_taxonomy_pair_count",
+    "invalid_legacy_pair_count",
+    "relevant_without_usable_taxonomy_count",
+)
 
 
 def _sanitize_classifier_provider_error(error: ClassifierProviderError) -> str:
@@ -148,6 +155,27 @@ def _mark_classifier_provider_error(
     result.fatal = True
     result.errors.append(f"classifier_provider_error={sanitized}")
     return sanitized
+
+
+def _classifier_warning_counts(classifier: object) -> dict[str, int]:
+    """Read passive classifier parser warning counters when the classifier exposes them."""
+    raw_counts = getattr(classifier, "warning_counts", None)
+    if callable(raw_counts):
+        raw_counts = raw_counts()
+    if not isinstance(raw_counts, Mapping):
+        return dict.fromkeys(_CLASSIFIER_WARNING_COUNT_KEYS, 0)
+    counts: dict[str, int] = {}
+    for key in _CLASSIFIER_WARNING_COUNT_KEYS:
+        value = raw_counts.get(key, 0)
+        counts[key] = value if isinstance(value, int) and not isinstance(value, bool) else 0
+    return counts
+
+
+def _reset_classifier_warning_counts(classifier: object) -> None:
+    """Reset classifier parser warning counters when the classifier exposes a reset hook."""
+    reset = getattr(classifier, "reset_warning_counts", None)
+    if callable(reset):
+        reset()
 
 
 def release_publication_dir(config: Config) -> Path:
@@ -1107,6 +1135,7 @@ async def _process_ingest_articles(
                 unseen_articles=unseen_articles,
                 classified_articles=classified_articles,
                 unified_items=unified_items,
+                classifier_warning_counts=_classifier_warning_counts(classifier),
             )
         )
         return result
@@ -1126,6 +1155,7 @@ async def _process_ingest_articles(
                 unseen_articles=unseen_articles,
                 classified_articles=classified_articles,
                 unified_items=unified_items,
+                classifier_warning_counts=_classifier_warning_counts(classifier),
             )
         )
         return result
@@ -1156,6 +1186,7 @@ async def _process_ingest_articles(
                 classified_articles=classified_articles,
                 unified_items=unified_items,
                 classifier_error=sanitized_error,
+                classifier_warning_counts=_classifier_warning_counts(classifier),
             )
         )
         return result
@@ -1175,6 +1206,7 @@ async def _process_ingest_articles(
                 unseen_articles=unseen_articles,
                 classified_articles=classified_articles,
                 unified_items=unified_items,
+                classifier_warning_counts=_classifier_warning_counts(classifier),
             )
         )
         return result
@@ -1213,6 +1245,7 @@ async def _process_ingest_articles(
             unseen_articles=unseen_articles,
             classified_articles=classified_articles,
             unified_items=unified_items,
+            classifier_warning_counts=_classifier_warning_counts(classifier),
         )
     )
     return result
@@ -1356,6 +1389,7 @@ def _build_classifier_summary(
     unseen_articles: list[RawArticle],
     classified_articles: list[ClassifiedArticle],
     classifier_error: str | None = None,
+    classifier_warning_counts: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     """Summarize classifier outputs and anomalies."""
     rejected_by_category: dict[str, int] = {}
@@ -1375,10 +1409,24 @@ def _build_classifier_summary(
         "relevant_article_count": relevant_count,
         "rejected_article_count": rejected_count,
         "rejected_by_category": rejected_by_category,
+        "warning_counts": _normalize_classifier_warning_counts(classifier_warning_counts),
         "classification_output_anomaly": len(classified_articles) != len(unseen_articles),
         "classification_failed": classifier_error is not None,
         "classifier_error": classifier_error,
     }
+
+
+def _normalize_classifier_warning_counts(
+    counts: Mapping[str, int] | None,
+) -> dict[str, int]:
+    """Normalize classifier warning counters into stable summary keys."""
+    if counts is None:
+        return dict.fromkeys(_CLASSIFIER_WARNING_COUNT_KEYS, 0)
+    normalized: dict[str, int] = {}
+    for key in _CLASSIFIER_WARNING_COUNT_KEYS:
+        value = counts.get(key, 0)
+        normalized[key] = value if isinstance(value, int) and not isinstance(value, bool) else 0
+    return normalized
 
 
 def _summary_int(payload: dict[str, object], key: str) -> int:
@@ -1500,6 +1548,7 @@ def _build_ingest_debug_payload(
     classified_articles: list[ClassifiedArticle],
     unified_items: list[UnifiedItem],
     classifier_error: str | None = None,
+    classifier_warning_counts: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     """Build a detailed ingest diagnostic log for state-repo inspection."""
     relevant_articles = [
@@ -1526,6 +1575,7 @@ def _build_ingest_debug_payload(
         unseen_articles=unseen_articles,
         classified_articles=classified_articles,
         classifier_error=classifier_error,
+        classifier_warning_counts=classifier_warning_counts,
     )
     problems = _build_problem_summary(
         source_summaries=source_summaries,
@@ -1577,6 +1627,62 @@ def _build_ingest_debug_payload(
     }
 
 
+def _build_scrape_candidate_debug_payload(
+    *,
+    result: RunSnapshot,
+    classifier: Classifier,
+    scrape_batch: CandidateScrapeBatch,
+    fallback_record_count: int,
+    batch_id: str | None = None,
+) -> dict[str, object]:
+    """Build a compact scrape/backfill diagnostic payload for fallback-only drains."""
+    fallback_input_count = sum(
+        1 for candidate in scrape_batch.fallback_candidates if _fallback_input_article(candidate)
+    )
+    classifier_summary = _build_classifier_summary(
+        unseen_articles=[],
+        classified_articles=[],
+        classifier_warning_counts=_classifier_warning_counts(classifier),
+    )
+    fallback_classifier_summary = {
+        "fallback_classifier_input_count": fallback_input_count,
+        "fallback_operational_record_count": fallback_record_count,
+        "warning_counts": _classifier_warning_counts(classifier),
+    }
+    return {
+        "schema_version": "news_items.scrape_candidates.debug.v1",
+        "run_timestamp": result.run_timestamp.isoformat(),
+        "dataset_name": result.dataset_name.value,
+        "job_name": result.job_name.value,
+        "config_name": result.config_name,
+        "config_path": result.config_path,
+        "days_searched": result.days_searched,
+        "result_summary": result.result_summary,
+        "workflow": _workflow_metadata(),
+        "counts": {
+            "source_count": result.source_count,
+            "raw_article_count": result.raw_article_count,
+            "selected_candidate_count": len(scrape_batch.selected_candidates),
+            "fallback_candidate_count": len(scrape_batch.fallback_candidates),
+            "fallback_operational_record_count": fallback_record_count,
+            "scrape_attempt_count": len(scrape_batch.attempts),
+            "unified_item_count": result.unified_item_count,
+            "seen_count_before": result.seen_count_before,
+            "seen_count_after": result.seen_count_after,
+        },
+        "batch_id": batch_id,
+        "classifier_summary": classifier_summary,
+        "fallback_classifier_summary": fallback_classifier_summary,
+        "problems": {
+            "classification_failed": False,
+            "classification_output_anomaly": False,
+        },
+        "suspicions": [],
+        "warnings": result.warnings,
+        "errors": result.errors,
+    }
+
+
 async def run_news_ingest_job(
     config: Config,
     config_path: Path | None = None,
@@ -1609,6 +1715,7 @@ async def run_news_ingest_job(
         system_prompt=config.classifier.system_prompt,
         user_prompt_template=config.classifier.user_prompt_template,
     )
+    _reset_classifier_warning_counts(classifier)
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
     seen_store = create_seen_store(config.state_paths.seen_path)
     result.seen_count_before = seen_store.count
@@ -1899,6 +2006,7 @@ async def run_news_scrape_candidates_job(
         system_prompt=config.classifier.system_prompt,
         user_prompt_template=config.classifier.user_prompt_template,
     )
+    _reset_classifier_warning_counts(classifier)
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
     seen_store = create_seen_store(config.state_paths.seen_path)
     result.seen_count_before = seen_store.count
@@ -1945,10 +2053,20 @@ async def run_news_scrape_candidates_job(
         if not scrape_batch.raw_articles:
             result.unified_item_count = len(fallback_records)
             if fallback_records:
-                return result.finish(
+                result.finish(
                     f"fallback retention completed with {len(fallback_records)} provisional row(s)"
                 )
-            return result.finish("candidate scrape completed with no materializable rows")
+            else:
+                result.finish("candidate scrape completed with no materializable rows")
+            result.set_debug_payload(
+                _build_scrape_candidate_debug_payload(
+                    result=result,
+                    classifier=classifier,
+                    scrape_batch=scrape_batch,
+                    fallback_record_count=len(fallback_records),
+                )
+            )
+            return result
 
         processed = await _process_ingest_articles(
             config=config,
@@ -2188,6 +2306,7 @@ async def run_news_backfill_scrape_job(
         system_prompt=config.classifier.system_prompt,
         user_prompt_template=config.classifier.user_prompt_template,
     )
+    _reset_classifier_warning_counts(classifier)
     deduplicator = create_deduplicator(threshold=config.dedup.similarity_threshold)
     seen_store = create_seen_store(config.state_paths.seen_path)
     result.seen_count_before = seen_store.count
@@ -2235,10 +2354,20 @@ async def run_news_backfill_scrape_job(
 
         if not scrape_batch.raw_articles:
             result.unified_item_count = len(fallback_records)
-            return result.finish(
+            result.finish(
                 "fallback retention completed with "
                 f"{len(fallback_records)} provisional row(s) for backfill batch {batch_id}"
             )
+            result.set_debug_payload(
+                _build_scrape_candidate_debug_payload(
+                    result=result,
+                    classifier=classifier,
+                    scrape_batch=scrape_batch,
+                    fallback_record_count=len(fallback_records),
+                    batch_id=batch_id,
+                )
+            )
+            return result
 
         processed = await _process_ingest_articles(
             config=config,

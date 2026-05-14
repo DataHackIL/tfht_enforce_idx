@@ -343,6 +343,24 @@ class TestFetchAndClassifyHelpers:
         assert "source_error_rate_high" in suspicions
         assert "sources_returned_zero_results" in suspicions
 
+    def test_classifier_summary_persists_warning_counts(self) -> None:
+        """Run debug summaries should carry classifier parser warning counters."""
+        classifier_summary = _build_classifier_summary(
+            unseen_articles=[build_raw_article("https://example.com/u1")],
+            classified_articles=[],
+            classifier_warning_counts={
+                "parse_failure_count": 2,
+                "invalid_taxonomy_pair_count": 1,
+            },
+        )
+
+        assert classifier_summary["warning_counts"] == {
+            "parse_failure_count": 2,
+            "invalid_taxonomy_pair_count": 1,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+        }
+
     def test_mark_seen_collects_all_source_urls(self, tmp_path: Path) -> None:
         """mark_seen should persist every source URL from unified items."""
         from denbust.store.seen import SeenStore
@@ -1785,6 +1803,10 @@ class TestRunPipelineAsync:
                 build_classified_article("https://example.com/fallback", relevant=True),
             ]
         )
+        classifier.warning_counts = {
+            "parse_failure_count": 2,
+            "invalid_taxonomy_pair_count": 1,
+        }
         monkeypatch.setattr(
             "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
         )
@@ -1823,6 +1845,24 @@ class TestRunPipelineAsync:
         assert rows[0]["content_basis"] == ContentBasis.SEARCH_RESULT_ONLY.value
         assert rows[0]["record_confidence"] == "low"
         assert rows[0]["event_candidate_ids"] == ["candidate-fallback"]
+        assert result.debug_payload is not None
+        assert result.debug_payload["schema_version"] == "news_items.scrape_candidates.debug.v1"
+        assert result.debug_payload["classifier_summary"]["warning_counts"] == {
+            "parse_failure_count": 2,
+            "invalid_taxonomy_pair_count": 1,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+        }
+        assert result.debug_payload["fallback_classifier_summary"] == {
+            "fallback_classifier_input_count": 1,
+            "fallback_operational_record_count": 1,
+            "warning_counts": {
+                "parse_failure_count": 2,
+                "invalid_taxonomy_pair_count": 1,
+                "invalid_legacy_pair_count": 0,
+                "relevant_without_usable_taxonomy_count": 0,
+            },
+        }
 
     @pytest.mark.asyncio
     async def test_run_news_scrape_candidates_job_marks_provider_error_fatal_without_seen(
@@ -3304,7 +3344,13 @@ class TestRunPipeline:
                 "counts": {"unseen_article_count": 1},
                 "workflow": {},
                 "source_summaries": [],
-                "classifier_summary": {"rejected_article_count": 1},
+                "classifier_summary": {
+                    "rejected_article_count": 1,
+                    "warning_counts": {
+                        "parse_failure_count": 2,
+                        "invalid_taxonomy_pair_count": 1,
+                    },
+                },
                 "problems": {"all_unseen_rejected": True},
                 "suspicions": ["all_unseen_rejected"],
                 "warnings": [],
@@ -3333,6 +3379,11 @@ class TestRunPipeline:
         assert '"rejected_articles": [' in content
         summary_content = summary_path.read_text(encoding="utf-8")
         assert '"suspicions": [' in summary_content
+        summary_payload = json.loads(summary_content)
+        assert summary_payload["classifier_summary"]["warning_counts"] == {
+            "parse_failure_count": 2,
+            "invalid_taxonomy_pair_count": 1,
+        }
 
     def test_run_job_from_config_best_effort_debug_write_still_persists_snapshot(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
