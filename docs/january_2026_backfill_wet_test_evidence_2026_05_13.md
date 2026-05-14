@@ -515,3 +515,103 @@ repeated parse failures should keep recovery deferred. This interpretation does 
 classifier prompts, taxonomy validity policy, legacy taxonomy policy, queue behavior, scrape
 candidate selection, generic fetch behavior, browser/CDP scraper behavior, scrape caps,
 source-family support, or source-targeted query fanout.
+
+## 2026-05-15 Addendum: Parse-Failure Structure Interpretation
+
+`CLASSIFIER-PR-PARSE-FAILURE-STRUCTURE-INTERPRETATION` ran the next bounded Phase C January 1-7
+pass after sanitized tail-shape, quote-aware brace-balance, double-wrapper, inner-object, and
+valid-inner-JSON fields were available. The generated local evidence root is
+`data/may_26_followup/20260514T222732Z/`; generated artifacts remain untracked. The run reused
+`agents/news/local_search_brave_exa.yaml`, the same January 1-7 UTC date window, and a temporary
+Chrome-CDP endpoint. Chrome-CDP was reachable during setup, but source-adapter attempts later
+reported `ECONNREFUSED`; this addendum interprets classifier-output structure evidence only, not
+browser-CDP source-adapter health.
+
+Exact inspected artifacts:
+
+- Discovery log:
+  `data/may_26_followup/20260514T222732Z/logs/backfill_discover_2026_01_01_07_brave_exa.log`
+- Post-discovery diagnostic:
+  `data/may_26_followup/20260514T222732Z/artifacts/diagnose_discovery_after_discover_brave_exa.json`
+- Scrape log:
+  `data/may_26_followup/20260514T222732Z/logs/backfill_scrape_2026_01_01_07_brave_exa_chrome_cdp.log`
+- Full scrape debug payload:
+  `data/may_26_followup/20260514T222732Z/state/news_items/backfill_scrape/logs/2026-05-14T22-36-36-344382Z.json`
+- Compact scrape debug summary:
+  `data/may_26_followup/20260514T222732Z/state/news_items/backfill_scrape/logs/2026-05-14T22-36-36-344382Z.summary.json`
+- Post-scrape discovery diagnostic:
+  `data/may_26_followup/20260514T222732Z/artifacts/diagnose_discovery_after_scrape_brave_exa_chrome_cdp.json`
+
+The run reported:
+
+| Figure | Value |
+| --- | ---: |
+| Persisted candidates | 3,748 |
+| Fallback classifier inputs | 100 |
+| Attempted candidates | 100 |
+| Persisted scrape attempts | 159 |
+| Provisional operational rows retained | 30 |
+| Partial pages | 97 |
+| Scrape failures | 3 |
+| Remaining eligible candidates | 3,152 |
+| Inferred stop reason | `budget_cap_reached` |
+
+Both the full debug payload and compact summary recorded the same warning counters:
+
+| Counter | Count | Rate |
+| --- | ---: | ---: |
+| `classifier_summary.warning_counts.parse_failure_count` | 5 | 5% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 1 | 1% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.parse_failure_count` | 5 | 5% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 1 | 1% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+
+The matching post-scrape discovery diagnostic reported 30 retained candidate-fallback operational
+rows, all low-confidence fallback rows, with `invalid_taxonomy_pair_record_count=0`,
+`fallback_record_without_taxonomy_count=0`, and
+`partial_page_fallback_without_taxonomy_count=0`. The warnings are therefore pre-retention
+classifier-output losses rather than persisted invalid fallback taxonomy.
+
+Both `classifier_summary.parse_failure_diagnostics.category_counts` and
+`fallback_classifier_summary.parse_failure_diagnostics.category_counts` were identical:
+
+| Category | Count |
+| --- | ---: |
+| `empty_response` | 0 |
+| `json_decode_error` | 0 |
+| `non_object_json_array` | 0 |
+| `non_object_json_scalar` | 0 |
+| `object_like_non_json` | 5 |
+| `truncated_response` | 0 |
+| `other_parse_failure` | 0 |
+
+The five retained sanitized samples all had:
+
+- `category=object_like_non_json`
+- `line_count=1`
+- `json_error_kind=missing_property_name`
+- `json_error_position=1`, `json_error_line=1`, `json_error_column=2`
+- `starts_with_code_fence=false`, `ends_with_code_fence=false`
+- `response_length` between 136 and 167 characters
+- `normalized_length` equal to `response_length`
+- `leading_brace_count=2`, `trailing_brace_count=2`, and `brace_balance=0`
+- `starts_with_double_open_object=true` and `ends_with_double_close_object=true`
+- `outer_wrapper_candidate=true`, `inner_object_candidate=true`,
+  `contains_balanced_inner_object=true`, and `inner_json_object_candidate=true`
+
+Interpretation: the added sanitized structure fields show the repeated parse failures are not
+merely suggestive double-open shapes; they are consistently balanced double-wrapper candidates
+where trimming one outer wrapper exposes a parseable JSON object. That crosses the decision gate for
+a later recovery PR.
+
+Parser recovery is now recommended only as a separate, narrow,
+`CLASSIFIER-PR-PARSE-FAILURE-DOUBLE-WRAP-RECOVERY` slice. That slice should add fixture-backed
+recovery for the proven balanced double-wrapper valid-inner-JSON shape and explicit negative tests
+for pseudo-JSON, balanced-but-not-JSON inner text, unbalanced wrappers, mixed parse-failure
+categories, non-object JSON, code-fenced malformed JSON, and invalid taxonomy output. This
+interpretation does not change classifier prompts, parser behavior, taxonomy validity policy,
+legacy taxonomy policy, queue behavior, scrape candidate selection, generic fetch behavior,
+browser/CDP scraper behavior, scrape caps, source-family support, or source-targeted query fanout.

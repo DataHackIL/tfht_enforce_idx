@@ -100,9 +100,11 @@ Planned future datasets:
 - Interprets the first post-capture bounded Phase C parse-failure evidence pass: five fallback
   parse failures across 100 fallback classifier inputs were all `object_like_non_json`, with
   one-line, no-code-fence samples and `missing_property_name` at line 1 column 2, so parser recovery
-  remains deferred until a follow-up evidence pass uses the newly captured sanitized tail shape,
-  quote-aware brace balance, wrapper/inner-object indicators, and valid-inner-JSON signal to prove
-  recovery is safe
+  stayed deferred until a follow-up evidence pass could prove recovery safety
+- Interprets the follow-up parse-failure structure evidence pass: the same five-failure pattern was
+  consistently balanced double-wrapped valid-inner-JSON classifier output, so the next parser slice
+  can add fixture-backed recovery for that exact shape while keeping prompts, taxonomy policy, queue
+  behavior, scraper behavior, source support, and generated-data boundaries unchanged
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking
