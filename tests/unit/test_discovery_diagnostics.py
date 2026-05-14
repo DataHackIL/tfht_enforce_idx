@@ -822,10 +822,19 @@ def test_candidate_source_maps_supported_generic_source_family_domains() -> None
         first_seen_at=now,
         last_seen_at=now,
     ).model_copy(update={"source_hints": []})
+    kan_non_article = _candidate(
+        "kan-non-article",
+        url="https://www.kan.org.il/live/",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
 
     assert _candidate_source(globes) == "globes"
     assert _candidate_source(themarker) == "themarker"
     assert _candidate_source(kan) == "kan"
+    assert _candidate_source(kan_non_article) == "www.kan.org.il"
 
 
 def test_candidate_source_scans_all_source_hints_before_domain_fallback() -> None:

@@ -119,10 +119,18 @@ discovery/backfill fanout, Israel Hayom subdomains, browser scraper work, queue 
 Mako/Haaretz Chrome-CDP behavior, and unrelated source families out of scope.
 
 For `SRC-PR-KAN`, fresh diagnostics and candidate-state inspection over the same persisted state
-showed two official `kan.org.il` candidate-only URLs, one still scrape-eligible official Kan
-candidate, and no official Kan attempted-scrape or partial-page evidence in the bounded drain. The
-same keyword searches also surfaced unrelated Kan-named domains such as `kanisrael.co.il`,
-`kan-ashkelon.co.il` Facebook posts, and other non-Kan hosts. That evidence supports bounded
-main-domain generic-fetch source-family recognition for official `kan.org.il` URLs only, while
-leaving source-targeted discovery/backfill fanout, unrelated Kan-named domains, browser scraper
-work, queue fairness, Mako/Haaretz Chrome-CDP behavior, and unrelated source families out of scope.
+showed two official `kan.org.il` candidate-only URLs and no official Kan attempted-scrape or
+partial-page evidence in the bounded drain:
+
+| Candidate ID | URL | Status | Content basis | Source hints | Discovered via | Scrape attempts |
+| --- | --- | --- | --- | --- | --- | ---: |
+| `candidate_c26f6055d9d8e0fb1ead6e4b` | `https://www.kan.org.il/content/kan-news/local/983197/` | `unsupported_source` | `candidate_only` | `www.facebook.com` | `brave` | 0 |
+| `candidate_d784dda040a57b3c2c7022ca` | `https://www.kan.org.il/content/kan-news/local/296141/` | `new` | `candidate_only` | `brave` | `brave` | 0 |
+
+The same keyword searches also surfaced unrelated Kan-named domains such as `kanisrael.co.il`,
+`kan-ashkelon.co.il` Facebook posts, and other non-Kan hosts. This weak evidence does not prove
+generic-fetch extraction quality for Kan. It only supports low-confidence diagnostic labeling for
+future official Kan news article-path candidates under `kan.org.il/content/kan-news/`, while leaving
+source-targeted discovery/backfill fanout, unrelated Kan-named domains, non-article Kan pages,
+browser scraper work, queue fairness, Mako/Haaretz Chrome-CDP behavior, and unrelated source
+families out of scope.

@@ -17,6 +17,7 @@ class SourceFamily:
     discovery_domain: str
     include_subdomains: bool = True
     source_targeted_discovery: bool = True
+    article_path_prefixes: tuple[str, ...] = ()
 
 
 GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
@@ -43,21 +44,29 @@ GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
         discovery_domain="www.kan.org.il",
         include_subdomains=False,
         source_targeted_discovery=False,
+        article_path_prefixes=("/content/kan-news/",),
     ),
 )
 
 
-def source_family_name_for_domain(domain: str | None) -> str | None:
-    """Return the known generic-fetch source family for a domain."""
+def _family_matches_domain(family: SourceFamily, domain: str | None) -> bool:
     normalized = normalize_domain(domain)
     if normalized is None:
-        return None
+        return False
+    return any(
+        normalized == family_domain
+        or (family.include_subdomains and normalized.endswith(f".{family_domain}"))
+        for family_domain in family.domains
+    )
+
+
+def source_family_name_for_domain(domain: str | None) -> str | None:
+    """Return the known generic-fetch source family for an unrestricted domain."""
     for family in GENERIC_FETCH_SOURCE_FAMILIES:
-        for family_domain in family.domains:
-            if normalized == family_domain or (
-                family.include_subdomains and normalized.endswith(f".{family_domain}")
-            ):
-                return family.name
+        if family.article_path_prefixes:
+            continue
+        if _family_matches_domain(family, domain):
+            return family.name
     return None
 
 
@@ -65,7 +74,16 @@ def source_family_name_for_url(url: str | None) -> str | None:
     """Return the known generic-fetch source family for a URL."""
     if not url:
         return None
-    return source_family_name_for_domain(urlparse(url).netloc)
+    parsed = urlparse(url)
+    for family in GENERIC_FETCH_SOURCE_FAMILIES:
+        if not _family_matches_domain(family, parsed.netloc):
+            continue
+        if family.article_path_prefixes and not any(
+            parsed.path.startswith(prefix) for prefix in family.article_path_prefixes
+        ):
+            continue
+        return family.name
+    return None
 
 
 def generic_fetch_source_domains() -> list[tuple[str, str]]:
