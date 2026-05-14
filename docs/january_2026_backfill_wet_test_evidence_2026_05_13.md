@@ -318,8 +318,37 @@ operational taxonomy.
 
 Interpretation: 5 warning events across 100 fallback classifier inputs, including four parse
 failures, is enough to justify a bounded classifier-output follow-up, but the next PR should first
-characterize the observed parse-failure output shapes and add fixture-backed regression coverage
-before changing parser behavior. The evidence does not justify changing classifier prompts,
-taxonomy validity policy, legacy taxonomy policy, queue fairness, scrape candidate selection,
-generic fetch behavior, browser/CDP scraper behavior, scrape caps, source-family support, or
-source-targeted query fanout in this interpretation slice.
+check whether retained artifacts expose raw parse-failure output shapes before changing parser
+behavior. The evidence does not justify changing classifier prompts, taxonomy validity policy,
+legacy taxonomy policy, queue fairness, scrape candidate selection, generic fetch behavior,
+browser/CDP scraper behavior, scrape caps, source-family support, or source-targeted query fanout in
+this interpretation slice.
+
+## 2026-05-14 Addendum: Classifier Output Robustness Evidence Review
+
+`CLASSIFIER-PR-OUTPUT-ROBUSTNESS` inspected the generated evidence root
+`data/may_26_followup/20260514T182934Z/`, including the backfill-scrape debug payload
+`state/news_items/backfill_scrape/logs/2026-05-14T18-38-54-795669Z.json`, its compact
+`.summary.json`, the post-scrape discovery diagnostic, operational rows, run metadata, and the
+root-level `logs/`, `reports/`, and `summaries/` directories. The persisted artifacts confirmed the
+same four parse failures, one invalid taxonomy pair, 100 fallback classifier inputs, and 30 retained
+fallback operational rows, but they did not persist the raw malformed classifier responses. The
+root-level log/report/summary directories were empty.
+
+The actual malformed response shapes are therefore insufficiently observable from the retained
+artifacts. Earlier local process logs from related runs showed JSON decoder messages consistent with
+object-like non-JSON text, but those messages are not retained in this evidence root and are not
+enough to characterize the four target parse failures as a specific recoverable output category.
+
+No parser recovery was added because accepting guessed pseudo-JSON would change classifier output
+semantics without evidence that the target raw responses were safely recoverable. Instead,
+representative current-policy regression coverage now proves plausible malformed object-like
+non-JSON outputs are rejected deterministically as low-confidence not-relevant results and still
+increment `parse_failure_count`. Existing canonical JSON success behavior and invalid taxonomy-pair
+rejection/counting behavior remain unchanged.
+
+The next classifier-output follow-up should persist a sanitized parse-failure shape sample or
+structured parse-error evidence in run debug artifacts before considering any parser recovery. That
+future evidence-capture work should still avoid prompt changes, taxonomy-policy changes, queue
+behavior changes, scraper behavior changes, scrape-cap changes, source-family support, and raw
+generated data commits.

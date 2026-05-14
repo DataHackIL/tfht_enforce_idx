@@ -88,6 +88,10 @@ Planned future datasets:
   Brave+Exa/no-Google scrape/backfill run saw 4 parse failures and 1 invalid taxonomy pair across
   100 fallback classifier inputs, and compact summaries now retain `fallback_classifier_summary`
   for future fallback-only drains
+- Keeps classifier output robustness evidence-driven: the retained Phase C parse-failure artifacts
+  do not expose raw malformed response shapes, so representative non-JSON outputs are covered only
+  as current rejection-policy examples and parser recovery is deferred until sanitized shape
+  evidence is persisted safely
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking
@@ -433,8 +437,8 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   fallback classifier inputs produced 4 parse failures, 1 invalid taxonomy pair, no invalid legacy
   pairs, and no relevant-without-usable-taxonomy warnings. It also keeps
   `fallback_classifier_summary` in compact run summaries going forward and sets the next PR to
-  characterize observed parse-failure shapes before any bounded parser robustness change. It does
-  not recommend prompt, taxonomy-policy, queue, scraper, or source-family changes
+  inspect parse-failure shape evidence before any bounded parser robustness change. It does not
+  recommend prompt, taxonomy-policy, queue, scraper, or source-family changes
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable
