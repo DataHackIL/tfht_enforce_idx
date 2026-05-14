@@ -217,6 +217,11 @@ class ClassifierWarningSignals(BaseModel):
     partial_page_fallback_without_taxonomy_count: int = 0
     low_confidence_fallback_record_count: int = 0
     invalid_taxonomy_pair_record_count: int = 0
+    fallback_record_confidence_counts: list[FailureSummary] = Field(default_factory=list)
+    fallback_classification_confidence_counts: list[FailureSummary] = Field(default_factory=list)
+    low_confidence_fallback_records_by_source: list[FailureSummary] = Field(default_factory=list)
+    low_confidence_fallback_records_by_domain: list[FailureSummary] = Field(default_factory=list)
+    low_confidence_fallback_records_by_taxonomy: list[FailureSummary] = Field(default_factory=list)
 
 
 class PartialPageDiagnostics(BaseModel):
@@ -651,6 +656,46 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
                 **classifier.model_dump(mode="json")
             )
         )
+        if classifier.fallback_record_confidence_counts:
+            lines.append(
+                "  fallback_record_confidence: "
+                + ", ".join(
+                    f"{item.name}={item.count}"
+                    for item in classifier.fallback_record_confidence_counts
+                )
+            )
+        if classifier.fallback_classification_confidence_counts:
+            lines.append(
+                "  fallback_classification_confidence: "
+                + ", ".join(
+                    f"{item.name}={item.count}"
+                    for item in classifier.fallback_classification_confidence_counts
+                )
+            )
+        if classifier.low_confidence_fallback_records_by_source:
+            lines.append(
+                "  low_confidence_fallback_sources: "
+                + ", ".join(
+                    f"{item.name}={item.count}"
+                    for item in classifier.low_confidence_fallback_records_by_source
+                )
+            )
+        if classifier.low_confidence_fallback_records_by_domain:
+            lines.append(
+                "  low_confidence_fallback_domains: "
+                + ", ".join(
+                    f"{item.name}={item.count}"
+                    for item in classifier.low_confidence_fallback_records_by_domain
+                )
+            )
+        if classifier.low_confidence_fallback_records_by_taxonomy:
+            lines.append(
+                "  low_confidence_fallback_taxonomy: "
+                + ", ".join(
+                    f"{item.name}={item.count}"
+                    for item in classifier.low_confidence_fallback_records_by_taxonomy
+                )
+            )
     if report.source_suggestions.suggestions:
         lines.append("")
         lines.append("Source suggestions")
@@ -996,7 +1041,7 @@ def _build_failure_summaries(
         else:
             raise ValueError(f"Unsupported failure summary key: {key}")
         counts[value] += 1
-    return [FailureSummary(name=name, count=count) for name, count in counts.most_common(5)]
+    return _failure_summaries_from_counter(counts)
 
 
 def _build_scrape_failure_diagnostics(
@@ -1324,9 +1369,12 @@ def _candidate_has_generic_fetch_status(
 
 
 def _failure_summaries_from_counter(
-    counts: Counter[str], *, limit: int = 5
+    counts: Counter[str], *, limit: int | None = 5
 ) -> list[FailureSummary]:
-    return [FailureSummary(name=name, count=count) for name, count in counts.most_common(limit)]
+    ordered_counts = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    if limit is not None:
+        ordered_counts = ordered_counts[:limit]
+    return [FailureSummary(name=name, count=count) for name, count in ordered_counts]
 
 
 def _record_content_basis(row: dict[str, Any]) -> str:
@@ -1352,6 +1400,26 @@ def _record_has_valid_taxonomy_pair(row: dict[str, Any]) -> bool:
     if not isinstance(category, str) or not isinstance(subcategory, str):
         return False
     return default_taxonomy().has_pair(category, subcategory)
+
+
+def _record_label(row: dict[str, Any], field_name: str, *, default: str = "unknown") -> str:
+    value = row.get(field_name)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return default
+
+
+def _record_confidence_label(row: dict[str, Any], field_name: str) -> str:
+    return _record_label(row, field_name).casefold()
+
+
+def _record_taxonomy_label(row: dict[str, Any]) -> str:
+    if not _record_has_taxonomy_pair(row):
+        return "missing"
+    return "{category}/{subcategory}".format(
+        category=row["taxonomy_category_id"],
+        subcategory=row["taxonomy_subcategory_id"],
+    )
 
 
 def _partial_attempt_source_label(attempt: ScrapeAttempt) -> str:
@@ -1400,8 +1468,15 @@ def _build_classifier_warning_signals(
     low_confidence_rows = [
         row
         for row in fallback_rows
-        if row.get("record_confidence") == "low" or row.get("classification_confidence") == "low"
+        if _record_confidence_label(row, "record_confidence") == "low"
+        or _record_confidence_label(row, "classification_confidence") == "low"
     ]
+    record_confidence_counts = Counter(
+        _record_confidence_label(row, "record_confidence") for row in fallback_rows
+    )
+    classification_confidence_counts = Counter(
+        _record_confidence_label(row, "classification_confidence") for row in fallback_rows
+    )
     return ClassifierWarningSignals(
         candidate_fallback_record_count=len(fallback_rows),
         partial_page_fallback_record_count=len(partial_rows),
@@ -1412,6 +1487,26 @@ def _build_classifier_warning_signals(
         ),
         low_confidence_fallback_record_count=len(low_confidence_rows),
         invalid_taxonomy_pair_record_count=len(invalid_taxonomy_pairs),
+        fallback_record_confidence_counts=_failure_summaries_from_counter(
+            record_confidence_counts,
+            limit=None,
+        ),
+        fallback_classification_confidence_counts=_failure_summaries_from_counter(
+            classification_confidence_counts,
+            limit=None,
+        ),
+        low_confidence_fallback_records_by_source=_failure_summaries_from_counter(
+            Counter(_record_label(row, "source_name") for row in low_confidence_rows),
+            limit=None,
+        ),
+        low_confidence_fallback_records_by_domain=_failure_summaries_from_counter(
+            Counter(_record_label(row, "source_domain") for row in low_confidence_rows),
+            limit=None,
+        ),
+        low_confidence_fallback_records_by_taxonomy=_failure_summaries_from_counter(
+            Counter(_record_taxonomy_label(row) for row in low_confidence_rows),
+            limit=None,
+        ),
     )
 
 

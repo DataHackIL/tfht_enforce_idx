@@ -363,6 +363,8 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
                 "content_basis": "partial_page",
                 "record_confidence": "low",
                 "classification_confidence": "low",
+                "taxonomy_category_id": "brothels",
+                "taxonomy_subcategory_id": "keeping_brothel",
             },
             {
                 "id": "full-row-same-url",
@@ -395,6 +397,9 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
                 "event_candidate_ids": ["partial-metadata-only"],
                 "content_basis": "search_result_only",
                 "record_confidence": "high",
+                "classification_confidence": "high",
+                "taxonomy_category_id": "pimping_prostitution",
+                "taxonomy_subcategory_id": "phenomenon_coverage",
             },
             {
                 "id": "unrelated-fallback",
@@ -459,7 +464,34 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
     assert partials.classifier_warning_signals.search_result_only_fallback_record_count == 2
     assert partials.classifier_warning_signals.low_confidence_fallback_record_count == 2
     assert partials.classifier_warning_signals.invalid_taxonomy_pair_record_count == 1
-    assert partials.classifier_warning_signals.partial_page_fallback_without_taxonomy_count == 1
+    assert partials.classifier_warning_signals.partial_page_fallback_without_taxonomy_count == 0
+    assert [
+        item.model_dump(mode="json")
+        for item in partials.classifier_warning_signals.fallback_record_confidence_counts
+    ] == [{"name": "low", "count": 2}, {"name": "high", "count": 1}]
+    assert [
+        item.model_dump(mode="json")
+        for item in partials.classifier_warning_signals.fallback_classification_confidence_counts
+    ] == [
+        {"name": "high", "count": 1},
+        {"name": "low", "count": 1},
+        {"name": "unknown", "count": 1},
+    ]
+    assert [
+        item.model_dump(mode="json")
+        for item in partials.classifier_warning_signals.low_confidence_fallback_records_by_source
+    ] == [{"name": "globes", "count": 2}]
+    assert [
+        item.model_dump(mode="json")
+        for item in partials.classifier_warning_signals.low_confidence_fallback_records_by_domain
+    ] == [{"name": "globes.co.il", "count": 2}]
+    assert [
+        item.model_dump(mode="json")
+        for item in partials.classifier_warning_signals.low_confidence_fallback_records_by_taxonomy
+    ] == [
+        {"name": "brothels/keeping_brothel", "count": 1},
+        {"name": "invalid_category/invalid_subcategory", "count": 1},
+    ]
     rendered = render_discovery_diagnostic_report(report)
     assert "Partial pages" in rendered
     assert "operational_matching=enabled" in rendered
@@ -468,6 +500,9 @@ def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
     assert "partial_attempt_kinds: generic_fetch=2, source_adapter=1" in rendered
     assert "partial_attempt_sources: generic_fetch=2, unknown_source_adapter=1" in rendered
     assert "classifier_signals candidate_fallback_records=3" in rendered
+    assert "fallback_record_confidence: low=2, high=1" in rendered
+    assert "low_confidence_fallback_sources: globes=2" in rendered
+    assert "low_confidence_fallback_taxonomy: brothels/keeping_brothel=1" in rendered
 
 
 def test_partial_page_diagnostics_mark_operational_counts_as_unmeasured_when_skipped(
@@ -499,6 +534,101 @@ def test_partial_page_diagnostics_mark_operational_counts_as_unmeasured_when_ski
     assert partials.retained_operational_record_count == 0
     assert partials.metadata_only_partial_candidate_count == 0
     assert "operational_matching=skipped" in render_discovery_diagnostic_report(report)
+
+
+def test_classifier_warning_signals_report_all_low_confidence_fallback_groups(
+    tmp_path: Path,
+) -> None:
+    """Classifier fallback breakdowns should not hide low-confidence tail groups."""
+    now = datetime.now(UTC)
+    config = Config(
+        store={"state_root": tmp_path},
+        operational={
+            "provider": OperationalProvider.LOCAL_JSON,
+            "root_dir": tmp_path / "operational",
+        },
+    )
+    taxonomy_pairs = [
+        ("brothels", "administrative_closure"),
+        ("brothels", "keeping_brothel"),
+        ("human_trafficking", "trafficking_slavery_conditions"),
+        ("human_trafficking", "trafficking_sexual_exploitation"),
+        ("human_trafficking", "trafficking_women"),
+        ("pimping_prostitution", "phenomenon_coverage"),
+        (None, None),
+    ]
+    sources = ["walla", "haaretz", "mako", "ynet", "brave", "globes", "maariv"]
+    domains = [
+        "news.walla.co.il",
+        "haaretz.co.il",
+        "mako.co.il",
+        "ynet.co.il",
+        "law.acri.org.il",
+        "globes.co.il",
+        "maariv.co.il",
+    ]
+    candidates = [
+        _candidate(
+            f"fallback-tail-{index}",
+            url=f"https://example-{index}.co.il/article",
+            discovered_via=["brave"],
+            status=CandidateStatus.PARTIALLY_SCRAPED,
+            first_seen_at=now - timedelta(days=1),
+            last_seen_at=now,
+            content_basis=ContentBasis.PARTIAL_PAGE,
+        )
+        for index in range(len(sources))
+    ]
+    StateRepoDiscoveryPersistence(config.discovery_state_paths).upsert_candidates(candidates)
+    LocalJsonOperationalStore(tmp_path / "operational").upsert_records(
+        DatasetName.NEWS_ITEMS.value,
+        [
+            {
+                "id": f"fallback-tail-row-{index}",
+                "source_name": source,
+                "source_domain": domains[index],
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": [candidate.candidate_id],
+                "content_basis": "partial_page",
+                "record_confidence": " Low " if index == 0 else "LOW" if index == 1 else "low",
+                "classification_confidence": " Medium ",
+                **(
+                    {
+                        "taxonomy_category_id": taxonomy_pairs[index][0],
+                        "taxonomy_subcategory_id": taxonomy_pairs[index][1],
+                    }
+                    if taxonomy_pairs[index] != (None, None)
+                    else {}
+                ),
+            }
+            for index, (candidate, source) in enumerate(zip(candidates, sources, strict=True))
+        ],
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+    signals = report.partial_page_diagnostics.classifier_warning_signals
+
+    assert signals.low_confidence_fallback_record_count == 7
+    assert [item.model_dump(mode="json") for item in signals.fallback_record_confidence_counts] == [
+        {"name": "low", "count": 7}
+    ]
+    assert [
+        item.model_dump(mode="json") for item in signals.fallback_classification_confidence_counts
+    ] == [{"name": "medium", "count": 7}]
+    assert [item.name for item in signals.low_confidence_fallback_records_by_source] == sorted(
+        sources
+    )
+    assert [item.name for item in signals.low_confidence_fallback_records_by_domain] == sorted(
+        domains
+    )
+    assert all(item.count == 1 for item in signals.low_confidence_fallback_records_by_source)
+    assert all(item.count == 1 for item in signals.low_confidence_fallback_records_by_domain)
+    assert [item.name for item in signals.low_confidence_fallback_records_by_taxonomy] == sorted(
+        {f"{category}/{subcategory}" for category, subcategory in taxonomy_pairs} - {"None/None"}
+        | {"missing"}
+    )
 
 
 def test_discovery_diagnostic_report_treats_event_id_only_operational_rows_as_available(

@@ -78,7 +78,8 @@ Planned future datasets:
 - Breaks down partial-page diagnostics so operators can distinguish retained candidate-fallback
   operational rows, metadata-only partials, search-result-only generic fetch failures, source vs
   generic partial attempts, generic partials after source-adapter attempts, dominant partial
-  domains/sources, and visible current-candidate classifier/taxonomy risk signals
+  domains/sources, and visible current-candidate classifier/taxonomy risk signals, including
+  low-confidence fallback counts by source, domain, taxonomy label, and confidence field
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking
