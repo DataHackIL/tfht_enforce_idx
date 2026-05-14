@@ -278,12 +278,31 @@ many `partial_page` candidates:
   dominating partial outcomes.
 - `classifier_warning_signals` summarizes what discovery diagnostics can infer from persisted
   current-candidate fallback operational rows: fallback rows, partial fallback rows, low-confidence
-  fallback rows, missing taxonomy pairs, and invalid taxonomy pairs. Unrelated historical fallback
-  rows in the operational store are ignored. Run-level classifier parse warnings that are not
-  persisted in candidate or operational state still need the matching run log or debug summary.
+  fallback rows, missing taxonomy pairs, invalid taxonomy pairs, fallback confidence distributions,
+  and low-confidence fallback breakdowns by source, domain, and taxonomy label. Unrelated
+  historical fallback rows in the operational store are ignored. Run-level classifier parse warnings
+  that are not persisted in candidate or operational state still need the matching run log or debug
+  summary.
 
 This diagnostic slice is interpretation-only. It does not change queue fairness, source
 prioritization, scrape caps, generic fetch behavior, or source-family scraper support.
+
+After `CLASSIFIER-PR-CANDIDATE-FALLBACK-DIAGNOSTICS`, the fresh 2026-05-14 Phase C bounded drain
+showed 30 retained candidate-fallback operational rows, all partial-page rows and all
+low-confidence at the record level, while the scrape log also contained classifier parse and invalid
+taxonomy-pair warnings. The durable diagnostic gap was that `denbust diagnose-discovery` flattened
+those 30 low-confidence fallback rows into a single count, obscuring whether the pressure was tied
+to specific source labels, domains, taxonomy labels, or confidence fields. The slice therefore:
+
+- adds fallback `record_confidence` and `classification_confidence` count distributions;
+- reports low-confidence fallback rows by source label, source domain, and taxonomy pair;
+- keeps the counts scoped to operational rows matched to the current candidate state;
+- leaves run-log-only parse and invalid taxonomy warnings as a separate persistence/reporting
+  follow-up because those warnings are not attached to candidate or operational records today.
+
+This is still diagnostic-only. It does not change classifier prompts, taxonomy policy, queue
+fairness, source prioritization, scrape candidate selection, generic fetch behavior,
+browser/CDP scraping, or source-family support.
 
 After `SRC-PR-GLOBES-THEMARKER`, search-discovered Globes and TheMarker article pages have bounded
 generic-fetch source-family support. The January 1-7 evidence showed Globes as a repeated

@@ -1,6 +1,6 @@
 # January 1-7, 2026 Backfill Wet-Test Evidence
 
-Date summarized: 2026-05-13
+Date summarized: 2026-05-13, with 2026-05-14 Phase C diagnostic addenda appended.
 
 This is the checked-in evidence summary for the bounded January 1-7 Chrome-CDP wet test. The
 generated logs and JSON artifacts remain local under `data/may_26_followup/20260503T214851Z/` and
@@ -210,3 +210,27 @@ support mapping Sport1 into Maariv-family article handling, suppressing Sport1 b
 scrape/classifier evidence exists, source-targeted query fanout, a browser/CDP scraper, queue
 fairness or scrape-cap changes, Mako/Haaretz behavior changes, or broader sports-domain filtering.
 Sport1 candidates and regular `www.maariv.co.il` news/law article URLs remain scrape-eligible.
+
+## 2026-05-14 Addendum: Fresh Classifier Candidate-Fallback Diagnostic Evidence
+
+The same 2026-05-14 fresh Phase C diagnostic reported 30 retained candidate-fallback operational
+rows. All 30 were partial-page fallback rows and all 30 were low-confidence at the retained-record
+level, while none had missing or invalid taxonomy pairs in the persisted operational state. Direct
+inspection of the local operational rows showed the low-confidence fallback rows were spread across
+Haaretz, Walla, Mako, Ynet, TheMarker, Brave-only, and Globes source labels and across valid TFHT
+taxonomy pairs such as `brothels/keeping_brothel`,
+`human_trafficking/trafficking_slavery_conditions`, and
+`pimping_prostitution/phenomenon_coverage`.
+
+The scrape log also contained run-level classifier warnings: invalid taxonomy pairs
+`pimping_prostitution / advertising_prostitution` and
+`human_trafficking / phenomenon_coverage`, plus several JSON parse failures. Those warnings were
+visible only in the run log, not in candidate state or the retained operational records. This
+supports improving persisted diagnostic aggregation for matched candidate-fallback rows, while
+leaving run-log warning capture as a separate diagnostic persistence follow-up.
+
+`CLASSIFIER-PR-CANDIDATE-FALLBACK-DIAGNOSTICS` therefore adds source/domain/taxonomy/confidence
+breakdowns for low-confidence fallback rows in `partial_page_diagnostics.classifier_warning_signals`.
+It does not change classifier prompts or policy, taxonomy validity, queue fairness, scrape
+candidate selection, generic fetch behavior, browser/CDP scraping, source-family support, or source
+targeted query fanout.
