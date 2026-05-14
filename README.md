@@ -79,6 +79,9 @@ Planned future datasets:
   operational rows, metadata-only partials, search-result-only generic fetch failures, source vs
   generic partial attempts, generic partials after source-adapter attempts, dominant partial
   domains/sources, and visible current-candidate classifier/taxonomy risk signals
+- Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
+  recoveries separately from definite scrape failures, without otherwise changing source-suggestion
+  ranking
 - Reports self-heal-eligible candidate backlog and structured scrape-failure groups for future
   repair workflows, without running automatic AI repair or selector rewriting
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains

@@ -1309,6 +1309,86 @@ def test_build_discovery_diagnostic_report_keeps_generic_source_families_suggest
     assert "example.com" in suggestion_domains
 
 
+def test_source_suggestions_separate_generic_partials_from_failures(tmp_path: Path) -> None:
+    """Generic partial recoveries should not inflate failure counts or ranking score."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    persistence.upsert_candidates(
+        [
+            _candidate(
+                "candidate-themarker-partial",
+                url="https://www.themarker.com/news/2026-01-04/ty-article/abc",
+                discovered_via=["brave"],
+                status=CandidateStatus.PARTIALLY_SCRAPED,
+                first_seen_at=now - timedelta(days=2),
+                last_seen_at=now - timedelta(hours=2),
+                content_basis=ContentBasis.PARTIAL_PAGE,
+            ),
+            _candidate(
+                "candidate-themarker-blocked",
+                url="https://www.themarker.com/news/2026-01-05/ty-article/def",
+                discovered_via=["exa"],
+                status=CandidateStatus.SCRAPE_FAILED,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now - timedelta(hours=1),
+                content_basis=ContentBasis.SEARCH_RESULT_ONLY,
+            ),
+            _candidate(
+                "candidate-example-a",
+                url="https://example.com/news/a",
+                discovered_via=["brave"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now - timedelta(minutes=45),
+            ),
+            _candidate(
+                "candidate-example-b",
+                url="https://example.com/news/b",
+                discovered_via=["exa"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now - timedelta(minutes=30),
+            ),
+        ]
+    )
+    persistence.append_attempts(
+        [
+            ScrapeAttempt(
+                candidate_id="candidate-themarker-partial",
+                started_at=now - timedelta(hours=2),
+                finished_at=now - timedelta(hours=2),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                fetch_status=FetchStatus.PARTIAL,
+            ),
+            ScrapeAttempt(
+                candidate_id="candidate-themarker-blocked",
+                started_at=now - timedelta(hours=1),
+                finished_at=now - timedelta(hours=1),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                fetch_status=FetchStatus.BLOCKED,
+                error_code="generic_fetch_http_403",
+            ),
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+
+    suggestion_by_domain = {
+        suggestion.domain: suggestion for suggestion in report.source_suggestions.suggestions
+    }
+    suggestion = next(
+        item for item in report.source_suggestions.suggestions if item.domain == "themarker.com"
+    )
+    assert suggestion.scrape_attempt_count == 2
+    assert suggestion.scrape_partial_count == 1
+    assert suggestion.scrape_failure_count == 1
+    assert suggestion.score == 1.75
+    assert suggestion_by_domain["example.com"].score == 2.5
+    assert report.source_suggestions.suggestions[0].domain == "example.com"
+    assert "partials=1 failures=1" in render_discovery_diagnostic_report(report)
+
+
 def test_build_discovery_diagnostic_report_ignores_blank_provenance_domains(tmp_path: Path) -> None:
     """Blank provenance domains should not contribute to source-suggestion run counts."""
     now = datetime.now(UTC)

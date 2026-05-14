@@ -250,6 +250,7 @@ class SourceSuggestion(BaseModel):
     search_result_only_count: int = 0
     scrape_attempt_count: int = 0
     scrape_success_count: int = 0
+    scrape_partial_count: int = 0
     scrape_failure_count: int = 0
     unsupported_count: int = 0
     score: float = 0.0
@@ -649,7 +650,9 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
             lines.append(
                 "  {domain} score={score:.2f} candidates={candidate_count} runs={run_count} "
                 "candidate_only={candidate_only_count} successes={scrape_success_count} "
-                "failures={scrape_failure_count}".format(**suggestion.model_dump(mode="json"))
+                "partials={scrape_partial_count} failures={scrape_failure_count}".format(
+                    **suggestion.model_dump(mode="json")
+                )
             )
     if report.notes:
         lines.append("")
@@ -1584,8 +1587,13 @@ def _build_source_suggestion_report(
         success_count = sum(
             1 for attempt in domain_attempts if attempt.fetch_status is FetchStatus.SUCCESS
         )
+        partial_count = sum(
+            1 for attempt in domain_attempts if attempt.fetch_status is FetchStatus.PARTIAL
+        )
         failure_count = sum(
-            1 for attempt in domain_attempts if attempt.fetch_status is not FetchStatus.SUCCESS
+            1
+            for attempt in domain_attempts
+            if attempt.fetch_status not in {FetchStatus.SUCCESS, FetchStatus.PARTIAL}
         )
         candidate_only_count = sum(
             1
@@ -1620,6 +1628,7 @@ def _build_source_suggestion_report(
                 search_result_only_count=search_result_only_count,
                 scrape_attempt_count=len(domain_attempts),
                 scrape_success_count=success_count,
+                scrape_partial_count=partial_count,
                 scrape_failure_count=failure_count,
                 unsupported_count=unsupported_count,
                 score=score,

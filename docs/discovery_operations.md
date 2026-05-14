@@ -303,6 +303,28 @@ Future work should still inspect fresh `partial_page_diagnostics` before adding 
 TheMarker browser/CDP scraper. This slice intentionally does not change queue fairness,
 prioritization, scrape caps, Mako/Haaretz browser behavior, or broader Israeli source coverage.
 
+After `SRC-PR-GLOBES-THEMARKER-FOLLOWUP`, the generic source-suggestion diagnostics contract
+distinguishes partial recoveries from definite scrape failures. The fresh 2026-05-14 January 1-7
+evidence pass persisted 3,745 candidates, attempted 100 candidates, retained 30 provisional
+operational rows, stopped at `budget_cap_reached`, and reported 97 partial pages. TheMarker
+dominated the partial-page pressure (`themarker.com=32`) and both TheMarker and Globes still
+appeared as top source suggestions (`themarker.com`: 298 candidates, 34 attempts; `globes.co.il`:
+216 candidates, 1 attempt). Because those TheMarker attempts were generic metadata recoveries
+rather than full article successes, counting `partial` attempts as failures made the
+source-suggestion line overstate failure pressure and understate usable generic-fetch progress. The
+follow-up therefore:
+
+- adds `scrape_partial_count` to `source_suggestions.suggestions`;
+- renders `partials=...` beside successes and failures in `denbust diagnose-discovery`;
+- counts only non-success, non-partial attempts as `scrape_failure_count`;
+- leaves source-suggestion ranking otherwise unchanged, so partials are not failures but also do
+  not receive an unsupported positive score bump;
+- keeps Globes/TheMarker source-family scope unchanged.
+
+This is a generic diagnostics interpretation fix triggered by Globes/TheMarker evidence. It does
+not change generic fetch extraction, source targeted query fanout, queue fairness, source
+prioritization, scrape caps, browser/CDP behavior, or source-family support.
+
 After `SRC-PR-ISRAELHAYOM`, search-discovered main-domain Israel Hayom article pages have bounded
 generic-fetch source-family recognition. The January 1-7 evidence showed `israelhayom.co.il` as a
 repeated source suggestion with 25 main-domain candidate-only URLs across two runs, plus local state
