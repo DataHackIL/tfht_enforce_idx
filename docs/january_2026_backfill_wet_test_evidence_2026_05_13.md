@@ -634,3 +634,92 @@ paths as before. The slice does not change classifier prompts, taxonomy validity
 taxonomy policy, queue behavior, scrape candidate selection, generic fetch behavior, browser/CDP
 scraper behavior, scrape caps, source-family support, source-targeted query fanout, or generated
 data tracking.
+
+## 2026-05-15 Addendum: Post-Recovery Evidence Check
+
+`CLASSIFIER-PR-POST-RECOVERY-EVIDENCE-CHECK` found no existing post-PR #135 generated artifact
+under `data/may_26_followup/`, so it generated a new bounded Phase C January 1-7 pass. The
+generated local evidence root is `data/may_26_followup/20260514T231311Z/`; generated artifacts
+remain untracked.
+
+The run reused `agents/news/local_search_brave_exa.yaml`, the January 1-7 UTC date window, an
+isolated state root at `data/may_26_followup/20260514T231311Z/state`, and a temporary Chrome-CDP
+endpoint at `http://127.0.0.1:9222`.
+
+Exact inspected artifacts:
+
+- Discovery log:
+  `data/may_26_followup/20260514T231311Z/logs/backfill_discover_2026_01_01_07_brave_exa.log`
+- Post-discovery diagnostic:
+  `data/may_26_followup/20260514T231311Z/artifacts/diagnose_discovery_after_discover_brave_exa.json`
+- Scrape log:
+  `data/may_26_followup/20260514T231311Z/logs/backfill_scrape_2026_01_01_07_brave_exa_chrome_cdp.log`
+- Full scrape debug payload:
+  `data/may_26_followup/20260514T231311Z/state/news_items/backfill_scrape/logs/2026-05-14T23-19-42-898391Z.json`
+- Compact scrape debug summary:
+  `data/may_26_followup/20260514T231311Z/state/news_items/backfill_scrape/logs/2026-05-14T23-19-42-898391Z.summary.json`
+- Post-scrape discovery diagnostic:
+  `data/may_26_followup/20260514T231311Z/artifacts/diagnose_discovery_after_scrape_brave_exa_chrome_cdp.json`
+
+The run reported:
+
+| Figure | Value |
+| --- | ---: |
+| Persisted candidates | 1,878 |
+| Fallback classifier inputs | 100 |
+| Attempted candidates | 100 |
+| Persisted scrape attempts | 160 |
+| Provisional operational rows retained | 33 |
+| Partial pages | 97 |
+| Scrape failures | 3 |
+| Remaining eligible candidates | 1,431 |
+| Inferred stop reason | `budget_cap_reached` |
+
+Discovery caveat: Exa returned `402 Payment Required` near the end of the discovery leg, so the
+post-discovery diagnostic showed `brave=1878`, `exa=0`, and `google_cse=0`. Google CSE remained
+disabled by the tracked no-Google config. Browser caveat: Chrome-CDP was reachable, but Mako search
+attempts repeatedly timed out during challenge navigation. This pass is therefore useful for the
+fallback classifier recovery question, but it should not be interpreted as clean Exa coverage or
+clean Mako source-adapter health evidence.
+
+Both the full debug payload and compact summary recorded the same warning and recovery counters:
+
+| Counter | Count | Rate |
+| --- | ---: | ---: |
+| `classifier_summary.warning_counts.parse_failure_count` | 0 | 0% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 1 | 1% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+| `classifier_summary.warning_counts.double_wrapper_recovery_count` | 4 | 4% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.parse_failure_count` | 0 | 0% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 1 | 1% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.double_wrapper_recovery_count` | 4 | 4% of 100 fallback classifier inputs |
+
+The parse-failure diagnostics in both summary objects were empty: all category counts were zero,
+`samples=[]`, and `sample_count=0`.
+
+The matching post-scrape discovery diagnostic reported:
+
+| Retained-row diagnostic | Value |
+| --- | ---: |
+| `candidate_fallback_record_count` | 33 |
+| `partial_page_fallback_record_count` | 33 |
+| `fallback_record_without_taxonomy_count` | 1 |
+| `partial_page_fallback_without_taxonomy_count` | 1 |
+| `invalid_taxonomy_pair_record_count` | 0 |
+| `low_confidence_fallback_record_count` | 33 |
+
+Direct inspection of the generated local operational rows showed the missing-taxonomy retained row
+was a low-confidence, internal-only Globes partial fallback with legacy `category=trafficking` and
+no TFHT taxonomy leaf. The row did not contain an invalid taxonomy pair.
+
+Interpretation: `double_wrapper_recovery_count` appeared, and the prior five-parse-failure
+fallback pattern dropped to zero parse failures across the same 100-input fallback scrape shape.
+Invalid taxonomy warnings did not rise unexpectedly compared with the prior structure pass
+(`1/100` before and `1/100` after), and invalid taxonomy did not leak into retained fallback rows.
+The result supports pausing further parser hardening. The remaining classifier question is not
+another parser recovery path; it is whether retained candidate-fallback rows without usable TFHT
+taxonomy should be retained, suppressed, or reported separately from taxonomy-complete fallback
+rows.
