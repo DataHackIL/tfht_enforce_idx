@@ -128,11 +128,11 @@ class TestClassifierParsing:
             "'taxonomy_subcategory_id': 'keeping_brothel', 'confidence': 'high'}",
         ],
     )
-    def test_parse_brace_delimited_non_json_fixtures_remain_rejected(
+    def test_parse_representative_object_like_non_json_remains_rejected(
         self,
         response: str,
     ) -> None:
-        """Observed parse-failure logs only expose the decoder shape, so do not recover guesses."""
+        """Do not recover plausible malformed object-like outputs without retained raw evidence."""
         classifier = Classifier(api_key="test-key")
 
         result = classifier._parse_response(response)

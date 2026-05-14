@@ -335,11 +335,11 @@ fallback-specific input counts and warning counts while the compact `.summary.js
 `classifier_summary.warning_counts`; compact summaries now also retain
 `fallback_classifier_summary` for future fallback-only drains. The retained fallback rows still had
 valid persisted taxonomy pairs in `partial_page_diagnostics.classifier_warning_signals`, so the
-evidence supports a bounded classifier-output follow-up that first characterizes observed parse
-failure output shapes and adds fixture-backed regression coverage. It does not support changing
-classifier prompts, taxonomy policy, queue behavior, scrape candidate selection, generic fetch
-behavior, browser/CDP scraping, source-family support, scrape caps, or source-targeted query fanout
-in the interpretation slice.
+evidence supports a bounded classifier-output follow-up that first checks whether retained
+artifacts actually expose raw parse-failure output shapes. It does not support changing classifier
+prompts, taxonomy policy, queue behavior, scrape candidate selection, generic fetch behavior,
+browser/CDP scraping, source-family support, scrape caps, or source-targeted query fanout in the
+interpretation slice.
 
 After `SRC-PR-GLOBES-THEMARKER`, search-discovered Globes and TheMarker article pages have bounded
 generic-fetch source-family support. The January 1-7 evidence showed Globes as a repeated
@@ -612,16 +612,15 @@ Run-level classifier warning counters are diagnostic evidence, not a parser-poli
 `data/may_26_followup/20260514T182934Z/` persisted four fallback parse failures and one invalid
 taxonomy pair across 100 fallback classifier inputs. The root's full debug JSON and compact summary
 persisted only counts; its local `logs/`, `reports/`, and `summaries/` folders did not retain raw
-classifier response text. The only observable parse-failure output shape was therefore the JSON
-decoder signature `Expecting property name enclosed in double quotes: line 1 column 2`, which is
-consistent with brace-delimited non-JSON objects such as unquoted-key or single-quoted pseudo-JSON.
+classifier response text. That means the actual malformed response shapes are insufficiently
+observable from the retained artifacts.
 
-Those shapes remain intentionally rejected unless a future artifact captures the exact malformed
-payload safely. Representative fixture strings now prove that brace-delimited non-JSON outputs
-return the low-confidence not-relevant fallback and increment `parse_failure_count`. Canonical JSON
-responses and invalid taxonomy-pair rejection remain unchanged. Do not broaden this into prompt
-changes, taxonomy-policy changes, queue behavior changes, scrape behavior changes, scrape-cap
-changes, or source-family expansion.
+Parser recovery therefore remains intentionally deferred unless a future artifact captures exact
+malformed payload shape evidence safely. Representative non-JSON strings now prove only the current
+rejection policy: malformed object-like outputs return the low-confidence not-relevant fallback and
+increment `parse_failure_count`. Canonical JSON responses and invalid taxonomy-pair rejection remain
+unchanged. Do not broaden this into prompt changes, taxonomy-policy changes, queue behavior
+changes, scrape behavior changes, scrape-cap changes, or source-family expansion.
 
 ## One-Time 90-Day Re-Scan
 
