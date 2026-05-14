@@ -1,5 +1,6 @@
 """Unit tests for run snapshot persistence."""
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -117,6 +118,16 @@ class TestRunSnapshots:
                 "workflow": {"run_id": "123"},
                 "source_summaries": [{"source_name": "mako", "raw_article_count": 0}],
                 "classifier_summary": {"rejected_article_count": 2},
+                "fallback_classifier_summary": {
+                    "fallback_classifier_input_count": 3,
+                    "fallback_operational_record_count": 1,
+                    "warning_counts": {
+                        "parse_failure_count": 1,
+                        "invalid_taxonomy_pair_count": 0,
+                        "invalid_legacy_pair_count": 0,
+                        "relevant_without_usable_taxonomy_count": 0,
+                    },
+                },
                 "problems": {"all_unseen_rejected": True},
                 "suspicions": ["all_unseen_rejected"],
                 "warnings": [],
@@ -129,4 +140,15 @@ class TestRunSnapshots:
         content = path.read_text(encoding="utf-8")
         assert '"schema_version": "news_items.ingest.debug.v1"' in content
         assert '"suspicions": [' in content
+        payload = json.loads(content)
+        assert payload["fallback_classifier_summary"] == {
+            "fallback_classifier_input_count": 3,
+            "fallback_operational_record_count": 1,
+            "warning_counts": {
+                "parse_failure_count": 1,
+                "invalid_taxonomy_pair_count": 0,
+                "invalid_legacy_pair_count": 0,
+                "relevant_without_usable_taxonomy_count": 0,
+            },
+        }
         assert '"rejected_articles"' not in content

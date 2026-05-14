@@ -316,6 +316,31 @@ fallback classification through zero full-article counts. These fields are diagn
 not alter classifier prompts, taxonomy validity rules, candidate selection, queue fairness, generic
 fetch behavior, browser/CDP scraping, or source-family support.
 
+After `CLASSIFIER-PR-WARNING-EVIDENCE-INTERPRETATION`, the first post-persistence bounded Phase C
+January 1-7 scrape/backfill evidence pass under `data/may_26_followup/20260514T182934Z/` used the
+same Brave+Exa/no-Google local config and the same Chrome-CDP scrape shape. It persisted 3,743
+candidates, attempted 100 candidates, recorded 159 scrape attempts, retained 30 provisional
+fallback operational rows, left 3,148 eligible candidates, and stopped at `budget_cap_reached`.
+The post-scrape run payload recorded 100 fallback classifier inputs and these warning counts in both
+`classifier_summary.warning_counts` and `fallback_classifier_summary.warning_counts`:
+
+- `parse_failure_count=4`
+- `invalid_taxonomy_pair_count=1`
+- `invalid_legacy_pair_count=0`
+- `relevant_without_usable_taxonomy_count=0`
+
+That is a 4% parse-failure rate, a 1% invalid-taxonomy-output rate, and a combined 5% warning rate
+over fallback classifier inputs. During the evidence pass, the full debug JSON carried the
+fallback-specific input counts and warning counts while the compact `.summary.json` carried only
+`classifier_summary.warning_counts`; compact summaries now also retain
+`fallback_classifier_summary` for future fallback-only drains. The retained fallback rows still had
+valid persisted taxonomy pairs in `partial_page_diagnostics.classifier_warning_signals`, so the
+evidence supports a bounded classifier-output follow-up that first characterizes observed parse
+failure output shapes and adds fixture-backed regression coverage. It does not support changing
+classifier prompts, taxonomy policy, queue behavior, scrape candidate selection, generic fetch
+behavior, browser/CDP scraping, source-family support, scrape caps, or source-targeted query fanout
+in the interpretation slice.
+
 After `SRC-PR-GLOBES-THEMARKER`, search-discovered Globes and TheMarker article pages have bounded
 generic-fetch source-family support. The January 1-7 evidence showed Globes as a repeated
 unsupported source suggestion (`globes.co.il`, 25 candidates across two runs) and showed TheMarker
