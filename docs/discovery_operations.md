@@ -303,6 +303,26 @@ Future work should still inspect fresh `partial_page_diagnostics` before adding 
 TheMarker browser/CDP scraper. This slice intentionally does not change queue fairness,
 prioritization, scrape caps, Mako/Haaretz browser behavior, or broader Israeli source coverage.
 
+After `SRC-PR-ISRAELHAYOM`, search-discovered Israel Hayom article pages have the same bounded
+generic-fetch source-family support. The January 1-7 evidence showed `israelhayom.co.il` as a
+repeated source suggestion with 25 main-domain candidate-only URLs across two runs, plus local state
+showed 33 Israel Hayom-family candidate-only URLs and 31 still scrape-eligible Israel Hayom-family
+URLs after the bounded drain. No Israel Hayom candidate had valid attempted-scrape or partial-page
+evidence in that pass, so this slice does not justify a browser scraper or source-native adapter.
+It:
+
+- recognizes `israelhayom.co.il` as a supported generic-fetch source family;
+- emits source-targeted discovery/backfill queries for `www.israelhayom.co.il`;
+- labels generic fallback provenance as `israelhayom` when search engines found an Israel Hayom
+  article URL;
+- keeps Israel Hayom eligible for source-suggestion diagnostics when candidate-only or weak
+  conversion evidence still shows backlog pressure.
+
+Future work should inspect fresh `partial_page_diagnostics` and attempted Israel Hayom scrape
+evidence before adding any Israel Hayom browser/CDP scraper. This slice intentionally does not
+change queue fairness, prioritization, scrape caps, Mako/Haaretz browser behavior, Kan/News1
+coverage, or broader Israeli source coverage.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:

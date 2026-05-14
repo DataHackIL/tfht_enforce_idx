@@ -201,6 +201,22 @@ The key evidence is the `queue_drain` object:
 - `remaining_eligible_candidate_order`;
 - `inferred_stop_reason`.
 
+For source-family follow-up slices, inspect the same persisted state with the current
+`denbust diagnose-discovery` implementation before coding. The post-scrape diagnostic should be
+used to compare:
+
+- `source_suggestions.suggestions` for repeated candidate-only unsupported domains;
+- `partial_page_diagnostics` for domains that generic fetch already reached as partial pages;
+- `queue_drain.remaining_eligible_candidate_order` and the candidate JSONL for domain-specific
+  backlog shape.
+
+For `SRC-PR-ISRAELHAYOM`, this evidence favored bounded generic-fetch source-family support:
+`israelhayom.co.il` appeared as a repeated source suggestion with 25 candidate-only main-domain
+URLs across two runs, local state contained 33 Israel Hayom-family candidate-only URLs, and no
+Israel Hayom candidate had attempted-scrape or partial-page evidence. That supports source-targeted
+discovery/backfill domains and generic fallback source labeling, not a browser scraper, queue
+fairness change, or Mako/Haaretz browser behavior change.
+
 ## Phase 4 - Source Artifact Check
 
 Run artifact-only source diagnostics after the scrape pass:
@@ -380,8 +396,13 @@ PRs, for seven planned follow-ups total:
    titles, and source-suggestion diagnostics remain available when candidate-only or weak
    conversion evidence still justifies stronger scraper work.
 5. `SRC-PR-ISRAELHAYOM` - source-family expansion.
-   Add or improve Israel Hayom support if bounded scrape diagnostics show enough high-value
-   unsupported or partial candidates.
+   Implemented as bounded generic-fetch source-family support, not as a browser scraper. Fresh
+   diagnostics over the January 1-7 persisted state showed `israelhayom.co.il` as a repeated
+   source suggestion with 25 candidate-only main-domain URLs across two runs, 33 Israel
+   Hayom-family candidate-only URLs in local state, and no Israel Hayom attempted-scrape or
+   partial-page evidence. Israel Hayom URLs are now mapped to a source-family label for
+   diagnostics/fallback provenance, and source-targeted discovery/backfill queries now cover
+   `www.israelhayom.co.il`.
 6. `SRC-PR-KAN` - source-family expansion.
    Add or improve Kan support if the broader search corpus keeps surfacing relevant candidates that
    current generic fetch cannot handle well.

@@ -28,6 +28,11 @@ GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
         domains=frozenset({"themarker.com"}),
         discovery_domain="www.themarker.com",
     ),
+    SourceFamily(
+        name="israelhayom",
+        domains=frozenset({"israelhayom.co.il"}),
+        discovery_domain="www.israelhayom.co.il",
+    ),
 )
 
 _GENERIC_FETCH_DOMAIN_TO_SOURCE: dict[str, str] = {
