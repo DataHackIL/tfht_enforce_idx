@@ -117,3 +117,12 @@ Israel Hayom attempted scrape or partial-page evidence in the bounded drain. Tha
 bounded main-domain generic-fetch source-family recognition, while leaving source-targeted
 discovery/backfill fanout, Israel Hayom subdomains, browser scraper work, queue fairness,
 Mako/Haaretz Chrome-CDP behavior, and unrelated source families out of scope.
+
+For `SRC-PR-KAN`, fresh diagnostics and candidate-state inspection over the same persisted state
+showed two official `kan.org.il` candidate-only URLs, one still scrape-eligible official Kan
+candidate, and no official Kan attempted-scrape or partial-page evidence in the bounded drain. The
+same keyword searches also surfaced unrelated Kan-named domains such as `kanisrael.co.il`,
+`kan-ashkelon.co.il` Facebook posts, and other non-Kan hosts. That evidence supports bounded
+main-domain generic-fetch source-family recognition for official `kan.org.il` URLs only, while
+leaving source-targeted discovery/backfill fanout, unrelated Kan-named domains, browser scraper
+work, queue fairness, Mako/Haaretz Chrome-CDP behavior, and unrelated source families out of scope.

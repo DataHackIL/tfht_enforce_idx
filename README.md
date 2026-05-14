@@ -407,6 +407,11 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   `israelhayom`, while source-targeted discovery/backfill fanout, Israel Hayom subdomains, browser
   scrapers, source-native adapters, and queue-prioritization changes remain out of scope until
   stronger extraction evidence exists
+- `SRC-PR-KAN` adds bounded generic-fetch source-family recognition for official main-domain
+  `kan.org.il` article URLs: search-discovered official Kan article URLs can be grouped as `kan`,
+  while source-targeted discovery/backfill fanout, unrelated Kan-named domains such as
+  `kanisrael.co.il` or `kan-ashkelon.co.il`, browser scrapers, source-native adapters, and
+  queue-prioritization changes remain out of scope until stronger extraction evidence exists
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable

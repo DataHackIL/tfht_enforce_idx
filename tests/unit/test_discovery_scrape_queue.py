@@ -775,6 +775,50 @@ async def test_scrape_candidates_labels_israelhayom_generic_partial_from_candida
 
 
 @pytest.mark.asyncio
+async def test_scrape_candidates_labels_kan_generic_partial_from_candidate_domain(
+    tmp_path: Path,
+) -> None:
+    """Generic partial fallback metadata should label official Kan source-family URLs."""
+    store = build_store(tmp_path)
+    candidate = build_candidate(
+        "candidate-kan",
+        status=CandidateStatus.NEW,
+        source_hint="brave",
+        current_url="https://www.kan.org.il/content/kan-news/local/296141/",
+        canonical_url="https://www.kan.org.il/content/kan-news/local/296141/",
+    ).model_copy(update={"discovered_via": ["brave"]})
+    store.upsert_candidates([candidate])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
+        return GenericFetchResult(
+            fetch_status=FetchStatus.PARTIAL,
+            title="כותרת כאן",
+            snippet="תקציר כאן",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    stored = store.get_candidate("candidate-kan")
+    assert stored is not None
+    assert stored.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    assert stored.metadata["fallback_source_name"] == "kan"
+
+
+@pytest.mark.asyncio
 async def test_scrape_candidates_records_fallback_metadata_for_final_url_and_diagnostics(
     tmp_path: Path,
 ) -> None:

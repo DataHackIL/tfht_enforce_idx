@@ -37,6 +37,13 @@ GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
         include_subdomains=False,
         source_targeted_discovery=False,
     ),
+    SourceFamily(
+        name="kan",
+        domains=frozenset({"kan.org.il"}),
+        discovery_domain="www.kan.org.il",
+        include_subdomains=False,
+        source_targeted_discovery=False,
+    ),
 )
 
 
