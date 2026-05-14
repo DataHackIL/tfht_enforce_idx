@@ -203,7 +203,7 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     assert [query.query_text for query in broad_queries] == ["בית בושת", "סחר"]
     keyword_source_queries = [query for query in source_queries if "taxonomy" not in query.tags]
     taxonomy_source_queries = [query for query in source_queries if "taxonomy" in query.tags]
-    assert len(keyword_source_queries) == 10
+    assert len(keyword_source_queries) == 8
     assert (
         len(taxonomy_source_queries)
         == config.backfill.max_source_targeted_taxonomy_queries_per_window
@@ -215,11 +215,10 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
         "walla",
         "globes",
         "themarker",
-        "israelhayom",
     }
     assert all(query.preferred_domains for query in keyword_source_queries)
     assert all(not query.preferred_domains for query in taxonomy_queries)
-    assert {"globes", "themarker", "israelhayom"}.issubset(
+    assert {"globes", "themarker"}.issubset(
         {query.source_hint for query in taxonomy_source_queries}
     )
     assert all("backfill" in query.tags and "window:0" in query.tags for query in source_queries)
@@ -299,7 +298,6 @@ def test_build_backfill_queries_emits_source_targeted_taxonomy_terms(
         ("mako", ("www.mako.co.il",)),
         ("globes", ("www.globes.co.il",)),
         ("themarker", ("www.themarker.com",)),
-        ("israelhayom", ("www.israelhayom.co.il",)),
     }
     assert all(
         query.date_from == window.date_from and query.date_to == window.date_to
@@ -378,13 +376,11 @@ def test_build_backfill_queries_keeps_taxonomy_source_provenance_for_keyword_ove
         for query in queries
         if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
     ]
-    assert len(source_queries) == 8
+    assert len(source_queries) == 6
     assert sorted("taxonomy" in query.tags for query in source_queries) == [
         False,
         False,
         False,
-        False,
-        True,
         True,
         True,
         True,

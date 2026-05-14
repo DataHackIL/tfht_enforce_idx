@@ -51,8 +51,8 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
     taxonomy_targeted_source_queries = [
         query for query in targeted_queries if "taxonomy" in query.tags
     ]
-    assert len(keyword_targeted_queries) == 10
-    assert len(taxonomy_targeted_source_queries) == len(taxonomy_queries) * 5
+    assert len(keyword_targeted_queries) == 8
+    assert len(taxonomy_targeted_source_queries) == len(taxonomy_queries) * 4
     assert len(taxonomy_queries) == len(
         {term for _, _, term in default_taxonomy().discovery_terms()}
     )
@@ -65,7 +65,6 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
         ("mako", ("www.mako.co.il",)),
         ("globes", ("www.globes.co.il",)),
         ("themarker", ("www.themarker.com",)),
-        ("israelhayom", ("www.israelhayom.co.il",)),
     }
     assert all(not query.preferred_domains for query in taxonomy_queries)
     assert {
@@ -76,7 +75,6 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
         ("mako", ("www.mako.co.il",)),
         ("globes", ("www.globes.co.il",)),
         ("themarker", ("www.themarker.com",)),
-        ("israelhayom", ("www.israelhayom.co.il",)),
     }
     assert any(
         query.query_text == "נישואין בכפייה"
@@ -111,12 +109,7 @@ def test_build_discovery_queries_respects_enabled_query_kinds() -> None:
 
     queries = build_discovery_queries(config, days=3)
 
-    assert [query.source_hint for query in queries] == [
-        "mako",
-        "globes",
-        "themarker",
-        "israelhayom",
-    ]
+    assert [query.source_hint for query in queries] == ["mako", "globes", "themarker"]
     assert all(query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED for query in queries)
 
 
@@ -152,7 +145,6 @@ def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
         ("mako", ("www.mako.co.il",)),
         ("globes", ("www.globes.co.il",)),
         ("themarker", ("www.themarker.com",)),
-        ("israelhayom", ("www.israelhayom.co.il",)),
     }
     assert all(
         query.date_from == datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
@@ -186,13 +178,11 @@ def test_build_discovery_queries_keeps_taxonomy_source_provenance_for_keyword_ov
         for query in queries
         if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
     ]
-    assert len(source_queries) == 8
+    assert len(source_queries) == 6
     assert sorted("taxonomy" in query.tags for query in source_queries) == [
         False,
         False,
         False,
-        False,
-        True,
         True,
         True,
         True,
@@ -221,13 +211,12 @@ def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() 
     keyword_targeted_queries = [query for query in targeted_queries if "taxonomy" not in query.tags]
 
     assert len(broad_queries) == 1
-    assert len(keyword_targeted_queries) == 4
+    assert len(keyword_targeted_queries) == 3
     assert broad_queries[0].query_text == "זנות"
     assert {query.source_hint for query in keyword_targeted_queries} == {
         "mako",
         "globes",
         "themarker",
-        "israelhayom",
     }
 
 
@@ -276,7 +265,6 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
         ("ynet", ("www.ynet.co.il",)),
         ("globes", ("www.globes.co.il",)),
         ("themarker", ("www.themarker.com",)),
-        ("israelhayom", ("www.israelhayom.co.il",)),
     }
 
 
@@ -433,5 +421,4 @@ def test_enabled_discovery_domains_adds_generic_fetch_source_families() -> None:
         ("ynet", "www.ynet.co.il"),
         ("globes", "www.globes.co.il"),
         ("themarker", "www.themarker.com"),
-        ("israelhayom", "www.israelhayom.co.il"),
     ]

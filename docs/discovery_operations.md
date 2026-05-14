@@ -114,9 +114,9 @@ eligible for Google CSE-backed discovery. The current domain set is:
 - `www.news1.co.il/*`
 
 The pipeline currently builds source-targeted Google CSE queries for configured source domains,
-supported generic-fetch source families, and Facebook social discovery. Future discovery expansion
-can and should use this same CSE to query the broader listed Israeli news domains through the API
-before adding new source-specific scrapers.
+generic-fetch source families that have source-targeted fanout enabled, and Facebook social
+discovery. Future discovery expansion can and should use this same CSE to query the broader listed
+Israeli news domains through the API before adding new source-specific scrapers.
 
 Before model-backed validation, lint the tracked validation CSV without credentials:
 
@@ -303,25 +303,26 @@ Future work should still inspect fresh `partial_page_diagnostics` before adding 
 TheMarker browser/CDP scraper. This slice intentionally does not change queue fairness,
 prioritization, scrape caps, Mako/Haaretz browser behavior, or broader Israeli source coverage.
 
-After `SRC-PR-ISRAELHAYOM`, search-discovered Israel Hayom article pages have the same bounded
-generic-fetch source-family support. The January 1-7 evidence showed `israelhayom.co.il` as a
+After `SRC-PR-ISRAELHAYOM`, search-discovered main-domain Israel Hayom article pages have bounded
+generic-fetch source-family recognition. The January 1-7 evidence showed `israelhayom.co.il` as a
 repeated source suggestion with 25 main-domain candidate-only URLs across two runs, plus local state
 showed 33 Israel Hayom-family candidate-only URLs and 31 still scrape-eligible Israel Hayom-family
 URLs after the bounded drain. No Israel Hayom candidate had valid attempted-scrape or partial-page
-evidence in that pass, so this slice does not justify a browser scraper or source-native adapter.
-It:
+evidence in that pass, so this slice does not justify recurring source-targeted query fanout, broad
+subdomain matching, a browser scraper, or a source-native adapter. It:
 
-- recognizes `israelhayom.co.il` as a supported generic-fetch source family;
-- emits source-targeted discovery/backfill queries for `www.israelhayom.co.il`;
-- labels generic fallback provenance as `israelhayom` when search engines found an Israel Hayom
-  article URL;
+- recognizes main-domain `israelhayom.co.il` URLs as the `israelhayom` source family;
+- labels generic fallback provenance as `israelhayom` when search engines found a main-domain
+  Israel Hayom article URL;
+- leaves Israel Hayom subdomains such as `knesset.israelhayom.co.il`, `nadlan.israelhayom.co.il`,
+  and `coalition.israelhayom.co.il` ungrouped until separate evidence justifies them;
 - keeps Israel Hayom eligible for source-suggestion diagnostics when candidate-only or weak
   conversion evidence still shows backlog pressure.
 
 Future work should inspect fresh `partial_page_diagnostics` and attempted Israel Hayom scrape
-evidence before adding any Israel Hayom browser/CDP scraper. This slice intentionally does not
-change queue fairness, prioritization, scrape caps, Mako/Haaretz browser behavior, Kan/News1
-coverage, or broader Israeli source coverage.
+evidence before adding Israel Hayom source-targeted query fanout, subdomain matching, or any
+browser/CDP scraper. This slice intentionally does not change queue fairness, prioritization,
+scrape caps, Mako/Haaretz browser behavior, Kan/News1 coverage, or broader Israeli source coverage.
 
 ## GitHub Actions Run Path
 
