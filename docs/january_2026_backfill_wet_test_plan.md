@@ -362,8 +362,8 @@ successful bounded wet test.
 ## Follow-Up PR Map
 
 Use stable planning IDs for the post-wet-test slices so they are not confused with GitHub pull
-request numbers. The current map is three simple cross-cutting PRs, four source-family PRs, and one
-evidence interpretation follow-up:
+request numbers. The current map is three simple cross-cutting PRs, four source-family PRs, and
+three evidence interpretation follow-ups:
 
 1. `WET-PR-EVIDENCE-CONFIG` - planning/config evidence only.
    Add a tracked Brave+Exa/no-Google local search config, document that local operators may bypass
@@ -434,6 +434,18 @@ evidence interpretation follow-up:
    metadata or a retained search-result-only fallback.
    Non-archive News1 pages, recurring source-targeted discovery/backfill queries, generic metadata
    hardening, and any browser/source-native scraper remain out of scope.
+9. `SRC-PR-SPORT1-NOISE` - evidence interpretation follow-up.
+   Implemented as diagnostic-only source-suggestion classification for `sport1.maariv.co.il`, not
+   as a search-noise filter or Maariv-family source support. The fresh 2026-05-14 January 1-7
+   diagnostic showed 147 Sport1 candidates across two runs, all candidate-only, with zero scrape
+   attempts, partial recoveries, successes, or failures. Candidate-state inspection showed
+   sports-vertical paths such as `israeli-soccer`, `world-soccer`, `square`, basketball, tennis, and
+   related sections, but the candidates were still article-like URLs and some titles contained
+   legal/crime-adjacent wording. Source suggestions now flag that shape as
+   `sports_vertical_candidate_only` while keeping Sport1 scrape-eligible until attempted
+   scrape/classifier evidence justifies stronger action. Source-family mapping, source-targeted
+   discovery/backfill fanout, browser/source-native scraper work, queue fairness/prioritization/
+   caps, Mako/Haaretz behavior changes, and broader sports-domain policy remain out of scope.
 
 Do not bundle the source-family work into one large scraper PR. Promote each source-family PR only
 after the latest diagnostics justify it.

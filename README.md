@@ -85,6 +85,8 @@ Planned future datasets:
 - Reports self-heal-eligible candidate backlog and structured scrape-failure groups for future
   repair workflows, without running automatic AI repair or selector rewriting
 - Writes source-suggestion diagnostics artifacts for repeated unseen non-social domains
+- Flags candidate-only `sport1.maariv.co.il` pressure in source-suggestion diagnostics without
+  changing scrape eligibility or Maariv source-family support
 - Lints the tracked classifier validation CSV with `denbust validation-lint`
 - Shares validation taxonomy/category/index-relevance row-integrity rules between
   `denbust validation-lint` and reviewed-row finalize/import

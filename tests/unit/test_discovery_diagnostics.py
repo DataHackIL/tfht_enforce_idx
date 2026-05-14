@@ -1179,6 +1179,75 @@ def test_build_discovery_diagnostic_report_builds_source_suggestions(tmp_path: P
     assert "Source suggestions" in render_discovery_diagnostic_report(report)
 
 
+def test_source_suggestions_classify_sport1_candidate_only_pressure_without_demoting(
+    tmp_path: Path,
+) -> None:
+    """Sport1 candidate-only pressure should be diagnostic, not an eligibility filter."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    persistence.upsert_candidates(
+        [
+            _candidate(
+                "candidate-sport1-a",
+                url="https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884",
+                discovered_via=["exa"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=2),
+                last_seen_at=now - timedelta(hours=2),
+            ),
+            _candidate(
+                "candidate-sport1-b",
+                url="https://sport1.maariv.co.il/world-soccer/article/1735653",
+                discovered_via=["brave"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now - timedelta(hours=1),
+            ),
+        ]
+    )
+    persistence.append_provenance(
+        [
+            CandidateProvenance(
+                run_id="run-1",
+                candidate_id="candidate-sport1-a",
+                producer_name="exa",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl(
+                    "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884"
+                ),
+                normalized_url=HttpUrl(
+                    "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884"
+                ),
+                discovered_at=now - timedelta(days=2),
+            ),
+            CandidateProvenance(
+                run_id="run-2",
+                candidate_id="candidate-sport1-b",
+                producer_name="brave",
+                producer_kind=ProducerKind.SEARCH_ENGINE,
+                raw_url=HttpUrl("https://sport1.maariv.co.il/world-soccer/article/1735653"),
+                normalized_url=HttpUrl("https://sport1.maariv.co.il/world-soccer/article/1735653"),
+                discovered_at=now - timedelta(days=1),
+            ),
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+
+    suggestion = report.source_suggestions.suggestions[0]
+    assert suggestion.domain == "sport1.maariv.co.il"
+    assert suggestion.candidate_count == 2
+    assert suggestion.candidate_only_count == 2
+    assert suggestion.scrape_attempt_count == 0
+    assert suggestion.unsupported_count == 0
+    assert suggestion.run_count == 2
+    assert suggestion.score == 4.5
+    assert suggestion.diagnostic_classification == "sports_vertical_candidate_only"
+    assert "candidate-only sports-vertical pressure" in (suggestion.diagnostic_note or "")
+    assert "diagnostic=sports_vertical_candidate_only" in render_discovery_diagnostic_report(report)
+
+
 def test_build_discovery_diagnostic_report_ignores_candidates_without_domain(
     tmp_path: Path,
 ) -> None:

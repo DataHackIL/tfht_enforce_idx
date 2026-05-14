@@ -74,6 +74,8 @@ def test_classify_search_noise_marks_expected_noise_domains(
     "url",
     [
         "https://www.ynet.co.il/news/article/abc123",
+        "https://www.maariv.co.il/news/law/article-1270778",
+        "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884",
         "https://x.com/example/status/123456789",
         "https://mobile.twitter.com/example/status/123456789",
         "https://facebook.com/story.php?story_fbid=5&id=6",

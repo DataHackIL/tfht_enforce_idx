@@ -33,6 +33,12 @@ from denbust.taxonomy import default_taxonomy
 
 _SEARCH_ENGINE_NAMES: tuple[str, ...] = ("brave", "exa", "google_cse")
 _SOURCE_SUGGESTION_EXCLUDED_DOMAINS: frozenset[str] = frozenset({"facebook.com"})
+_SOURCE_SUGGESTION_DIAGNOSTIC_DOMAINS: dict[str, tuple[str, str]] = {
+    "sport1.maariv.co.il": (
+        "sports_vertical_candidate_only",
+        "candidate-only sports-vertical pressure; keep scrape-eligible until attempted evidence exists",
+    )
+}
 _RETRY_BACKLOG_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.QUEUED,
     CandidateStatus.SCRAPE_PENDING,
@@ -254,6 +260,8 @@ class SourceSuggestion(BaseModel):
     scrape_failure_count: int = 0
     unsupported_count: int = 0
     score: float = 0.0
+    diagnostic_classification: str | None = None
+    diagnostic_note: str | None = None
 
 
 class SourceSuggestionReport(BaseModel):
@@ -647,13 +655,16 @@ def render_discovery_diagnostic_report(report: DiscoveryDiagnosticReport) -> str
         lines.append("")
         lines.append("Source suggestions")
         for suggestion in report.source_suggestions.suggestions:
-            lines.append(
+            line = (
                 "  {domain} score={score:.2f} candidates={candidate_count} runs={run_count} "
                 "candidate_only={candidate_only_count} successes={scrape_success_count} "
                 "partials={scrape_partial_count} failures={scrape_failure_count}".format(
                     **suggestion.model_dump(mode="json")
                 )
             )
+            if suggestion.diagnostic_classification:
+                line += f" diagnostic={suggestion.diagnostic_classification}"
+            lines.append(line)
     if report.notes:
         lines.append("")
         lines.append("Notes")
@@ -1619,6 +1630,16 @@ def _build_source_suggestion_report(
             - failure_count * 0.25
             - unsupported_count * 0.5
         )
+        diagnostic_classification = None
+        diagnostic_note = None
+        if (
+            domain in _SOURCE_SUGGESTION_DIAGNOSTIC_DOMAINS
+            and candidate_only_count == len(domain_candidates)
+            and not domain_attempts
+        ):
+            diagnostic_classification, diagnostic_note = _SOURCE_SUGGESTION_DIAGNOSTIC_DOMAINS[
+                domain
+            ]
         suggestions.append(
             SourceSuggestion(
                 domain=domain,
@@ -1632,6 +1653,8 @@ def _build_source_suggestion_report(
                 scrape_failure_count=failure_count,
                 unsupported_count=unsupported_count,
                 score=score,
+                diagnostic_classification=diagnostic_classification,
+                diagnostic_note=diagnostic_note,
             )
         )
     suggestions.sort(key=lambda item: (-item.score, -item.candidate_count, item.domain))
