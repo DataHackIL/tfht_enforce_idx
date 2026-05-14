@@ -165,12 +165,13 @@ class ClassifierProviderError(RuntimeError):
 
 @dataclass
 class ClassifierWarningCounts:
-    """Run-local classifier parser warning counters."""
+    """Run-local classifier parser warning and recovery counters."""
 
     parse_failure_count: int = 0
     invalid_taxonomy_pair_count: int = 0
     invalid_legacy_pair_count: int = 0
     relevant_without_usable_taxonomy_count: int = 0
+    double_wrapper_recovery_count: int = 0
 
     def as_dict(self) -> dict[str, int]:
         """Return stable artifact fields for run/debug summaries."""
@@ -179,6 +180,7 @@ class ClassifierWarningCounts:
             "invalid_taxonomy_pair_count": self.invalid_taxonomy_pair_count,
             "invalid_legacy_pair_count": self.invalid_legacy_pair_count,
             "relevant_without_usable_taxonomy_count": self.relevant_without_usable_taxonomy_count,
+            "double_wrapper_recovery_count": self.double_wrapper_recovery_count,
         }
 
 
@@ -449,6 +451,36 @@ def _parse_failure_structure_metadata(text: str) -> ParseFailureStructureMetadat
     )
 
 
+def _is_recoverable_double_wrapper_structure(
+    structure: ParseFailureStructureMetadata,
+) -> bool:
+    """Return whether structure matches the proven recovery gate."""
+    return (
+        structure.leading_brace_count == 2
+        and structure.trailing_brace_count == 2
+        and structure.outer_wrapper_candidate
+        and structure.inner_object_candidate
+        and structure.contains_balanced_inner_object
+        and structure.inner_json_object_candidate
+    )
+
+
+def _recover_double_wrapped_json_object(text: str) -> dict[str, Any] | None:
+    """Recover the proven ``{{ ... }}`` classifier output shape only."""
+    stripped = text.strip()
+    structure = _parse_failure_structure_metadata(stripped)
+    if not _is_recoverable_double_wrapper_structure(structure):
+        return None
+    inner_text = stripped[1:-1].strip()
+    try:
+        recovered = json.loads(inner_text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(recovered, dict):
+        return None
+    return recovered
+
+
 def _strip_markdown_fence(text: str) -> tuple[str, bool]:
     """Strip a leading Markdown code fence using the existing parser behavior."""
     normalized_text = text.strip()
@@ -551,7 +583,7 @@ class Classifier:
 
     @property
     def warning_counts(self) -> dict[str, int]:
-        """Return run-local parser warning counters for diagnostic artifacts."""
+        """Return run-local parser warning and recovery counters for artifacts."""
         return self._warning_counts.as_dict()
 
     @property
@@ -560,7 +592,7 @@ class Classifier:
         return self._parse_failure_diagnostics.as_dict()
 
     def reset_warning_counts(self) -> None:
-        """Reset parser warning counters at a pipeline run boundary."""
+        """Reset parser warning and recovery counters at a pipeline run boundary."""
         self._warning_counts = ClassifierWarningCounts()
         self._parse_failure_diagnostics = ClassifierParseFailureDiagnostics.empty()
 
@@ -605,9 +637,20 @@ class Classifier:
     def _parse_response(self, text: str) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
         try:
-            normalized_text, _ = _strip_markdown_fence(text)
+            normalized_text, stripped_markdown_fence = _strip_markdown_fence(text)
 
-            data = json.loads(normalized_text)
+            try:
+                data = json.loads(normalized_text)
+            except json.JSONDecodeError as error:
+                recovered_data = (
+                    None
+                    if stripped_markdown_fence
+                    else _recover_double_wrapped_json_object(normalized_text)
+                )
+                if recovered_data is None:
+                    raise error
+                self._warning_counts.double_wrapper_recovery_count += 1
+                data = recovered_data
             if not isinstance(data, dict):
                 self._warning_counts.parse_failure_count += 1
                 self._parse_failure_diagnostics.record(

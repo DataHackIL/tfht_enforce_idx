@@ -615,3 +615,22 @@ categories, non-object JSON, code-fenced malformed JSON, and invalid taxonomy ou
 interpretation does not change classifier prompts, parser behavior, taxonomy validity policy,
 legacy taxonomy policy, queue behavior, scrape candidate selection, generic fetch behavior,
 browser/CDP scraper behavior, scrape caps, source-family support, or source-targeted query fanout.
+
+## 2026-05-15 Addendum: Double-Wrapper Parser Recovery
+
+`CLASSIFIER-PR-PARSE-FAILURE-DOUBLE-WRAP-RECOVERY` implements the later recovery slice justified by
+the structure interpretation above. The parser now recovers only when the normalized classifier
+response has exactly the proven shape: two leading object braces, two trailing object braces,
+quote-aware balanced braces, a balanced inner object candidate after trimming one outer wrapper, and
+an inner substring that parses as a JSON object. That recovered object is then handled by the same
+existing classifier validation code as ordinary JSON, while `double_wrapper_recovery_count` records
+how many responses used this recovery path.
+
+This is an implementation addendum, not a new wet-test claim. It does not add evidence artifacts or
+change the January 1-7 run figures. The negative boundary remains explicit: pseudo-JSON,
+balanced-but-not-valid-JSON inner text, unbalanced wrappers, non-object JSON, code-fenced malformed
+JSON, and recovered JSON with invalid taxonomy pairs remain rejected or counted by the same warning
+paths as before. The slice does not change classifier prompts, taxonomy validity policy, legacy
+taxonomy policy, queue behavior, scrape candidate selection, generic fetch behavior, browser/CDP
+scraper behavior, scrape caps, source-family support, source-targeted query fanout, or generated
+data tracking.

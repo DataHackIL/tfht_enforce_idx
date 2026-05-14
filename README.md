@@ -105,6 +105,12 @@ Planned future datasets:
   consistently balanced double-wrapped valid-inner-JSON classifier output, so the next parser slice
   can add fixture-backed recovery for that exact shape while keeping prompts, taxonomy policy, queue
   behavior, scraper behavior, source support, and generated-data boundaries unchanged
+- Recovers only the proven classifier double-wrapper shape where the normalized response starts
+  with exactly two opening object braces, ends with exactly two closing object braces, has balanced
+  braces outside strings, and trimming one outer wrapper exposes a valid JSON object; recovered
+  objects still use the normal taxonomy validation path and increment
+  `double_wrapper_recovery_count`, while pseudo-JSON, unbalanced wrappers, non-object JSON,
+  code-fenced malformed JSON, and invalid taxonomy pairs remain rejected
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking
