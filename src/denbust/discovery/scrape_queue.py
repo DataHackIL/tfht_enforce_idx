@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -21,6 +22,7 @@ from denbust.discovery.models import (
     ScrapeAttempt,
     ScrapeAttemptKind,
 )
+from denbust.discovery.source_families import source_family_name_for_url
 from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.sources.base import Source
@@ -383,12 +385,16 @@ def _fallback_metadata(
     source_name: str | None,
     fetch_result: GenericFetchResult,
 ) -> dict[str, object]:
+    fallback_source_name = (
+        source_name
+        or source_family_name_for_url(str(candidate.canonical_url or candidate.current_url))
+        or next(iter(candidate.source_hints), None)
+        or next(iter(candidate.discovered_via), None)
+    )
     payload: dict[str, object] = {
         "fallback_title": title or next(iter(candidate.titles), None),
         "fallback_snippet": snippet or next(iter(candidate.snippets), None),
-        "fallback_source_name": source_name
-        or next(iter(candidate.source_hints), None)
-        or next(iter(candidate.discovered_via), None),
+        "fallback_source_name": fallback_source_name,
         "fallback_content_basis": content_basis.value,
     }
     if publication_datetime is not None:
@@ -649,15 +655,18 @@ async def _fetch_partial_page(
 
 def _extract_partial_page_metadata(html: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
+    structured = _extract_structured_article_metadata(soup)
     title = _first_non_empty(
-        soup.title.string if soup.title and soup.title.string else None,
         _meta_content(soup, property_name="og:title"),
         _meta_content(soup, name="twitter:title"),
+        structured.get("title"),
+        soup.title.string if soup.title and soup.title.string else None,
     )
     snippet = _first_non_empty(
         _meta_content(soup, name="description"),
         _meta_content(soup, property_name="og:description"),
         _meta_content(soup, name="twitter:description"),
+        structured.get("snippet"),
     )
     publication_datetime = _parse_publication_datetime(
         _first_non_empty(
@@ -666,6 +675,7 @@ def _extract_partial_page_metadata(html: str) -> dict[str, Any]:
             _meta_content(soup, name="pubdate"),
             _meta_content(soup, name="publish-date"),
             _meta_content(soup, name="date"),
+            structured.get("publication_datetime"),
         )
     )
     return {
@@ -673,6 +683,66 @@ def _extract_partial_page_metadata(html: str) -> dict[str, Any]:
         "snippet": snippet,
         "publication_datetime": publication_datetime,
     }
+
+
+def _extract_structured_article_metadata(soup: BeautifulSoup) -> dict[str, str | None]:
+    """Extract article metadata from JSON-LD blocks when present."""
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        if not isinstance(script, Tag):
+            continue
+        raw_payload = script.string or script.get_text()
+        if not raw_payload:
+            continue
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            continue
+        for node in _iter_json_ld_nodes(payload):
+            if not _is_article_json_ld_node(node):
+                continue
+            return {
+                "title": _structured_string(node.get("headline") or node.get("name")),
+                "snippet": _structured_string(node.get("description")),
+                "publication_datetime": _structured_string(
+                    node.get("datePublished") or node.get("dateCreated")
+                ),
+            }
+    return {"title": None, "snippet": None, "publication_datetime": None}
+
+
+def _iter_json_ld_nodes(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, list):
+        nodes: list[dict[str, object]] = []
+        for item in payload:
+            nodes.extend(_iter_json_ld_nodes(item))
+        return nodes
+    if not isinstance(payload, dict):
+        return []
+    nodes = [payload]
+    graph = payload.get("@graph")
+    if isinstance(graph, list):
+        for item in graph:
+            nodes.extend(_iter_json_ld_nodes(item))
+    return nodes
+
+
+def _is_article_json_ld_node(node: dict[str, object]) -> bool:
+    value = node.get("@type")
+    if isinstance(value, str):
+        return value in {"Article", "NewsArticle", "ReportageNewsArticle"}
+    if isinstance(value, list):
+        return any(
+            isinstance(item, str) and item in {"Article", "NewsArticle", "ReportageNewsArticle"}
+            for item in value
+        )
+    return False
+
+
+def _structured_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split()).strip()
+    return normalized or None
 
 
 def _meta_content(

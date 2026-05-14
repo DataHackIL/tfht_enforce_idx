@@ -22,6 +22,7 @@ from denbust.discovery.models import (
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     GenericFetchResult,
+    _extract_partial_page_metadata,
     _metadata_datetime,
     scrape_candidates,
     select_backfill_candidates_for_scrape,
@@ -74,6 +75,52 @@ def build_raw_article(
         date=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
         source_name=source_name,
     )
+
+
+def test_extract_partial_page_metadata_prefers_article_metadata_for_globes_fixture() -> None:
+    """Globes-like article metadata should produce clean partial-page fields."""
+    html = """
+    <html>
+      <head>
+        <title>Generic site title</title>
+        <meta property="og:title" content="Globes article headline" />
+        <meta property="og:description" content="Globes article summary" />
+        <meta property="article:published_time" content="2026-01-05T10:30:00+02:00" />
+      </head>
+    </html>
+    """
+
+    parsed = _extract_partial_page_metadata(html)
+
+    assert parsed["title"] == "Globes article headline"
+    assert parsed["snippet"] == "Globes article summary"
+    assert parsed["publication_datetime"] == datetime(2026, 1, 5, 8, 30, tzinfo=UTC)
+
+
+def test_extract_partial_page_metadata_uses_themarker_json_ld_fixture() -> None:
+    """TheMarker-like JSON-LD should fill metadata when meta tags are absent."""
+    html = """
+    <html>
+      <head>
+        <title>TheMarker site title</title>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": ["NewsArticle", "Article"],
+            "headline": "TheMarker article headline",
+            "description": "TheMarker article summary",
+            "datePublished": "2026-01-04T19:15:00+02:00"
+          }
+        </script>
+      </head>
+    </html>
+    """
+
+    parsed = _extract_partial_page_metadata(html)
+
+    assert parsed["title"] == "TheMarker article headline"
+    assert parsed["snippet"] == "TheMarker article summary"
+    assert parsed["publication_datetime"] == datetime(2026, 1, 4, 17, 15, tzinfo=UTC)
 
 
 class FakeSource:
@@ -658,6 +705,50 @@ async def test_scrape_candidates_retains_partial_fallback_after_adapter_exceptio
         FetchStatus.FAILED,
         FetchStatus.PARTIAL,
     ]
+
+
+@pytest.mark.asyncio
+async def test_scrape_candidates_labels_globes_generic_partial_from_candidate_domain(
+    tmp_path: Path,
+) -> None:
+    """Generic partial fallback metadata should use supported source-family domains."""
+    store = build_store(tmp_path)
+    candidate = build_candidate(
+        "candidate-globes",
+        status=CandidateStatus.NEW,
+        source_hint="exa",
+        current_url="https://www.globes.co.il/news/article.aspx?did=1001531007",
+        canonical_url="https://globes.co.il/news/article.aspx?did=1001531007",
+    ).model_copy(update={"discovered_via": ["exa"]})
+    store.upsert_candidates([candidate])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
+        return GenericFetchResult(
+            fetch_status=FetchStatus.PARTIAL,
+            title="כותרת גלובס",
+            snippet="תקציר גלובס",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    stored = store.get_candidate("candidate-globes")
+    assert stored is not None
+    assert stored.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    assert stored.metadata["fallback_source_name"] == "globes"
 
 
 @pytest.mark.asyncio
