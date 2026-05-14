@@ -628,10 +628,19 @@ parse-failure shape diagnostics beside the existing warning counters under
 `sample_shape_max_length=80`. Samples store only structural metadata such as response length,
 normalized length, line count, a sanitized allowlisted JSON error kind, JSON error position,
 code-fence flags, and a character-class `shape_signature`; they do not store raw classifier
-response text, article text, secrets, provider headers, prompts, or candidate payloads. The sample
-selection prefers category coverage within the cap, so a rare later category can replace an earlier
-duplicate sample. Compact `.summary.json` files retain the same summary fields so operators can
-review parse-failure shape pressure without opening generated full debug logs.
+response text, article text, secrets, provider headers, prompts, or candidate payloads. After
+`CLASSIFIER-PR-PARSE-FAILURE-STRUCTURE-EVIDENCE`, samples also include the same bounded
+character-class `tail_shape_signature`, `leading_brace_count`, `trailing_brace_count`,
+`brace_balance`, `starts_with_double_open_object`, `ends_with_double_close_object`,
+`outer_wrapper_candidate`, `inner_object_candidate`, `contains_balanced_inner_object`, and
+`inner_json_object_candidate`. Brace balance is computed outside JSON double-quoted strings so a
+literal brace inside a string does not distort the structural signal. The wrapper and balanced
+inner-object fields are structure-only indicators; only `inner_json_object_candidate` says that
+trimming one outer wrapper would expose a parseable JSON object. None of these fields parse or
+recover the malformed response for production classification. The sample selection prefers category
+coverage within the cap, so a rare later category can replace an earlier duplicate sample. Compact
+`.summary.json` files retain the same summary fields so operators can review parse-failure shape
+pressure without opening generated full debug logs.
 
 The stable parse-failure categories are `empty_response`, `json_decode_error`,
 `non_object_json_array`, `non_object_json_scalar`, `object_like_non_json`,
@@ -683,16 +692,16 @@ signature, brace-balance signal, or enough wrapper metadata to prove that simply
 would always recover a valid classifier object without accepting ambiguous pseudo-JSON.
 
 Parser recovery therefore remains deferred. The observed category is not safely recoverable from
-the current artifact shape alone; it is also not evidence for prompt changes, taxonomy validity
+the previous artifact shape alone; it is also not evidence for prompt changes, taxonomy validity
 changes, legacy taxonomy changes, queue behavior changes, scrape candidate selection changes,
 generic fetch changes, browser/CDP scraper changes, scrape-cap changes, source-family support, or
-source-targeted query fanout. The next bounded PR should slightly broaden sanitized shape capture,
-for example with tail character-class signature and object-wrapper/balance indicators, before any
-fixture-backed parser recovery decision. That next PR should remain capture-only. A later
-interpretation can recommend parser recovery only if the added sanitized fields prove a balanced,
-consistently double-wrapped JSON object with a valid recoverable inner object; pseudo-JSON,
-unbalanced wrappers, mixed parse-failure categories, or no repeated parse failures should keep
-recovery deferred.
+source-targeted query fanout. The next bounded evidence interpretation should use the added tail
+character-class signature and object-wrapper/balance indicators without committing generated
+artifacts. A later interpretation can recommend parser recovery only if the added sanitized fields
+show repeat failures that are balanced, consistently double-wrapped object candidates with
+`inner_json_object_candidate=true`; pseudo-JSON, balanced-but-not-JSON inner objects, unbalanced
+wrappers, mixed parse-failure categories, or no repeated parse failures should keep recovery
+deferred.
 
 ## One-Time 90-Day Re-Scan
 

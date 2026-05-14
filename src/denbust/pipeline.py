@@ -142,6 +142,33 @@ _CLASSIFIER_WARNING_COUNT_KEYS = (
     "invalid_legacy_pair_count",
     "relevant_without_usable_taxonomy_count",
 )
+_PARSE_FAILURE_SAMPLE_STRING_KEYS = {
+    "shape_signature",
+    "tail_shape_signature",
+}
+_PARSE_FAILURE_SAMPLE_INT_KEYS = {
+    "response_length",
+    "normalized_length",
+    "line_count",
+    "leading_brace_count",
+    "trailing_brace_count",
+    "brace_balance",
+}
+_PARSE_FAILURE_SAMPLE_OPTIONAL_INT_KEYS = {
+    "json_error_position",
+    "json_error_line",
+    "json_error_column",
+}
+_PARSE_FAILURE_SAMPLE_BOOL_KEYS = {
+    "starts_with_code_fence",
+    "ends_with_code_fence",
+    "starts_with_double_open_object",
+    "ends_with_double_close_object",
+    "outer_wrapper_candidate",
+    "inner_object_candidate",
+    "contains_balanced_inner_object",
+    "inner_json_object_candidate",
+}
 
 
 def _sanitize_classifier_provider_error(error: ClassifierProviderError) -> str:
@@ -1459,6 +1486,23 @@ def _normalize_classifier_warning_counts(
     return normalized
 
 
+def _is_safe_parse_failure_sample_value(key: str, value: object) -> bool:
+    """Return whether a parse-failure sample value is safe to copy to artifacts."""
+    if key == "category":
+        return isinstance(value, str) and value in PARSE_FAILURE_CATEGORY_KEYS
+    if key in _PARSE_FAILURE_SAMPLE_INT_KEYS:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if key in _PARSE_FAILURE_SAMPLE_OPTIONAL_INT_KEYS:
+        return value is None or (isinstance(value, int) and not isinstance(value, bool))
+    if key in _PARSE_FAILURE_SAMPLE_BOOL_KEYS:
+        return isinstance(value, bool)
+    return (
+        key == "json_error_kind"
+        and isinstance(value, str)
+        and value in PARSE_FAILURE_JSON_ERROR_KIND_KEYS
+    )
+
+
 def _normalize_classifier_parse_failure_diagnostics(
     diagnostics: Mapping[str, object] | None,
 ) -> dict[str, object]:
@@ -1498,23 +1542,9 @@ def _normalize_classifier_parse_failure_diagnostics(
                 if key not in raw_sample:
                     continue
                 value = raw_sample[key]
-                if key == "shape_signature" and isinstance(value, str):
+                if key in _PARSE_FAILURE_SAMPLE_STRING_KEYS and isinstance(value, str):
                     sample[key] = value[:sample_shape_max_length]
-                elif key in {
-                    "category",
-                    "response_length",
-                    "normalized_length",
-                    "line_count",
-                    "json_error_position",
-                    "json_error_line",
-                    "json_error_column",
-                    "starts_with_code_fence",
-                    "ends_with_code_fence",
-                } or (
-                    key == "json_error_kind"
-                    and isinstance(value, str)
-                    and value in PARSE_FAILURE_JSON_ERROR_KIND_KEYS
-                ):
+                elif _is_safe_parse_failure_sample_value(key, value):
                     sample[key] = value
             samples.append(sample)
 

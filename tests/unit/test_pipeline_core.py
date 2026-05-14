@@ -364,6 +364,16 @@ class TestFetchAndClassifyHelpers:
                         "normalized_length": 44,
                         "line_count": 1,
                         "shape_signature": "{AAAAAAAA: AAAA",
+                        "tail_shape_signature": "{AAAAAAAA: AAAA",
+                        "leading_brace_count": 1,
+                        "trailing_brace_count": 0,
+                        "brace_balance": 1,
+                        "starts_with_double_open_object": False,
+                        "ends_with_double_close_object": False,
+                        "outer_wrapper_candidate": False,
+                        "inner_object_candidate": False,
+                        "contains_balanced_inner_object": False,
+                        "inner_json_object_candidate": False,
                         "json_error_kind": "missing_property_name",
                         "json_error_position": 1,
                         "json_error_line": 1,
@@ -401,6 +411,16 @@ class TestFetchAndClassifyHelpers:
                     "normalized_length": 44,
                     "line_count": 1,
                     "shape_signature": "{AAAAAAAA: AAAA",
+                    "tail_shape_signature": "{AAAAAAAA: AAAA",
+                    "leading_brace_count": 1,
+                    "trailing_brace_count": 0,
+                    "brace_balance": 1,
+                    "starts_with_double_open_object": False,
+                    "ends_with_double_close_object": False,
+                    "outer_wrapper_candidate": False,
+                    "inner_object_candidate": False,
+                    "contains_balanced_inner_object": False,
+                    "inner_json_object_candidate": False,
                     "json_error_kind": "missing_property_name",
                     "json_error_position": 1,
                     "json_error_line": 1,
@@ -418,6 +438,37 @@ class TestFetchAndClassifyHelpers:
             for sample in classifier_summary["parse_failure_diagnostics"]["samples"]
         )
         assert "sk-ant-secret" not in str(classifier_summary["parse_failure_diagnostics"])
+
+    def test_classifier_summary_drops_mistyped_parse_failure_sample_values(self) -> None:
+        """Sample normalization should not pass through mistyped artifact fields."""
+        classifier_summary = _build_classifier_summary(
+            unseen_articles=[],
+            classified_articles=[],
+            classifier_parse_failure_diagnostics={
+                "category_counts": {"object_like_non_json": 1},
+                "samples": [
+                    {
+                        "category": "object_like_non_json",
+                        "shape_signature": "{{AAAA}}",
+                        "leading_brace_count": "sk-ant-secret",
+                        "trailing_brace_count": True,
+                        "starts_with_double_open_object": "true",
+                        "json_error_position": "bearer token-value",
+                        "inner_json_object_candidate": "yes",
+                    }
+                ],
+            },
+        )
+
+        diagnostics = classifier_summary["parse_failure_diagnostics"]
+        assert diagnostics["samples"] == [
+            {
+                "category": "object_like_non_json",
+                "shape_signature": "{{AAAA}}",
+            }
+        ]
+        assert "sk-ant-secret" not in str(diagnostics)
+        assert "bearer token-value" not in str(diagnostics)
 
     def test_mark_seen_collects_all_source_urls(self, tmp_path: Path) -> None:
         """mark_seen should persist every source URL from unified items."""
@@ -1877,6 +1928,16 @@ class TestRunPipelineAsync:
                     "normalized_length": 38,
                     "line_count": 1,
                     "shape_signature": "{AAAAAAAA: AAAA",
+                    "tail_shape_signature": "{AAAAAAAA: AAAA",
+                    "leading_brace_count": 1,
+                    "trailing_brace_count": 0,
+                    "brace_balance": 1,
+                    "starts_with_double_open_object": False,
+                    "ends_with_double_close_object": False,
+                    "outer_wrapper_candidate": False,
+                    "inner_object_candidate": False,
+                    "contains_balanced_inner_object": False,
+                    "inner_json_object_candidate": False,
                     "json_error_kind": "missing_property_name",
                     "json_error_position": 1,
                     "json_error_line": 1,
@@ -1967,6 +2028,16 @@ class TestRunPipelineAsync:
                         "normalized_length": 38,
                         "line_count": 1,
                         "shape_signature": "{AAAAAAAA: AAAA",
+                        "tail_shape_signature": "{AAAAAAAA: AAAA",
+                        "leading_brace_count": 1,
+                        "trailing_brace_count": 0,
+                        "brace_balance": 1,
+                        "starts_with_double_open_object": False,
+                        "ends_with_double_close_object": False,
+                        "outer_wrapper_candidate": False,
+                        "inner_object_candidate": False,
+                        "contains_balanced_inner_object": False,
+                        "inner_json_object_candidate": False,
                         "json_error_kind": "missing_property_name",
                         "json_error_position": 1,
                         "json_error_line": 1,

@@ -376,6 +376,35 @@ prompts, parser recovery behavior, taxonomy validity policy, legacy taxonomy pol
 fairness, scrape candidate selection, generic fetch behavior, browser/CDP scraping, scrape caps,
 source-family support, or source-targeted query fanout.
 
+## 2026-05-14 Addendum: Parse-Failure Structure Evidence Capture
+
+`CLASSIFIER-PR-PARSE-FAILURE-STRUCTURE-EVIDENCE` broadens the sanitized sample metadata for future
+runs without changing parser recovery. In addition to the existing leading `shape_signature`,
+parse-failure samples now carry a bounded `tail_shape_signature`, `leading_brace_count`,
+`trailing_brace_count`, `brace_balance`, `starts_with_double_open_object`,
+`ends_with_double_close_object`, `outer_wrapper_candidate`, `inner_object_candidate`, and
+`contains_balanced_inner_object`, plus `inner_json_object_candidate` to distinguish a structurally
+balanced inner object from a parseable JSON object. These fields are retained in both full debug
+payloads and compact `.summary.json` payloads through
+`classifier_summary.parse_failure_diagnostics` and
+`fallback_classifier_summary.parse_failure_diagnostics`.
+
+The fields are deliberately structural: signatures are character classes capped by
+`sample_shape_max_length=80`, quote-aware brace counts and balance are numeric, and
+wrapper/inner-object indicators are booleans. They do not store raw classifier response text, full
+article text, prompts, provider metadata, candidate payloads, secrets, or generated evidence
+artifact content.
+
+The decision gate for the next interpretation remains narrow. Repeat failures that are balanced,
+consistently double-wrapped object candidates can justify a later fixture-backed parser recovery PR
+only when `inner_json_object_candidate=true` repeats consistently and that later PR proves the
+recoverable inner object is valid in fixture-backed tests. Unbalanced wrappers, pseudo-JSON,
+balanced-but-not-JSON inner objects, mixed parse-failure categories, or absent repeat failures
+should keep recovery deferred. This capture-only slice does not change classifier prompts, parser
+recovery behavior, taxonomy validity policy, legacy taxonomy policy, queue behavior, scrape
+candidate selection, generic fetch behavior, browser/CDP scraper behavior, scrape caps,
+source-family support, or source-targeted query fanout.
+
 ## 2026-05-14 Addendum: Parse-Failure Evidence Interpretation
 
 `CLASSIFIER-PR-PARSE-FAILURE-EVIDENCE-INTERPRETATION` found no existing post-PR #131 generated

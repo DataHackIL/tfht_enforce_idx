@@ -56,6 +56,16 @@ PARSE_FAILURE_SAMPLE_KEYS = (
     "normalized_length",
     "line_count",
     "shape_signature",
+    "tail_shape_signature",
+    "leading_brace_count",
+    "trailing_brace_count",
+    "brace_balance",
+    "starts_with_double_open_object",
+    "ends_with_double_close_object",
+    "outer_wrapper_candidate",
+    "inner_object_candidate",
+    "contains_balanced_inner_object",
+    "inner_json_object_candidate",
     "json_error_kind",
     "json_error_position",
     "json_error_line",
@@ -181,6 +191,16 @@ class ClassifierParseFailureSample:
     normalized_length: int
     line_count: int
     shape_signature: str
+    tail_shape_signature: str
+    leading_brace_count: int
+    trailing_brace_count: int
+    brace_balance: int
+    starts_with_double_open_object: bool
+    ends_with_double_close_object: bool
+    outer_wrapper_candidate: bool
+    inner_object_candidate: bool
+    contains_balanced_inner_object: bool
+    inner_json_object_candidate: bool
     json_error_kind: str | None = None
     json_error_position: int | None = None
     json_error_line: int | None = None
@@ -196,6 +216,16 @@ class ClassifierParseFailureSample:
             "normalized_length": self.normalized_length,
             "line_count": self.line_count,
             "shape_signature": self.shape_signature,
+            "tail_shape_signature": self.tail_shape_signature,
+            "leading_brace_count": self.leading_brace_count,
+            "trailing_brace_count": self.trailing_brace_count,
+            "brace_balance": self.brace_balance,
+            "starts_with_double_open_object": self.starts_with_double_open_object,
+            "ends_with_double_close_object": self.ends_with_double_close_object,
+            "outer_wrapper_candidate": self.outer_wrapper_candidate,
+            "inner_object_candidate": self.inner_object_candidate,
+            "contains_balanced_inner_object": self.contains_balanced_inner_object,
+            "inner_json_object_candidate": self.inner_json_object_candidate,
             "json_error_kind": self.json_error_kind,
             "json_error_position": self.json_error_position,
             "json_error_line": self.json_error_line,
@@ -231,6 +261,7 @@ class ClassifierParseFailureDiagnostics:
         stable_category = (
             category if category in PARSE_FAILURE_CATEGORY_KEYS else "other_parse_failure"
         )
+        structure = _parse_failure_structure_metadata(normalized_text)
         self.category_counts[stable_category] += 1
         sample = ClassifierParseFailureSample(
             category=stable_category,
@@ -241,6 +272,19 @@ class ClassifierParseFailureDiagnostics:
                 normalized_text,
                 max_length=self.sample_shape_max_length,
             ),
+            tail_shape_signature=_tail_shape_signature(
+                normalized_text,
+                max_length=self.sample_shape_max_length,
+            ),
+            leading_brace_count=structure.leading_brace_count,
+            trailing_brace_count=structure.trailing_brace_count,
+            brace_balance=structure.brace_balance,
+            starts_with_double_open_object=structure.starts_with_double_open_object,
+            ends_with_double_close_object=structure.ends_with_double_close_object,
+            outer_wrapper_candidate=structure.outer_wrapper_candidate,
+            inner_object_candidate=structure.inner_object_candidate,
+            contains_balanced_inner_object=structure.contains_balanced_inner_object,
+            inner_json_object_candidate=structure.inner_json_object_candidate,
             json_error_kind=(
                 _json_decode_error_kind(json_error) if json_error is not None else None
             ),
@@ -284,6 +328,21 @@ class ClassifierParseFailureDiagnostics:
         }
 
 
+@dataclass(frozen=True)
+class ParseFailureStructureMetadata:
+    """Structural parse-failure indicators that do not retain response content."""
+
+    leading_brace_count: int
+    trailing_brace_count: int
+    brace_balance: int
+    starts_with_double_open_object: bool
+    ends_with_double_close_object: bool
+    outer_wrapper_candidate: bool
+    inner_object_candidate: bool
+    contains_balanced_inner_object: bool
+    inner_json_object_candidate: bool
+
+
 def _shape_signature(text: str, *, max_length: int) -> str:
     """Return bounded structural character classes instead of raw response text."""
     signature: list[str] = []
@@ -299,6 +358,95 @@ def _shape_signature(text: str, *, max_length: int) -> str:
         else:
             signature.append("?")
     return "".join(signature)
+
+
+def _tail_shape_signature(text: str, *, max_length: int) -> str:
+    """Return bounded structural character classes for the response tail."""
+    if max_length <= 0:
+        return ""
+    return _shape_signature(text[-max_length:], max_length=max_length)
+
+
+def _leading_char_count(text: str, char: str) -> int:
+    """Count repeated leading structural characters after surrounding whitespace."""
+    stripped = text.strip()
+    count = 0
+    for candidate in stripped:
+        if candidate != char:
+            break
+        count += 1
+    return count
+
+
+def _trailing_char_count(text: str, char: str) -> int:
+    """Count repeated trailing structural characters after surrounding whitespace."""
+    stripped = text.strip()
+    count = 0
+    for candidate in reversed(stripped):
+        if candidate != char:
+            break
+        count += 1
+    return count
+
+
+def _structural_brace_balance(text: str) -> int:
+    """Count brace balance outside JSON double-quoted strings."""
+    balance = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            balance += 1
+        elif char == "}":
+            balance -= 1
+    return balance
+
+
+def _is_json_object(text: str) -> bool:
+    """Return whether text parses as a JSON object without retaining parsed content."""
+    with contextlib.suppress(json.JSONDecodeError):
+        return isinstance(json.loads(text), dict)
+    return False
+
+
+def _parse_failure_structure_metadata(text: str) -> ParseFailureStructureMetadata:
+    """Return bounded structure-only indicators for malformed object-like responses."""
+    stripped = text.strip()
+    leading_brace_count = _leading_char_count(stripped, "{")
+    trailing_brace_count = _trailing_char_count(stripped, "}")
+    brace_balance = _structural_brace_balance(stripped)
+    starts_with_double_open_object = stripped.startswith("{{")
+    ends_with_double_close_object = stripped.endswith("}}")
+    outer_wrapper_candidate = (
+        starts_with_double_open_object and ends_with_double_close_object and brace_balance == 0
+    )
+    inner_text = stripped[1:-1].strip() if outer_wrapper_candidate else ""
+    inner_object_candidate = inner_text.startswith("{") and inner_text.endswith("}")
+    contains_balanced_inner_object = (
+        inner_object_candidate and _structural_brace_balance(inner_text) == 0
+    )
+    inner_json_object_candidate = contains_balanced_inner_object and _is_json_object(inner_text)
+    return ParseFailureStructureMetadata(
+        leading_brace_count=leading_brace_count,
+        trailing_brace_count=trailing_brace_count,
+        brace_balance=brace_balance,
+        starts_with_double_open_object=starts_with_double_open_object,
+        ends_with_double_close_object=ends_with_double_close_object,
+        outer_wrapper_candidate=outer_wrapper_candidate,
+        inner_object_candidate=inner_object_candidate,
+        contains_balanced_inner_object=contains_balanced_inner_object,
+        inner_json_object_candidate=inner_json_object_candidate,
+    )
 
 
 def _strip_markdown_fence(text: str) -> tuple[str, bool]:
