@@ -322,7 +322,7 @@ subdomain matching, a browser scraper, or a source-native adapter. It:
 Future work should inspect fresh `partial_page_diagnostics` and attempted Israel Hayom scrape
 evidence before adding Israel Hayom source-targeted query fanout, subdomain matching, or any
 browser/CDP scraper. This slice intentionally does not change queue fairness, prioritization,
-scrape caps, Mako/Haaretz browser behavior, Kan/News1 coverage, or broader Israeli source coverage.
+scrape caps, Mako/Haaretz browser behavior, Kan coverage, or broader Israeli source coverage.
 
 After `SRC-PR-KAN`, search-discovered official Kan news article paths have low-confidence
 generic-fetch diagnostic labeling. Fresh diagnostics and candidate-state inspection over the January
@@ -346,7 +346,33 @@ domains and social posts, so this slice does not broaden to those domains. It:
 Future work should inspect fresh `partial_page_diagnostics` and attempted Kan scrape evidence before
 adding Kan source-targeted query fanout, unrelated Kan-named domains, non-article Kan pages, or any
 browser/CDP scraper. This slice intentionally does not change queue fairness, prioritization, scrape
-caps, Mako/Haaretz browser behavior, News1 coverage, or broader Israeli source coverage.
+caps, Mako/Haaretz browser behavior, or broader Israeli source coverage.
+
+After `SRC-PR-NEWS1`, search-discovered main-domain News1 archive article paths have
+low-confidence generic-fetch diagnostic labeling. Fresh candidate-state inspection over the January
+1-7 persisted state showed three `news1.co.il/Archive/` candidate-only URLs, all discovered by Exa,
+all still scrape-eligible after the bounded drain, and no News1 attempted-scrape or partial-page
+evidence. The checked-in post-scrape diagnostic did not emit News1 among the top source suggestions.
+This slice therefore does not justify recurring source-targeted query fanout, a
+source-native adapter, a browser/CDP scraper, generic metadata hardening, or queue behavior changes.
+It:
+
+- recognizes main-domain News1 archive URLs under `news1.co.il/Archive/` as the `news1` source
+  family for diagnostic/fallback-provenance labeling;
+- labels generic fallback provenance as `news1` when search engines found a matching News1 archive
+  URL and generic fallback later records either partial page metadata or a retained
+  search-result-only fallback;
+- leaves non-archive News1 pages such as home and section pages ungrouped until separate evidence
+  justifies them;
+- does not emit source-targeted discovery/backfill fanout for News1 until stronger repeated backlog
+  or extraction evidence justifies spending recurring query budget;
+- keeps News1 eligible for source-suggestion diagnostics when candidate-only or weak conversion
+  evidence still shows backlog pressure.
+
+Future work should inspect fresh `partial_page_diagnostics` and attempted News1 scrape evidence
+before adding News1 source-targeted query fanout, non-archive News1 pages, generic metadata
+hardening, or any browser/CDP scraper. This slice intentionally does not change queue fairness,
+prioritization, scrape caps, Mako/Haaretz browser behavior, or broader Israeli source coverage.
 
 ## GitHub Actions Run Path
 

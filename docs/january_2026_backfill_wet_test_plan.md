@@ -415,8 +415,16 @@ PRs, for seven planned follow-ups total:
    pages remain out of scope, as do recurring source-targeted discovery/backfill queries and any
    browser/source-native scraper.
 7. `SRC-PR-NEWS1` - source-family expansion.
-   Add or improve News1 support if repeated wet-test slices show relevant candidates and generic
-   fetch/metadata extraction is insufficient.
+   Implemented as low-confidence generic-fetch diagnostic labeling, not as a browser scraper,
+   source-targeted query expansion, or generic metadata hardening. Candidate-state inspection over
+   the January 1-7 persisted state showed three main-domain News1 archive candidate-only URLs under
+   `/Archive/`, all discovered by Exa, all still scrape-eligible after the bounded drain, and no
+   News1 attempted-scrape or partial-page evidence. The post-scrape diagnostic did not emit News1
+   among the top source suggestions. News1 archive paths can now be mapped to a source-family label
+   for diagnostics/fallback provenance when future generic fallback records either partial page
+   metadata or a retained search-result-only fallback.
+   Non-archive News1 pages, recurring source-targeted discovery/backfill queries, generic metadata
+   hardening, and any browser/source-native scraper remain out of scope.
 
 Do not bundle the source-family work into one large scraper PR. Promote each source-family PR only
 after the latest diagnostics justify it.
