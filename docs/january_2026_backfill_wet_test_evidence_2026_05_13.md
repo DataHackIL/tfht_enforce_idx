@@ -185,3 +185,28 @@ substantial metadata-only generic-fetch progress. Counting `partial` attempts as
 `scrape_failure_count` overstates failure pressure and obscures whether the next step should be
 metadata/classifier hardening, scraper work, or deferral pending more evidence. The correction does
 not otherwise change source-suggestion ranking.
+
+## Fresh Sport1 Candidate-Only Follow-Up Evidence
+
+The same 2026-05-14 fresh Phase C diagnostic showed `sport1.maariv.co.il` as a repeated
+candidate-only source suggestion:
+
+| Figure | Value |
+| --- | ---: |
+| Candidates | 147 |
+| Candidate-only candidates | 147 |
+| Runs | 2 |
+| Scrape attempts | 0 |
+| Partial recoveries | 0 |
+| Scrape successes | 0 |
+| Scrape failures | 0 |
+| Score | 185.75 |
+
+Candidate-state inspection showed Sport1 sports-vertical paths such as `israeli-soccer`,
+`world-soccer`, `square`, basketball, tennis, and related sections, but the candidates were still
+article-like URLs and some titles contained legal/crime-adjacent wording. That evidence supports a
+diagnostic-only `sports_vertical_candidate_only` source-suggestion classification. It does not
+support mapping Sport1 into Maariv-family article handling, suppressing Sport1 before
+scrape/classifier evidence exists, source-targeted query fanout, a browser/CDP scraper, queue
+fairness or scrape-cap changes, Mako/Haaretz behavior changes, or broader sports-domain filtering.
+Sport1 candidates and regular `www.maariv.co.il` news/law article URLs remain scrape-eligible.

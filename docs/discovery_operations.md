@@ -325,6 +325,31 @@ This is a generic diagnostics interpretation fix triggered by Globes/TheMarker e
 not change generic fetch extraction, source targeted query fanout, queue fairness, source
 prioritization, scrape caps, browser/CDP behavior, or source-family support.
 
+After `SRC-PR-SPORT1-NOISE`, `sport1.maariv.co.il` candidate-only pressure is classified only in
+source-suggestion diagnostics. The fresh 2026-05-14 January 1-7 evidence showed
+`sport1.maariv.co.il` as a top source-suggestion domain with 147 candidates across two runs, all
+candidate-only, and no scrape attempts, partial recoveries, scrape successes, or scrape failures.
+Candidate-state inspection showed sports-vertical paths such as `israeli-soccer`, `world-soccer`,
+`square`, basketball, tennis, and related Sport1 sections, but the same sample still contained
+article-like pages and some legal/crime-adjacent wording. Candidate-only evidence is therefore not
+strong enough to suppress the domain before scrape/classifier evidence exists. The slice therefore:
+
+- adds `diagnostic_classification=sports_vertical_candidate_only` to matching
+  `source_suggestions.suggestions` entries when Sport1 pressure is entirely candidate-only and
+  unattempted;
+- renders that diagnostic classification in `denbust diagnose-discovery`;
+- keeps Sport1 search candidates scrape-eligible until attempted scrape, generic-fetch,
+  classifier, or retained-row evidence justifies a stronger action;
+- leaves regular `www.maariv.co.il` article URLs, including law/news article paths, scrape-eligible;
+- does not add Sport1 to generic-fetch source families or source-targeted discovery/backfill fanout;
+- does not change Maariv source-native scraping, queue fairness, prioritization, scrape caps,
+  browser/CDP behavior, Mako/Haaretz behavior, or broader sports-domain policy.
+
+If future evidence shows Sport1 candidates are consistently irrelevant after scrape/classifier
+processing, that should be handled as a separate evidence-backed filter decision. If future evidence
+shows retained TFHT rows or useful article extraction, that should be handled as a separate
+source-family decision.
+
 After `SRC-PR-ISRAELHAYOM`, search-discovered main-domain Israel Hayom article pages have bounded
 generic-fetch source-family recognition. The January 1-7 evidence showed `israelhayom.co.il` as a
 repeated source suggestion with 25 main-domain candidate-only URLs across two runs, plus local state
