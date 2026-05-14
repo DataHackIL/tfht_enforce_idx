@@ -607,6 +607,22 @@ Classifier provider/API failures are fatal for `ingest`, `scrape_candidates`, an
 does not mark articles as seen. Live checks record the same condition as a per-case `error` rather
 than fabricating `actual=not_relevant`.
 
+Run-level classifier warning counters are diagnostic evidence, not a parser-policy override. The
+2026-05-14 Phase C bounded scrape/backfill evidence root
+`data/may_26_followup/20260514T182934Z/` persisted four fallback parse failures and one invalid
+taxonomy pair across 100 fallback classifier inputs. The root's full debug JSON and compact summary
+persisted only counts; its local `logs/`, `reports/`, and `summaries/` folders did not retain raw
+classifier response text. The only observable parse-failure output shape was therefore the JSON
+decoder signature `Expecting property name enclosed in double quotes: line 1 column 2`, which is
+consistent with brace-delimited non-JSON objects such as unquoted-key or single-quoted pseudo-JSON.
+
+Those shapes remain intentionally rejected unless a future artifact captures the exact malformed
+payload safely. Representative fixture strings now prove that brace-delimited non-JSON outputs
+return the low-confidence not-relevant fallback and increment `parse_failure_count`. Canonical JSON
+responses and invalid taxonomy-pair rejection remain unchanged. Do not broaden this into prompt
+changes, taxonomy-policy changes, queue behavior changes, scrape behavior changes, scrape-cap
+changes, or source-family expansion.
+
 ## One-Time 90-Day Re-Scan
 
 `C-8` does not add a dedicated workflow. The catch-up run uses the existing backfill jobs with the

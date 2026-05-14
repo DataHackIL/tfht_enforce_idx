@@ -88,6 +88,10 @@ Planned future datasets:
   Brave+Exa/no-Google scrape/backfill run saw 4 parse failures and 1 invalid taxonomy pair across
   100 fallback classifier inputs, and compact summaries now retain `fallback_classifier_summary`
   for future fallback-only drains
+- Keeps classifier output robustness evidence-driven: the observed Phase C parse-failure artifacts
+  expose only a brace-delimited non-JSON decoder signature, so representative malformed fixtures are
+  rejected deterministically and parser recovery is deferred until raw malformed response shapes are
+  persisted safely
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking

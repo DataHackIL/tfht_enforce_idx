@@ -323,3 +323,34 @@ before changing parser behavior. The evidence does not justify changing classifi
 taxonomy validity policy, legacy taxonomy policy, queue fairness, scrape candidate selection,
 generic fetch behavior, browser/CDP scraper behavior, scrape caps, source-family support, or
 source-targeted query fanout in this interpretation slice.
+
+## 2026-05-14 Addendum: Classifier Output Robustness Characterization
+
+`CLASSIFIER-PR-OUTPUT-ROBUSTNESS` inspected the generated evidence root
+`data/may_26_followup/20260514T182934Z/`, including the backfill-scrape debug payload
+`state/news_items/backfill_scrape/logs/2026-05-14T18-38-54-795669Z.json`, its compact
+`.summary.json`, the post-scrape discovery diagnostic, operational rows, run metadata, and the
+root-level `logs/`, `reports/`, and `summaries/` directories. The persisted artifacts confirmed the
+same four parse failures, one invalid taxonomy pair, 100 fallback classifier inputs, and 30 retained
+fallback operational rows, but they did not persist the raw malformed classifier responses. The
+root-level log/report/summary directories were empty.
+
+The only directly observable parse-failure shape was the parser error signature:
+`Expecting property name enclosed in double quotes: line 1 column 2`. That signature means the
+response reached the parser as a brace-delimited object-like string whose first property was not a
+valid JSON double-quoted key. It is consistent with shapes such as unquoted-key pseudo-JSON or
+single-quoted/Python-style dictionaries, but the exact raw outputs are insufficiently observable
+from the retained artifacts.
+
+No parser recovery was added because accepting guessed pseudo-JSON would change classifier output
+semantics without evidence that the observed raw responses were safely recoverable. Instead,
+fixture-backed regression coverage now proves representative brace-delimited non-JSON outputs are
+rejected deterministically as low-confidence not-relevant results and still increment
+`parse_failure_count`. Existing canonical JSON success behavior and invalid taxonomy-pair
+rejection/counting behavior remain unchanged.
+
+The next classifier-output follow-up should persist a sanitized parse-failure shape sample or
+structured parse-error evidence in run debug artifacts before considering any parser recovery. That
+future evidence-capture work should still avoid prompt changes, taxonomy-policy changes, queue
+behavior changes, scraper behavior changes, scrape-cap changes, source-family support, and raw
+generated data commits.

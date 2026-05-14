@@ -117,6 +117,38 @@ class TestClassifierParsing:
         assert result.category == Category.NOT_RELEVANT
         assert result.confidence == "low"
 
+    @pytest.mark.parametrize(
+        "response",
+        [
+            "{relevant: true, enforcement_related: true, "
+            "taxonomy_category_id: 'brothels', "
+            "taxonomy_subcategory_id: 'keeping_brothel', confidence: 'high'}",
+            "{'relevant': True, 'enforcement_related': True, "
+            "'taxonomy_category_id': 'brothels', "
+            "'taxonomy_subcategory_id': 'keeping_brothel', 'confidence': 'high'}",
+        ],
+    )
+    def test_parse_brace_delimited_non_json_fixtures_remain_rejected(
+        self,
+        response: str,
+    ) -> None:
+        """Observed parse-failure logs only expose the decoder shape, so do not recover guesses."""
+        classifier = Classifier(api_key="test-key")
+
+        result = classifier._parse_response(response)
+
+        assert result.relevant is False
+        assert result.enforcement_related is False
+        assert result.category == Category.NOT_RELEVANT
+        assert result.sub_category is None
+        assert result.confidence == "low"
+        assert classifier.warning_counts == {
+            "parse_failure_count": 1,
+            "invalid_taxonomy_pair_count": 0,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+        }
+
     def test_parse_unknown_category(self) -> None:
         """Test parsing unknown category defaults to not_relevant."""
         classifier = Classifier(api_key="test-key")
