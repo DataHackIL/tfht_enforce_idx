@@ -362,8 +362,8 @@ successful bounded wet test.
 ## Follow-Up PR Map
 
 Use stable planning IDs for the post-wet-test slices so they are not confused with GitHub pull
-request numbers. The current map is three simple cross-cutting PRs followed by four source-family
-PRs, for seven planned follow-ups total:
+request numbers. The current map is three simple cross-cutting PRs, four source-family PRs, and one
+evidence interpretation follow-up:
 
 1. `WET-PR-EVIDENCE-CONFIG` - planning/config evidence only.
    Add a tracked Brave+Exa/no-Google local search config, document that local operators may bypass
@@ -395,6 +395,15 @@ PRs, for seven planned follow-ups total:
    `www.themarker.com`, generic metadata extraction prefers article metadata/JSON-LD over page
    titles, and source-suggestion diagnostics remain available when candidate-only or weak
    conversion evidence still justifies stronger scraper work.
+4.1. `SRC-PR-GLOBES-THEMARKER-FOLLOWUP` - evidence interpretation follow-up.
+   Implemented as a generic source-suggestion diagnostics correction after the fresh 2026-05-14
+   January 1-7 pass showed TheMarker and Globes still dominating suggestions while TheMarker also
+   dominated generic partial-page recoveries. Source suggestions now report `scrape_partial_count`,
+   render `partials=...` in text output, and no longer count `partial` generic fetch attempts as
+   `scrape_failure_count`. This keeps generic metadata progress separate from blocked or failed
+   fetches without giving partials a positive ranking bonus. It does not add a scraper, change
+   generic fetch extraction, expand source-targeted fanout, change queue fairness/prioritization/
+   caps, or alter Mako/Haaretz browser behavior.
 5. `SRC-PR-ISRAELHAYOM` - source-family expansion.
    Implemented as bounded main-domain generic-fetch source-family recognition, not as a browser
    scraper or source-targeted query expansion. Fresh diagnostics over the January 1-7 persisted

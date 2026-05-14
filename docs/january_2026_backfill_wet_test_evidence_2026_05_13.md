@@ -151,3 +151,37 @@ main-domain News1 archive-path candidates under `news1.co.il/Archive/`, while le
 source-targeted discovery/backfill fanout, non-archive News1 pages, generic metadata hardening,
 browser scraper work, queue fairness, Mako/Haaretz Chrome-CDP behavior, and unrelated source
 families out of scope.
+
+## Fresh Globes/TheMarker Follow-Up Evidence
+
+The 2026-05-14 fresh Phase C January 1-7 discovery/backfill evidence pass used the same
+Brave+Exa/no-Google local search mode and Chrome-CDP scrape shape under the generated local root
+`data/may_26_followup/20260514T135635Z/`. The generated artifacts are intentionally untracked.
+
+The run reported:
+
+| Figure | Value |
+| --- | ---: |
+| Persisted candidates | 3,745 |
+| Attempted candidates | 100 |
+| Persisted scrape attempts | 159 |
+| Provisional operational rows retained | 30 |
+| Partial pages | 97 |
+| Scrape failures | 3 |
+| Remaining eligible candidates | 3,143 |
+| Inferred stop reason | `budget_cap_reached` |
+
+The partial-page diagnostics showed all 97 partials came from generic fetch, with top partial
+domains led by `themarker.com=32`, `haaretz.co.il=27`, `mako.co.il=13`, `news.walla.co.il=10`, and
+`ynet.co.il=9`. Source suggestions still showed Globes and TheMarker pressure after the prior
+source-family slice: `themarker.com` had 298 candidates, 266 candidate-only candidates, and 34
+attempts; `globes.co.il` had 216 candidates, 215 candidate-only candidates, and one attempt.
+
+This evidence does not justify a browser/CDP scraper, new source-family fanout, queue fairness
+change, scrape-cap change, Mako/Haaretz behavior change, or unrelated source-family work. It does
+justify a generic source-suggestion diagnostics correction that separates partial recoveries from
+definite scrape failures: TheMarker can simultaneously be a top backlog source and a source with
+substantial metadata-only generic-fetch progress. Counting `partial` attempts as
+`scrape_failure_count` overstates failure pressure and obscures whether the next step should be
+metadata/classifier hardening, scraper work, or deferral pending more evidence. The correction does
+not otherwise change source-suggestion ranking.
