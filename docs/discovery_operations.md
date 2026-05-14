@@ -352,15 +352,16 @@ After `SRC-PR-NEWS1`, search-discovered main-domain News1 archive article paths 
 low-confidence generic-fetch diagnostic labeling. Fresh candidate-state inspection over the January
 1-7 persisted state showed three `news1.co.il/Archive/` candidate-only URLs, all discovered by Exa,
 all still scrape-eligible after the bounded drain, and no News1 attempted-scrape or partial-page
-evidence. The checked-in post-scrape diagnostic did not show News1 as repeated source-suggestion
-pressure. This slice therefore does not justify recurring source-targeted query fanout, a
+evidence. The checked-in post-scrape diagnostic did not emit News1 among the top source suggestions.
+This slice therefore does not justify recurring source-targeted query fanout, a
 source-native adapter, a browser/CDP scraper, generic metadata hardening, or queue behavior changes.
 It:
 
 - recognizes main-domain News1 archive URLs under `news1.co.il/Archive/` as the `news1` source
   family for diagnostic/fallback-provenance labeling;
 - labels generic fallback provenance as `news1` when search engines found a matching News1 archive
-  URL and generic fetch later recovers usable metadata;
+  URL and generic fallback later records either partial page metadata or a retained
+  search-result-only fallback;
 - leaves non-archive News1 pages such as home and section pages ungrouped until separate evidence
   justifies them;
 - does not emit source-targeted discovery/backfill fanout for News1 until stronger repeated backlog

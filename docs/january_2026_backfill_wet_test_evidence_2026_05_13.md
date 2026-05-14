@@ -145,8 +145,8 @@ the bounded drain, and no News1 attempted-scrape or partial-page evidence:
 | `candidate_72ea3953c62c179a8d85a6ae` | `https://www.news1.co.il/Archive/0026-D-175044-00.html` | `new` | `candidate_only` | `exa` | `exa` | 0 |
 | `candidate_824eaa3d83da7c421dbe46e2` | `https://www.news1.co.il/Archive/001-D-512714-00.html` | `new` | `candidate_only` | `exa` | `exa` | 0 |
 
-The same post-scrape diagnostic did not show `news1.co.il` as repeated source-suggestion pressure.
-This weak but concrete evidence supports low-confidence diagnostic labeling for future
+The same post-scrape diagnostic did not emit `news1.co.il` among the top source suggestions. This
+weak but concrete evidence supports low-confidence diagnostic labeling for future
 main-domain News1 archive-path candidates under `news1.co.il/Archive/`, while leaving
 source-targeted discovery/backfill fanout, non-archive News1 pages, generic metadata hardening,
 browser scraper work, queue fairness, Mako/Haaretz Chrome-CDP behavior, and unrelated source

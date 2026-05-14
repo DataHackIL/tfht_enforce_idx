@@ -113,6 +113,20 @@ def test_build_discovery_queries_respects_enabled_query_kinds() -> None:
     assert all(query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED for query in queries)
 
 
+def test_build_discovery_queries_excludes_news1_source_targeted_fanout() -> None:
+    """Candidate-only News1 evidence should not add recurring source-targeted fanout."""
+    config = Config(
+        keywords=["בית בושת"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    assert all(query.source_hint != "news1" for query in queries)
+    assert all(tuple(query.preferred_domains) != ("www.news1.co.il",) for query in queries)
+
+
 def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
     monkeypatch,
 ) -> None:

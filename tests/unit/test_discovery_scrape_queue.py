@@ -863,6 +863,95 @@ async def test_scrape_candidates_labels_news1_generic_partial_from_archive_path(
 
 
 @pytest.mark.asyncio
+async def test_scrape_candidates_labels_news1_search_result_only_fallback(
+    tmp_path: Path,
+) -> None:
+    """Failed generic fetches should still label News1 archive fallback provenance."""
+    store = build_store(tmp_path)
+    candidate = build_candidate(
+        "candidate-news1-failed",
+        status=CandidateStatus.NEW,
+        source_hint="exa",
+        current_url="https://www.news1.co.il/Archive/001-D-512703-00.html",
+        canonical_url="https://www.news1.co.il/Archive/001-D-512703-00.html",
+    ).model_copy(update={"discovered_via": ["exa"]})
+    store.upsert_candidates([candidate])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
+        return GenericFetchResult(
+            fetch_status=FetchStatus.FAILED,
+            error_code="generic_fetch_error",
+            error_message="Generic fetch failed",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    stored = store.get_candidate("candidate-news1-failed")
+    assert stored is not None
+    assert stored.candidate_status is CandidateStatus.SCRAPE_FAILED
+    assert stored.content_basis is ContentBasis.SEARCH_RESULT_ONLY
+    assert stored.metadata["fallback_source_name"] == "news1"
+
+
+@pytest.mark.asyncio
+async def test_scrape_candidates_does_not_label_news1_non_archive_fallback(
+    tmp_path: Path,
+) -> None:
+    """Non-archive News1 fallback metadata should keep the search-engine source hint."""
+    store = build_store(tmp_path)
+    candidate = build_candidate(
+        "candidate-news1-home",
+        status=CandidateStatus.NEW,
+        source_hint="exa",
+        current_url="https://www.news1.co.il/Home/",
+        canonical_url="https://www.news1.co.il/Home/",
+    ).model_copy(update={"discovered_via": ["exa"]})
+    store.upsert_candidates([candidate])
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
+        return GenericFetchResult(
+            fetch_status=FetchStatus.PARTIAL,
+            title="כותרת ניוז1",
+            snippet="תקציר ניוז1",
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[],
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    stored = store.get_candidate("candidate-news1-home")
+    assert stored is not None
+    assert stored.candidate_status is CandidateStatus.PARTIALLY_SCRAPED
+    assert stored.metadata["fallback_source_name"] == "exa"
+
+
+@pytest.mark.asyncio
 async def test_scrape_candidates_records_fallback_metadata_for_final_url_and_diagnostics(
     tmp_path: Path,
 ) -> None:

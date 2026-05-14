@@ -419,9 +419,10 @@ PRs, for seven planned follow-ups total:
    source-targeted query expansion, or generic metadata hardening. Candidate-state inspection over
    the January 1-7 persisted state showed three main-domain News1 archive candidate-only URLs under
    `/Archive/`, all discovered by Exa, all still scrape-eligible after the bounded drain, and no
-   News1 attempted-scrape or partial-page evidence. The post-scrape diagnostic did not show News1 as
-   repeated source-suggestion pressure. News1 archive paths can now be mapped to a source-family
-   label for diagnostics/fallback provenance when future generic fetches recover metadata.
+   News1 attempted-scrape or partial-page evidence. The post-scrape diagnostic did not emit News1
+   among the top source suggestions. News1 archive paths can now be mapped to a source-family label
+   for diagnostics/fallback provenance when future generic fallback records either partial page
+   metadata or a retained search-result-only fallback.
    Non-archive News1 pages, recurring source-targeted discovery/backfill queries, generic metadata
    hardening, and any browser/source-native scraper remain out of scope.
 

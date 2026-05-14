@@ -238,6 +238,32 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     }
 
 
+def test_build_backfill_queries_excludes_news1_source_targeted_fanout() -> None:
+    """Candidate-only News1 evidence should not spend recurring backfill query budget."""
+    config = Config(
+        keywords=["בית בושת"],
+        sources=[
+            {
+                "name": "walla",
+                "type": "rss",
+                "enabled": True,
+                "url": "https://news.walla.co.il/feed",
+            },
+        ],
+        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 7, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    assert all(query.source_hint != "news1" for query in queries)
+    assert all(tuple(query.preferred_domains) != ("www.news1.co.il",) for query in queries)
+
+
 def test_build_backfill_queries_returns_empty_when_keywords_normalize_away() -> None:
     """Backfill query generation should short-circuit when no usable keyword-driven queries remain."""
     config = Config(keywords=["", "   "], discovery={"default_query_kinds": ["source_targeted"]})
