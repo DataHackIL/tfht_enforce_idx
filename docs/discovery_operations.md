@@ -113,9 +113,10 @@ eligible for Google CSE-backed discovery. The current domain set is:
 - `shakuf.co.il/*`
 - `www.news1.co.il/*`
 
-The pipeline currently builds source-targeted Google CSE queries for configured source domains and
-Facebook social discovery. Future discovery expansion can and should use this same CSE to query the
-broader listed Israeli news domains through the API before adding new source-specific scrapers.
+The pipeline currently builds source-targeted Google CSE queries for configured source domains,
+supported generic-fetch source families, and Facebook social discovery. Future discovery expansion
+can and should use this same CSE to query the broader listed Israeli news domains through the API
+before adding new source-specific scrapers.
 
 Before model-backed validation, lint the tracked validation CSV without credentials:
 
@@ -291,11 +292,12 @@ pages returning HTTP 200 through the generic fetch path and being retained as pa
 implementation therefore does not add a browser scraper or source-native search adapter. It:
 
 - recognizes `globes.co.il` and `themarker.com` as supported generic-fetch source families;
+- emits source-targeted discovery/backfill queries for `www.globes.co.il` and `www.themarker.com`;
 - labels generic fallback provenance as `globes` or `themarker` when search engines found the URL;
 - uses article metadata and JSON-LD before the document title when generic fetch extracts partial
   page metadata;
-- removes those domains from source-suggestion expansion candidates because their current support
-  boundary is metadata-backed generic fetch, not source-native discovery.
+- keeps those domains eligible for source-suggestion diagnostics when candidate-only or weak
+  conversion evidence still shows backlog pressure.
 
 Future work should still inspect fresh `partial_page_diagnostics` before adding any Globes or
 TheMarker browser/CDP scraper. This slice intentionally does not change queue fairness,

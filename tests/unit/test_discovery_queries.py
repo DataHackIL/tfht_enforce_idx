@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.discovery.models import DiscoveryQueryKind
-from denbust.discovery.queries import build_discovery_queries, enabled_source_domains
+from denbust.discovery.queries import (
+    build_discovery_queries,
+    enabled_discovery_domains,
+    enabled_source_domains,
+)
 from denbust.taxonomy import default_taxonomy
 
 
@@ -47,8 +51,8 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
     taxonomy_targeted_source_queries = [
         query for query in targeted_queries if "taxonomy" in query.tags
     ]
-    assert len(keyword_targeted_queries) == 4
-    assert len(taxonomy_targeted_source_queries) == len(taxonomy_queries) * 2
+    assert len(keyword_targeted_queries) == 8
+    assert len(taxonomy_targeted_source_queries) == len(taxonomy_queries) * 4
     assert len(taxonomy_queries) == len(
         {term for _, _, term in default_taxonomy().discovery_terms()}
     )
@@ -56,12 +60,22 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
     assert {query.query_text for query in broad_queries} == {"בית בושת", "זנות"}
     assert {
         (query.source_hint, tuple(query.preferred_domains)) for query in keyword_targeted_queries
-    } == {("ynet", ("www.ynet.co.il",)), ("mako", ("www.mako.co.il",))}
+    } == {
+        ("ynet", ("www.ynet.co.il",)),
+        ("mako", ("www.mako.co.il",)),
+        ("globes", ("www.globes.co.il",)),
+        ("themarker", ("www.themarker.com",)),
+    }
     assert all(not query.preferred_domains for query in taxonomy_queries)
     assert {
         (query.source_hint, tuple(query.preferred_domains))
         for query in taxonomy_targeted_source_queries
-    } == {("ynet", ("www.ynet.co.il",)), ("mako", ("www.mako.co.il",))}
+    } == {
+        ("ynet", ("www.ynet.co.il",)),
+        ("mako", ("www.mako.co.il",)),
+        ("globes", ("www.globes.co.il",)),
+        ("themarker", ("www.themarker.com",)),
+    }
     assert any(
         query.query_text == "נישואין בכפייה"
         and {
@@ -95,9 +109,8 @@ def test_build_discovery_queries_respects_enabled_query_kinds() -> None:
 
     queries = build_discovery_queries(config, days=3)
 
-    assert len(queries) == 1
-    assert queries[0].query_kind is DiscoveryQueryKind.SOURCE_TARGETED
-    assert queries[0].source_hint == "mako"
+    assert [query.source_hint for query in queries] == ["mako", "globes", "themarker"]
+    assert all(query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED for query in queries)
 
 
 def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
@@ -126,12 +139,22 @@ def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
         if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
         and query.query_text == "דירה דיסקרטית"
     ]
-    assert len(taxonomy_source_queries) == 1
-    assert taxonomy_source_queries[0].preferred_domains == ["www.mako.co.il"]
-    assert taxonomy_source_queries[0].source_hint == "mako"
-    assert taxonomy_source_queries[0].date_from == datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
-    assert taxonomy_source_queries[0].date_to == datetime(2026, 4, 16, 12, 0, tzinfo=UTC)
-    assert {"mako", "taxonomy", "category:brothels"}.issubset(set(taxonomy_source_queries[0].tags))
+    assert {
+        (query.source_hint, tuple(query.preferred_domains)) for query in taxonomy_source_queries
+    } == {
+        ("mako", ("www.mako.co.il",)),
+        ("globes", ("www.globes.co.il",)),
+        ("themarker", ("www.themarker.com",)),
+    }
+    assert all(
+        query.date_from == datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
+        and query.date_to == datetime(2026, 4, 16, 12, 0, tzinfo=UTC)
+        for query in taxonomy_source_queries
+    )
+    assert all(
+        {"taxonomy", "category:brothels"}.issubset(set(query.tags))
+        for query in taxonomy_source_queries
+    )
 
 
 def test_build_discovery_queries_keeps_taxonomy_source_provenance_for_keyword_overlap(
@@ -155,8 +178,15 @@ def test_build_discovery_queries_keeps_taxonomy_source_provenance_for_keyword_ov
         for query in queries
         if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
     ]
-    assert len(source_queries) == 2
-    assert sorted("taxonomy" in query.tags for query in source_queries) == [False, True]
+    assert len(source_queries) == 6
+    assert sorted("taxonomy" in query.tags for query in source_queries) == [
+        False,
+        False,
+        False,
+        True,
+        True,
+        True,
+    ]
 
 
 def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() -> None:
@@ -181,9 +211,13 @@ def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() 
     keyword_targeted_queries = [query for query in targeted_queries if "taxonomy" not in query.tags]
 
     assert len(broad_queries) == 1
-    assert len(keyword_targeted_queries) == 1
+    assert len(keyword_targeted_queries) == 3
     assert broad_queries[0].query_text == "זנות"
-    assert keyword_targeted_queries[0].source_hint == "mako"
+    assert {query.source_hint for query in keyword_targeted_queries} == {
+        "mako",
+        "globes",
+        "themarker",
+    }
 
 
 def test_build_discovery_queries_returns_taxonomy_queries_for_empty_keyword_set() -> None:
@@ -225,8 +259,13 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
     ]
     keyword_targeted_queries = [query for query in targeted_queries if "taxonomy" not in query.tags]
 
-    assert len(keyword_targeted_queries) == 1
-    assert keyword_targeted_queries[0].preferred_domains == ["www.ynet.co.il"]
+    assert {
+        (query.source_hint, tuple(query.preferred_domains)) for query in keyword_targeted_queries
+    } == {
+        ("ynet", ("www.ynet.co.il",)),
+        ("globes", ("www.globes.co.il",)),
+        ("themarker", ("www.themarker.com",)),
+    }
 
 
 def test_build_discovery_queries_can_disable_social_targeted_generation() -> None:
@@ -354,7 +393,7 @@ def test_build_discovery_queries_does_not_load_taxonomy_when_disabled(monkeypatc
 
 
 def test_enabled_source_domains_returns_only_enabled_resolved_domains() -> None:
-    """Public source-domain resolution should expose reusable enabled discovery domains."""
+    """Configured source-domain resolution should not include generic source families."""
     config = Config(
         sources=[
             SourceConfig(name="disabled", type=SourceType.SCRAPER, enabled=False),
@@ -367,4 +406,19 @@ def test_enabled_source_domains_returns_only_enabled_resolved_domains() -> None:
     assert enabled_source_domains(config) == [
         ("ynet", "www.ynet.co.il"),
         ("mako", "www.mako.co.il"),
+    ]
+
+
+def test_enabled_discovery_domains_adds_generic_fetch_source_families() -> None:
+    """Discovery-domain resolution should include bounded generic source families."""
+    config = Config(
+        sources=[
+            SourceConfig(name="ynet", type=SourceType.RSS, url="https://www.ynet.co.il/feed.xml"),
+        ]
+    )
+
+    assert enabled_discovery_domains(config) == [
+        ("ynet", "www.ynet.co.il"),
+        ("globes", "www.globes.co.il"),
+        ("themarker", "www.themarker.com"),
     ]

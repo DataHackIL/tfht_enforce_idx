@@ -33,6 +33,13 @@ from denbust.discovery.state_paths import resolve_discovery_state_paths
 from denbust.discovery.storage import StateRepoDiscoveryPersistence
 from denbust.models.common import DatasetName
 
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
+
+
+def load_fixture(path: str) -> str:
+    """Load a tracked fixture file."""
+    return (FIXTURES_DIR / path).read_text(encoding="utf-8")
+
 
 def build_candidate(
     candidate_id: str,
@@ -78,48 +85,20 @@ def build_raw_article(
 
 
 def test_extract_partial_page_metadata_prefers_article_metadata_for_globes_fixture() -> None:
-    """Globes-like article metadata should produce clean partial-page fields."""
-    html = """
-    <html>
-      <head>
-        <title>Generic site title</title>
-        <meta property="og:title" content="Globes article headline" />
-        <meta property="og:description" content="Globes article summary" />
-        <meta property="article:published_time" content="2026-01-05T10:30:00+02:00" />
-      </head>
-    </html>
-    """
+    """Globes article metadata should produce clean partial-page fields."""
+    parsed = _extract_partial_page_metadata(load_fixture("html/globes_article.html"))
 
-    parsed = _extract_partial_page_metadata(html)
-
-    assert parsed["title"] == "Globes article headline"
-    assert parsed["snippet"] == "Globes article summary"
+    assert parsed["title"] == "כותרת כתבת גלובס על סחר בבני אדם"
+    assert parsed["snippet"] == "תקציר כתבת גלובס מתוך מטא דאטה של עמוד כתבה."
     assert parsed["publication_datetime"] == datetime(2026, 1, 5, 8, 30, tzinfo=UTC)
 
 
 def test_extract_partial_page_metadata_uses_themarker_json_ld_fixture() -> None:
-    """TheMarker-like JSON-LD should fill metadata when meta tags are absent."""
-    html = """
-    <html>
-      <head>
-        <title>TheMarker site title</title>
-        <script type="application/ld+json">
-          {
-            "@context": "https://schema.org",
-            "@type": ["NewsArticle", "Article"],
-            "headline": "TheMarker article headline",
-            "description": "TheMarker article summary",
-            "datePublished": "2026-01-04T19:15:00+02:00"
-          }
-        </script>
-      </head>
-    </html>
-    """
+    """TheMarker JSON-LD should fill metadata when meta tags are absent."""
+    parsed = _extract_partial_page_metadata(load_fixture("html/themarker_article.html"))
 
-    parsed = _extract_partial_page_metadata(html)
-
-    assert parsed["title"] == "TheMarker article headline"
-    assert parsed["snippet"] == "TheMarker article summary"
+    assert parsed["title"] == "כותרת כתבת דה מרקר על אכיפה"
+    assert parsed["snippet"] == "תקציר כתבת דה מרקר מתוך JSON-LD של עמוד כתבה."
     assert parsed["publication_datetime"] == datetime(2026, 1, 4, 17, 15, tzinfo=UTC)
 
 

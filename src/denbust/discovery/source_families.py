@@ -14,11 +14,20 @@ class SourceFamily:
 
     name: str
     domains: frozenset[str]
+    discovery_domain: str
 
 
 GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
-    SourceFamily(name="globes", domains=frozenset({"globes.co.il"})),
-    SourceFamily(name="themarker", domains=frozenset({"themarker.com"})),
+    SourceFamily(
+        name="globes",
+        domains=frozenset({"globes.co.il"}),
+        discovery_domain="www.globes.co.il",
+    ),
+    SourceFamily(
+        name="themarker",
+        domains=frozenset({"themarker.com"}),
+        discovery_domain="www.themarker.com",
+    ),
 )
 
 _GENERIC_FETCH_DOMAIN_TO_SOURCE: dict[str, str] = {
@@ -41,3 +50,8 @@ def source_family_name_for_url(url: str | None) -> str | None:
     if not url:
         return None
     return source_family_name_for_domain(urlparse(url).netloc)
+
+
+def generic_fetch_source_domains() -> list[tuple[str, str]]:
+    """Return source-targeted discovery domains for generic-fetch families."""
+    return [(family.name, family.discovery_domain) for family in GENERIC_FETCH_SOURCE_FAMILIES]

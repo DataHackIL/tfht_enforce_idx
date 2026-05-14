@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from denbust.config import Config, SourceConfig, SourceType
 from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
+from denbust.discovery.source_families import generic_fetch_source_domains
 from denbust.taxonomy import default_taxonomy
 
 _SCRAPER_SOURCE_DOMAINS: dict[str, str] = {
@@ -54,6 +55,19 @@ def enabled_source_domains(config: Config) -> list[tuple[str, str]]:
     return source_domains
 
 
+def enabled_discovery_domains(config: Config) -> list[tuple[str, str]]:
+    """Return configured source domains plus generic-fetch source-family domains."""
+    source_domains = enabled_source_domains(config)
+    seen = {(source_name, domain) for source_name, domain in source_domains}
+    for source_name, domain in generic_fetch_source_domains():
+        key = (source_name, domain)
+        if key in seen:
+            continue
+        source_domains.append(key)
+        seen.add(key)
+    return source_domains
+
+
 def _taxonomy_query_specs() -> list[tuple[str, list[str]]]:
     specs_by_term: dict[str, set[str]] = {}
     for category_id, subcategory_id, term in default_taxonomy().discovery_terms():
@@ -82,7 +96,7 @@ def build_discovery_queries(
     date_to = current_time
     queries: list[DiscoveryQuery] = []
     seen_keys: set[tuple[object, ...]] = set()
-    source_domains = enabled_source_domains(config)
+    source_domains = enabled_discovery_domains(config)
 
     for keyword in keywords:
         if DiscoveryQueryKind.BROAD in config.discovery.default_query_kinds:

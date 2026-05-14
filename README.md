@@ -399,8 +399,9 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
 - `SRC-PR-GLOBES-THEMARKER` adds bounded generic-fetch source-family support for `globes.co.il` and
   `themarker.com`: diagnostics and fallback provenance now group search-discovered article URLs as
   `globes`/`themarker`, article metadata and JSON-LD are preferred over page titles for partial
-  metadata extraction, and those domains no longer appear as unsupported source-suggestion
-  expansion targets. This is intentionally not a browser scraper or source-native discovery adapter
+  metadata extraction, and source-targeted discovery/backfill queries now cover both domains while
+  source-suggestion diagnostics can still surface weak conversion or candidate-only backlog. This is
+  intentionally not a browser scraper or source-native discovery adapter
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable

@@ -25,10 +25,7 @@ from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     order_scrape_eligible_candidates,
 )
-from denbust.discovery.source_families import (
-    GENERIC_FETCH_SOURCE_DOMAINS,
-    source_family_name_for_domain,
-)
+from denbust.discovery.source_families import source_family_name_for_domain
 from denbust.discovery.state_paths import write_metrics_snapshot
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.ops.factory import create_operational_store
@@ -1048,10 +1045,9 @@ def _build_scrape_failure_diagnostics(
 
 
 def _candidate_source(candidate: PersistentCandidate) -> str:
-    if candidate.source_hints:
-        first_hint = candidate.source_hints[0]
-        if first_hint not in _SEARCH_ENGINE_NAMES:
-            return first_hint
+    for source_hint in candidate.source_hints:
+        if source_hint not in _SEARCH_ENGINE_NAMES:
+            return source_hint
     for producer in candidate.discovered_via:
         if producer not in _SEARCH_ENGINE_NAMES:
             return producer
@@ -1566,7 +1562,6 @@ def _build_source_suggestion_report(
         for _, domain in enabled_source_domains(config)
         if (normalized := _normalize_domain(domain)) is not None
     }
-    known_domains.update(GENERIC_FETCH_SOURCE_DOMAINS)
     attempts_by_candidate_id: dict[str, list[ScrapeAttempt]] = {}
     for attempt in attempts:
         attempts_by_candidate_id.setdefault(attempt.candidate_id, []).append(attempt)
