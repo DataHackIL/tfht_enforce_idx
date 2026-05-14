@@ -419,6 +419,12 @@ The run reported:
 | Remaining eligible candidates | 3,139 |
 | Inferred stop reason | `budget_cap_reached` |
 
+Cap interpretation: this was a backfill scrape drain, so the active selected-candidate budget was
+`backfill.max_scrape_attempts_per_run=100`. The post-scrape discovery diagnostic also reported
+`queue_drain.max_candidate_budget=30`, inherited from the generic `max_articles` setting; that field
+is useful context but should not be read as the active selected-candidate cap for this backfill
+scrape job.
+
 Both the full debug payload and compact summary recorded the same warning counters:
 
 | Counter | Count | Rate |
@@ -431,6 +437,14 @@ Both the full debug payload and compact summary recorded the same warning counte
 | `fallback_classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 2 | 2% of 100 fallback classifier inputs |
 | `fallback_classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
 | `fallback_classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+
+These warning counters describe classifier-output losses before fallback retention. The matching
+post-scrape discovery diagnostic reported 26 retained candidate-fallback operational rows, all
+low-confidence fallback rows, with `invalid_taxonomy_pair_record_count=0`,
+`fallback_record_without_taxonomy_count=0`, and
+`partial_page_fallback_without_taxonomy_count=0`. The retained operational rows therefore did not
+carry invalid taxonomy; the parse and invalid-taxonomy warnings represent rejected classifier
+outputs that did not corrupt persisted fallback rows.
 
 Both `classifier_summary.parse_failure_diagnostics.category_counts` and
 `fallback_classifier_summary.parse_failure_diagnostics.category_counts` were identical:
@@ -464,8 +478,11 @@ only the leading 80-character shape signature, not a tail signature, brace balan
 wrapper indicator. That makes the observed category suggestive but not safely recoverable yet.
 
 Parser recovery is therefore not recommended in this slice. A future bounded PR should slightly
-broaden sanitized capture with tail shape and wrapper/balance indicators, then decide whether a tiny
-fixture-backed recovery for a double-wrapped object is justified. This interpretation does not
-change classifier prompts, taxonomy validity policy, legacy taxonomy policy, queue behavior, scrape
+broaden sanitized capture with tail shape and wrapper/balance indicators, then leave parser
+behavior unchanged until a later interpretation applies a clear decision gate. Balanced,
+consistently double-wrapped JSON with a valid recoverable inner object can justify a later
+fixture-backed recovery PR. Unbalanced wrappers, pseudo-JSON, mixed parse-failure categories, or no
+repeated parse failures should keep recovery deferred. This interpretation does not change
+classifier prompts, taxonomy validity policy, legacy taxonomy policy, queue behavior, scrape
 candidate selection, generic fetch behavior, browser/CDP scraper behavior, scrape caps,
 source-family support, or source-targeted query fanout.
