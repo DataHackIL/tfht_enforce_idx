@@ -795,6 +795,45 @@ def test_candidate_source_falls_back_to_non_search_producer_then_domain() -> Non
     assert _candidate_source(domain_only) == "example.com"
 
 
+def test_candidate_source_maps_supported_generic_source_family_domains() -> None:
+    """Search-only Globes/TheMarker candidates should be grouped by source family."""
+    now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
+    globes = _candidate(
+        "globes",
+        url="https://www.globes.co.il/news/article.aspx?did=1001531007",
+        discovered_via=["exa"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": ["exa"]})
+    themarker = _candidate(
+        "themarker",
+        url="https://www.themarker.com/news/2026-01-04/ty-article/abc",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
+
+    assert _candidate_source(globes) == "globes"
+    assert _candidate_source(themarker) == "themarker"
+
+
+def test_candidate_source_scans_all_source_hints_before_domain_fallback() -> None:
+    """Search-engine hints should not hide later concrete source hints."""
+    now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
+    candidate = _candidate(
+        "multi-hint",
+        url="https://www.mako.co.il/news/article/multi-hint",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": ["exa", "mako"]})
+
+    assert _candidate_source(candidate) == "mako"
+
+
 def test_render_discovery_diagnostic_report_caps_queue_order_text(tmp_path: Path) -> None:
     """Text diagnostics should summarize long orders without dumping the whole queue."""
     now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
@@ -1188,6 +1227,50 @@ def test_build_discovery_diagnostic_report_normalizes_source_domains(tmp_path: P
     report = build_discovery_diagnostic_report(config=config)
 
     assert report.source_suggestions.suggestions == []
+
+
+def test_build_discovery_diagnostic_report_keeps_generic_source_families_suggested(
+    tmp_path: Path,
+) -> None:
+    """Generic-fetch labels alone should not hide unsupported source-family backlog."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    persistence.upsert_candidates(
+        [
+            _candidate(
+                "candidate-globes",
+                url="https://www.globes.co.il/news/article.aspx?did=1001531007",
+                discovered_via=["exa"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=2),
+                last_seen_at=now - timedelta(hours=2),
+            ),
+            _candidate(
+                "candidate-themarker",
+                url="https://www.themarker.com/news/2026-01-04/ty-article/abc",
+                discovered_via=["brave"],
+                status=CandidateStatus.PARTIALLY_SCRAPED,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now - timedelta(hours=1),
+            ),
+            _candidate(
+                "candidate-example",
+                url="https://example.com/news/article",
+                discovered_via=["brave"],
+                status=CandidateStatus.NEW,
+                first_seen_at=now - timedelta(days=1),
+                last_seen_at=now - timedelta(minutes=30),
+            ),
+        ]
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+
+    suggestion_domains = {suggestion.domain for suggestion in report.source_suggestions.suggestions}
+    assert "globes.co.il" in suggestion_domains
+    assert "themarker.com" in suggestion_domains
+    assert "example.com" in suggestion_domains
 
 
 def test_build_discovery_diagnostic_report_ignores_blank_provenance_domains(tmp_path: Path) -> None:

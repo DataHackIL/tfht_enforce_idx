@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from denbust.config import Config
 from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
-from denbust.discovery.queries import SOCIAL_DISCOVERY_DOMAINS, enabled_source_domains
+from denbust.discovery.queries import SOCIAL_DISCOVERY_DOMAINS, enabled_discovery_domains
 
 BACKFILL_BATCH_ID_ENV = "DENBUST_BACKFILL_BATCH_ID"
 BACKFILL_DATE_FROM_ENV = "DENBUST_BACKFILL_DATE_FROM"
@@ -111,7 +111,7 @@ def build_backfill_queries(
 
     queries: list[DiscoveryQuery] = []
     seen_keys: set[tuple[object, ...]] = set()
-    source_domains = enabled_source_domains(config)
+    source_domains = enabled_discovery_domains(config)
     for keyword in keywords:
         if DiscoveryQueryKind.BROAD in config.discovery.default_query_kinds:
             broad_key = (DiscoveryQueryKind.BROAD, keyword, window.index)

@@ -371,8 +371,14 @@ PRs, for seven planned follow-ups total:
    current-candidate classifier/taxonomy warning signals. Queue fairness, source prioritization,
    generic fetch behavior, and source-family scraper support are unchanged.
 4. `SRC-PR-GLOBES-THEMARKER` - source-family expansion.
-   Add or improve source support for the Globes/TheMarker family if repeated diagnostics keep
-   showing high-value unsupported or partial candidates.
+   Implemented as bounded generic-fetch source-family support, not as a browser scraper. The
+   checked-in January 1-7 evidence showed `globes.co.il` as a repeated source suggestion and
+   showed TheMarker pages returning HTTP 200 with usable partial metadata through generic fetch.
+   Globes/TheMarker URLs are now mapped to source-family labels for diagnostics/fallback
+   provenance, source-targeted discovery/backfill queries now cover `www.globes.co.il` and
+   `www.themarker.com`, generic metadata extraction prefers article metadata/JSON-LD over page
+   titles, and source-suggestion diagnostics remain available when candidate-only or weak
+   conversion evidence still justifies stronger scraper work.
 5. `SRC-PR-ISRAELHAYOM` - source-family expansion.
    Add or improve Israel Hayom support if bounded scrape diagnostics show enough high-value
    unsupported or partial candidates.

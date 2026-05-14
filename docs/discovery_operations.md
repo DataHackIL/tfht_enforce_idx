@@ -113,9 +113,10 @@ eligible for Google CSE-backed discovery. The current domain set is:
 - `shakuf.co.il/*`
 - `www.news1.co.il/*`
 
-The pipeline currently builds source-targeted Google CSE queries for configured source domains and
-Facebook social discovery. Future discovery expansion can and should use this same CSE to query the
-broader listed Israeli news domains through the API before adding new source-specific scrapers.
+The pipeline currently builds source-targeted Google CSE queries for configured source domains,
+supported generic-fetch source families, and Facebook social discovery. Future discovery expansion
+can and should use this same CSE to query the broader listed Israeli news domains through the API
+before adding new source-specific scrapers.
 
 Before model-backed validation, lint the tracked validation CSV without credentials:
 
@@ -283,6 +284,24 @@ many `partial_page` candidates:
 
 This diagnostic slice is interpretation-only. It does not change queue fairness, source
 prioritization, scrape caps, generic fetch behavior, or source-family scraper support.
+
+After `SRC-PR-GLOBES-THEMARKER`, search-discovered Globes and TheMarker article pages have bounded
+generic-fetch source-family support. The January 1-7 evidence showed Globes as a repeated
+unsupported source suggestion (`globes.co.il`, 25 candidates across two runs) and showed TheMarker
+pages returning HTTP 200 through the generic fetch path and being retained as partial pages. The
+implementation therefore does not add a browser scraper or source-native search adapter. It:
+
+- recognizes `globes.co.il` and `themarker.com` as supported generic-fetch source families;
+- emits source-targeted discovery/backfill queries for `www.globes.co.il` and `www.themarker.com`;
+- labels generic fallback provenance as `globes` or `themarker` when search engines found the URL;
+- uses article metadata and JSON-LD before the document title when generic fetch extracts partial
+  page metadata;
+- keeps those domains eligible for source-suggestion diagnostics when candidate-only or weak
+  conversion evidence still shows backlog pressure.
+
+Future work should still inspect fresh `partial_page_diagnostics` before adding any Globes or
+TheMarker browser/CDP scraper. This slice intentionally does not change queue fairness,
+prioritization, scrape caps, Mako/Haaretz browser behavior, or broader Israeli source coverage.
 
 ## GitHub Actions Run Path
 

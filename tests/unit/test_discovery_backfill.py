@@ -203,14 +203,24 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     assert [query.query_text for query in broad_queries] == ["בית בושת", "סחר"]
     keyword_source_queries = [query for query in source_queries if "taxonomy" not in query.tags]
     taxonomy_source_queries = [query for query in source_queries if "taxonomy" in query.tags]
-    assert len(keyword_source_queries) == 4
-    assert len(taxonomy_source_queries) == len(taxonomy_queries) * 2
+    assert len(keyword_source_queries) == 8
+    assert (
+        len(taxonomy_source_queries)
+        == config.backfill.max_source_targeted_taxonomy_queries_per_window
+    )
     assert taxonomy_queries
     assert len(social_queries) == 2
-    assert {query.source_hint for query in keyword_source_queries} == {"ynet", "walla"}
+    assert {query.source_hint for query in keyword_source_queries} == {
+        "ynet",
+        "walla",
+        "globes",
+        "themarker",
+    }
     assert all(query.preferred_domains for query in keyword_source_queries)
     assert all(not query.preferred_domains for query in taxonomy_queries)
-    assert {query.source_hint for query in taxonomy_source_queries} == {"ynet", "walla"}
+    assert {"globes", "themarker"}.issubset(
+        {query.source_hint for query in taxonomy_source_queries}
+    )
     assert all("backfill" in query.tags and "window:0" in query.tags for query in source_queries)
     assert any(
         query.query_text == "צו הגבלת שימוש"
@@ -282,13 +292,20 @@ def test_build_backfill_queries_emits_source_targeted_taxonomy_terms(
         if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
         and query.query_text == "דירה דיסקרטית"
     ]
-    assert len(taxonomy_source_queries) == 1
-    assert taxonomy_source_queries[0].preferred_domains == ["www.mako.co.il"]
-    assert taxonomy_source_queries[0].source_hint == "mako"
-    assert taxonomy_source_queries[0].date_from == window.date_from
-    assert taxonomy_source_queries[0].date_to == window.date_to
-    assert {"backfill", "mako", "taxonomy", "category:brothels", "window:0"}.issubset(
-        set(taxonomy_source_queries[0].tags)
+    assert {
+        (query.source_hint, tuple(query.preferred_domains)) for query in taxonomy_source_queries
+    } == {
+        ("mako", ("www.mako.co.il",)),
+        ("globes", ("www.globes.co.il",)),
+        ("themarker", ("www.themarker.com",)),
+    }
+    assert all(
+        query.date_from == window.date_from and query.date_to == window.date_to
+        for query in taxonomy_source_queries
+    )
+    assert all(
+        {"backfill", "taxonomy", "category:brothels", "window:0"}.issubset(set(query.tags))
+        for query in taxonomy_source_queries
     )
 
 
@@ -359,8 +376,15 @@ def test_build_backfill_queries_keeps_taxonomy_source_provenance_for_keyword_ove
         for query in queries
         if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
     ]
-    assert len(source_queries) == 2
-    assert sorted("taxonomy" in query.tags for query in source_queries) == [False, True]
+    assert len(source_queries) == 6
+    assert sorted("taxonomy" in query.tags for query in source_queries) == [
+        False,
+        False,
+        False,
+        True,
+        True,
+        True,
+    ]
 
 
 def test_build_backfill_queries_does_not_load_taxonomy_when_disabled(
