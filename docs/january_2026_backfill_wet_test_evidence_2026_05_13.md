@@ -134,3 +134,20 @@ future official Kan news article-path candidates under `kan.org.il/content/kan-n
 source-targeted discovery/backfill fanout, unrelated Kan-named domains, non-article Kan pages,
 browser scraper work, queue fairness, Mako/Haaretz Chrome-CDP behavior, and unrelated source
 families out of scope.
+
+For `SRC-PR-NEWS1`, candidate-state inspection over the same persisted state showed three
+main-domain News1 archive candidate-only URLs, all Exa-discovered, all still scrape-eligible after
+the bounded drain, and no News1 attempted-scrape or partial-page evidence:
+
+| Candidate ID | URL | Status | Content basis | Source hints | Discovered via | Scrape attempts |
+| --- | --- | --- | --- | --- | --- | ---: |
+| `candidate_f3635f618524800b7e7fefce` | `https://www.news1.co.il/Archive/001-D-512703-00.html` | `new` | `candidate_only` | `exa` | `exa` | 0 |
+| `candidate_72ea3953c62c179a8d85a6ae` | `https://www.news1.co.il/Archive/0026-D-175044-00.html` | `new` | `candidate_only` | `exa` | `exa` | 0 |
+| `candidate_824eaa3d83da7c421dbe46e2` | `https://www.news1.co.il/Archive/001-D-512714-00.html` | `new` | `candidate_only` | `exa` | `exa` | 0 |
+
+The same post-scrape diagnostic did not show `news1.co.il` as repeated source-suggestion pressure.
+This weak but concrete evidence supports low-confidence diagnostic labeling for future
+main-domain News1 archive-path candidates under `news1.co.il/Archive/`, while leaving
+source-targeted discovery/backfill fanout, non-archive News1 pages, generic metadata hardening,
+browser scraper work, queue fairness, Mako/Haaretz Chrome-CDP behavior, and unrelated source
+families out of scope.

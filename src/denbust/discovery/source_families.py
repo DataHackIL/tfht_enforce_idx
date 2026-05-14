@@ -46,6 +46,14 @@ GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
         source_targeted_discovery=False,
         article_path_prefixes=("/content/kan-news/",),
     ),
+    SourceFamily(
+        name="news1",
+        domains=frozenset({"news1.co.il"}),
+        discovery_domain="www.news1.co.il",
+        include_subdomains=False,
+        source_targeted_discovery=False,
+        article_path_prefixes=("/Archive/",),
+    ),
 )
 
 

@@ -822,6 +822,22 @@ def test_candidate_source_maps_supported_generic_source_family_domains() -> None
         first_seen_at=now,
         last_seen_at=now,
     ).model_copy(update={"source_hints": []})
+    news1 = _candidate(
+        "news1",
+        url="https://www.news1.co.il/Archive/001-D-512703-00.html",
+        discovered_via=["exa"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
+    news1_non_archive = _candidate(
+        "news1-non-archive",
+        url="https://www.news1.co.il/Home/",
+        discovered_via=["exa"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
     kan_non_article = _candidate(
         "kan-non-article",
         url="https://www.kan.org.il/live/",
@@ -834,6 +850,8 @@ def test_candidate_source_maps_supported_generic_source_family_domains() -> None
     assert _candidate_source(globes) == "globes"
     assert _candidate_source(themarker) == "themarker"
     assert _candidate_source(kan) == "kan"
+    assert _candidate_source(news1) == "news1"
+    assert _candidate_source(news1_non_archive) == "www.news1.co.il"
     assert _candidate_source(kan_non_article) == "www.kan.org.il"
 
 
