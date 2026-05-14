@@ -100,3 +100,12 @@ so the stop reason is explainable as a budget limit rather than a queue-contract
 also exposed candidate-quality noise, including social/profile/app-store/dictionary-like surfaces
 that can consume scrape budget. That follow-up belongs in `DISC-PR-NOISE-FILTERS`, not in this
 config-and-evidence slice.
+
+After `SCRAPE-PR-PARTIAL-DIAGNOSTICS`, future `denbust diagnose-discovery` artifacts include
+`partial_page_diagnostics` for this exact interpretation gap. The original checked-in artifact still
+records only the older `queue_health.partial_page_candidates=88` figure, but fresh diagnostics over
+the same persisted state can now report how many partial candidates produced candidate-fallback
+operational rows, how many stayed metadata-only when operational matching is enabled, whether
+partial extraction came from generic fetch, a source adapter, or generic fallback after a
+source-adapter attempt, which domains/source hints dominate partials, and which persisted
+current-candidate classifier/taxonomy warning signals affect conversion interpretation.

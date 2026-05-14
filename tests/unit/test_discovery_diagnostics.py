@@ -17,7 +17,10 @@ from denbust.diagnostics.discovery import (
     _candidate_source,
     _load_operational_record_urls,
     _normalize_domain,
+    _partial_attempt_source_label,
     _read_jsonl,
+    _record_content_basis,
+    _record_has_valid_taxonomy_pair,
     build_discovery_diagnostic_report,
     persist_discovery_diagnostic_artifacts,
     render_discovery_diagnostic_report,
@@ -254,6 +257,326 @@ def test_build_discovery_diagnostic_report_counts_search_noise_reasons(tmp_path:
         "social_profile": 2,
     }
     assert "search_noise_filters social_profile=2" in rendered
+
+
+def test_build_discovery_diagnostic_report_breaks_down_partial_pages(
+    tmp_path: Path,
+) -> None:
+    """Partial-page diagnostics should distinguish retained rows from metadata-only partials."""
+    now = datetime.now(UTC)
+    config = Config(
+        store={"state_root": tmp_path},
+        operational={
+            "provider": OperationalProvider.LOCAL_JSON,
+            "root_dir": tmp_path / "operational",
+        },
+    )
+    persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
+    retained = _candidate(
+        "partial-retained",
+        url="https://www.globes.co.il/news/article-retained",
+        discovered_via=["brave"],
+        status=CandidateStatus.PARTIALLY_SCRAPED,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now,
+        content_basis=ContentBasis.PARTIAL_PAGE,
+    )
+    metadata_only = _candidate(
+        "partial-metadata-only",
+        url="https://www.themarker.com/news/article-metadata-only",
+        discovered_via=["exa"],
+        status=CandidateStatus.PARTIALLY_SCRAPED,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now,
+        content_basis=ContentBasis.PARTIAL_PAGE,
+    )
+    blocked = _candidate(
+        "blocked-search-result-only",
+        url="https://www.globes.co.il/news/article-blocked",
+        discovered_via=["brave"],
+        status=CandidateStatus.SCRAPE_FAILED,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now,
+        content_basis=ContentBasis.SEARCH_RESULT_ONLY,
+    )
+    persistence.upsert_candidates([retained, metadata_only, blocked])
+    persistence.append_attempts(
+        [
+            ScrapeAttempt(
+                candidate_id="partial-retained",
+                started_at=now,
+                finished_at=now,
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.FAILED,
+                source_adapter_name="globes",
+                error_code="candidate_not_found",
+            ),
+            ScrapeAttempt(
+                candidate_id="partial-retained",
+                started_at=now + timedelta(seconds=1),
+                finished_at=now + timedelta(seconds=1),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                fetch_status=FetchStatus.PARTIAL,
+            ),
+            ScrapeAttempt(
+                candidate_id="partial-retained",
+                started_at=now + timedelta(seconds=2),
+                finished_at=now + timedelta(seconds=2),
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.PARTIAL,
+            ),
+            ScrapeAttempt(
+                candidate_id="partial-metadata-only",
+                started_at=now + timedelta(seconds=3),
+                finished_at=now + timedelta(seconds=3),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                fetch_status=FetchStatus.PARTIAL,
+            ),
+            ScrapeAttempt(
+                candidate_id="blocked-search-result-only",
+                started_at=now + timedelta(seconds=4),
+                finished_at=now + timedelta(seconds=4),
+                attempt_kind=ScrapeAttemptKind.GENERIC_FETCH,
+                fetch_status=FetchStatus.BLOCKED,
+                error_code="generic_fetch_http_403",
+            ),
+        ]
+    )
+    store = LocalJsonOperationalStore(tmp_path / "operational")
+    store.upsert_records(
+        DatasetName.NEWS_ITEMS.value,
+        [
+            {
+                "id": "fallback-retained",
+                "source_name": "globes",
+                "source_domain": "globes.co.il",
+                "url": "https://www.globes.co.il/news/article-retained",
+                "canonical_url": "https://www.globes.co.il/news/article-retained",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "retained",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "retained",
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": ["partial-retained"],
+                "content_basis": "partial_page",
+                "record_confidence": "low",
+                "classification_confidence": "low",
+            },
+            {
+                "id": "full-row-same-url",
+                "source_name": "themarker",
+                "source_domain": "themarker.com",
+                "url": "https://www.themarker.com/news/article-metadata-only",
+                "canonical_url": "https://www.themarker.com/news/article-metadata-only",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "full row should not count as fallback retention",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "full row",
+                "annotation_source": None,
+                "event_candidate_ids": [],
+                "content_basis": "full_article_page",
+                "record_confidence": "high",
+            },
+            {
+                "id": "wrong-basis-fallback",
+                "source_name": "themarker",
+                "source_domain": "themarker.com",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "wrong-basis fallback should not count as partial retention",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "wrong basis",
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": ["partial-metadata-only"],
+                "content_basis": "search_result_only",
+                "record_confidence": "high",
+            },
+            {
+                "id": "unrelated-fallback",
+                "source_name": "globes",
+                "source_domain": "globes.co.il",
+                "url": "https://www.globes.co.il/news/unrelated",
+                "canonical_url": "https://www.globes.co.il/news/unrelated",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "unrelated fallback should not pollute current diagnostics",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "unrelated",
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": ["unrelated-candidate"],
+                "content_basis": "partial_page",
+                "record_confidence": "low",
+            },
+            {
+                "id": "search-result-fallback",
+                "source_name": "globes",
+                "source_domain": "globes.co.il",
+                "url": "https://www.globes.co.il/news/article-blocked",
+                "canonical_url": "https://www.globes.co.il/news/article-blocked",
+                "publication_datetime": now.isoformat(),
+                "retrieval_datetime": now.isoformat(),
+                "title": "search-result fallback should count classifier warning signals",
+                "category": "not_relevant",
+                "sub_category": None,
+                "summary_one_sentence": "search-result fallback",
+                "annotation_source": "candidate_fallback",
+                "event_candidate_ids": ["blocked-search-result-only"],
+                "content_basis": "search_result_only",
+                "record_confidence": "low",
+                "taxonomy_category_id": "invalid_category",
+                "taxonomy_subcategory_id": "invalid_subcategory",
+            },
+        ],
+    )
+
+    report = build_discovery_diagnostic_report(config=config)
+    partials = report.partial_page_diagnostics
+
+    assert partials.partial_candidate_count == 2
+    assert partials.operational_matching_enabled is True
+    assert partials.operational_records_available is True
+    assert partials.retained_operational_record_candidate_count == 1
+    assert partials.retained_operational_record_count == 1
+    assert partials.metadata_only_partial_candidate_count == 1
+    assert partials.search_result_only_candidate_count == 1
+    assert partials.generic_fetch_partial_candidate_count == 2
+    assert partials.source_adapter_partial_candidate_count == 1
+    assert partials.partial_after_source_adapter_attempt_count == 1
+    assert partials.partial_without_source_adapter_attempt_count == 1
+    assert partials.blocked_generic_fetch_candidate_count == 1
+    assert partials.generic_fetch_error_code_counts[0].model_dump(mode="json") == {
+        "name": "generic_fetch_http_403",
+        "count": 1,
+    }
+    assert partials.classifier_warning_signals.candidate_fallback_record_count == 3
+    assert partials.classifier_warning_signals.partial_page_fallback_record_count == 1
+    assert partials.classifier_warning_signals.search_result_only_fallback_record_count == 2
+    assert partials.classifier_warning_signals.low_confidence_fallback_record_count == 2
+    assert partials.classifier_warning_signals.invalid_taxonomy_pair_record_count == 1
+    assert partials.classifier_warning_signals.partial_page_fallback_without_taxonomy_count == 1
+    rendered = render_discovery_diagnostic_report(report)
+    assert "Partial pages" in rendered
+    assert "operational_matching=enabled" in rendered
+    assert "metadata_only_partial_candidates=1" in rendered
+    assert "partial_after_source_adapter_attempts=1" in rendered
+    assert "partial_attempt_kinds: generic_fetch=2, source_adapter=1" in rendered
+    assert "partial_attempt_sources: generic_fetch=2, unknown_source_adapter=1" in rendered
+    assert "classifier_signals candidate_fallback_records=3" in rendered
+
+
+def test_partial_page_diagnostics_mark_operational_counts_as_unmeasured_when_skipped(
+    tmp_path: Path,
+) -> None:
+    """Skipped operational matching should not masquerade as metadata-only evidence."""
+    now = datetime.now(UTC)
+    config = Config(store={"state_root": tmp_path})
+    candidate = _candidate(
+        "partial-skipped",
+        url="https://www.globes.co.il/news/article-skipped",
+        discovered_via=["brave"],
+        status=CandidateStatus.PARTIALLY_SCRAPED,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now,
+        content_basis=ContentBasis.PARTIAL_PAGE,
+    )
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        candidates_override=[candidate],
+        attempts_override=[],
+        include_operational_matches=False,
+    )
+    partials = report.partial_page_diagnostics
+
+    assert partials.operational_matching_enabled is False
+    assert partials.retained_operational_record_candidate_count == 0
+    assert partials.retained_operational_record_count == 0
+    assert partials.metadata_only_partial_candidate_count == 0
+    assert "operational_matching=skipped" in render_discovery_diagnostic_report(report)
+
+
+def test_discovery_diagnostic_report_treats_event_id_only_operational_rows_as_available(
+    tmp_path: Path,
+) -> None:
+    """Operational availability should not depend on canonical_url presence."""
+    now = datetime.now(UTC)
+    config = Config(
+        store={"state_root": tmp_path},
+        operational={
+            "provider": OperationalProvider.LOCAL_JSON,
+            "root_dir": tmp_path / "operational",
+        },
+    )
+    candidate = _candidate(
+        "event-id-only",
+        url="https://www.globes.co.il/news/event-id-only",
+        discovered_via=["brave"],
+        status=CandidateStatus.PARTIALLY_SCRAPED,
+        first_seen_at=now - timedelta(days=1),
+        last_seen_at=now,
+        content_basis=ContentBasis.PARTIAL_PAGE,
+    )
+    LocalJsonOperationalStore(tmp_path / "operational").upsert_records(
+        DatasetName.NEWS_ITEMS.value,
+        [
+            {
+                "id": "event-id-only-row",
+                "publication_datetime": now.isoformat(),
+                "event_candidate_ids": ["event-id-only"],
+                "annotation_source": "candidate_fallback",
+                "content_basis": "partial_page",
+            }
+        ],
+    )
+
+    report = build_discovery_diagnostic_report(
+        config=config,
+        candidates_override=[candidate],
+        attempts_override=[],
+    )
+
+    assert report.operational_records_available is True
+    assert report.candidate_conversion.operational_record_matches == 1
+    assert report.partial_page_diagnostics.operational_records_available is True
+    assert report.partial_page_diagnostics.retained_operational_record_candidate_count == 1
+    assert (
+        "No operational records were available for candidate-to-news-item matching."
+        not in report.notes
+    )
+
+
+def test_record_helpers_handle_enum_blank_and_missing_taxonomy_values() -> None:
+    """Operational helper predicates should handle typed and incomplete rows."""
+    now = datetime.now(UTC)
+
+    assert _record_content_basis({"content_basis": ContentBasis.PARTIAL_PAGE}) == "partial_page"
+    assert _record_content_basis({"content_basis": ""}) == ""
+    assert _record_content_basis({}) == ""
+    assert (
+        _record_has_valid_taxonomy_pair(
+            {"taxonomy_category_id": None, "taxonomy_subcategory_id": "missing"}
+        )
+        is False
+    )
+    assert (
+        _partial_attempt_source_label(
+            ScrapeAttempt(
+                candidate_id="source-named",
+                started_at=now,
+                finished_at=now,
+                attempt_kind=ScrapeAttemptKind.SOURCE_ADAPTER,
+                fetch_status=FetchStatus.PARTIAL,
+                source_adapter_name="mako",
+            )
+        )
+        == "mako"
+    )
 
 
 def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(
