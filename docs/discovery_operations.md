@@ -645,6 +645,39 @@ taxonomy-pair rejection remain unchanged. Do not broaden this into prompt change
 changes, queue behavior changes, scrape behavior changes, scrape-cap changes, or source-family
 expansion.
 
+After `CLASSIFIER-PR-PARSE-FAILURE-EVIDENCE-INTERPRETATION`, the first post-capture bounded Phase
+C January 1-7 evidence pass used the same operator-local Brave+Exa/no-Google config and the same
+Chrome-CDP scrape shape under
+`data/may_26_followup/20260514T202923Z/`. The inspected artifacts were:
+
+- `state/news_items/backfill_scrape/logs/2026-05-14T20-38-09-972334Z.json`
+- `state/news_items/backfill_scrape/logs/2026-05-14T20-38-09-972334Z.summary.json`
+- `artifacts/diagnose_discovery_after_scrape_brave_exa_chrome_cdp.json`
+
+The scrape drain selected 100 fallback candidates, recorded 158 scrape attempts, retained 26
+candidate-fallback operational rows, left 3,139 eligible candidates, and stopped at
+`budget_cap_reached`. Both full and compact debug payloads reported identical classifier warning
+counts: `parse_failure_count=5`, `invalid_taxonomy_pair_count=2`,
+`invalid_legacy_pair_count=0`, and `relevant_without_usable_taxonomy_count=0` in both
+`classifier_summary.warning_counts` and `fallback_classifier_summary.warning_counts`.
+
+The parse-failure diagnostics were also identical in both summary objects. All five failures were
+`object_like_non_json`; every sample was one line, had `starts_with_code_fence=false` and
+`ends_with_code_fence=false`, used `json_error_kind=missing_property_name`, and pointed to
+`json_error_position=1`, line 1, column 2. The bounded shape signatures all began with a
+double-opening object shape such as `{{"AAAAAAAA": ...`, which suggests an extra wrapper or
+duplicated opening brace pattern. The current sanitized evidence does not preserve a tail
+signature, brace-balance signal, or enough wrapper metadata to prove that simply trimming braces
+would always recover a valid classifier object without accepting ambiguous pseudo-JSON.
+
+Parser recovery therefore remains deferred. The observed category is not safely recoverable from
+the current artifact shape alone; it is also not evidence for prompt changes, taxonomy validity
+changes, legacy taxonomy changes, queue behavior changes, scrape candidate selection changes,
+generic fetch changes, browser/CDP scraper changes, scrape-cap changes, source-family support, or
+source-targeted query fanout. The next bounded PR should slightly broaden sanitized shape capture,
+for example with tail character-class signature and object-wrapper/balance indicators, before any
+fixture-backed parser recovery decision.
+
 ## One-Time 90-Day Re-Scan
 
 `C-8` does not add a dedicated workflow. The catch-up run uses the existing backfill jobs with the

@@ -97,6 +97,11 @@ Planned future datasets:
   `fallback_classifier_summary.parse_failure_diagnostics`; compact summaries retain the same
   bounded category counts, sanitized JSON error kinds, and structural samples without storing raw
   classifier response text, article text, secrets, or generated data artifacts
+- Interprets the first post-capture bounded Phase C parse-failure evidence pass: five fallback
+  parse failures across 100 fallback classifier inputs were all `object_like_non_json`, with
+  one-line, no-code-fence samples and `missing_property_name` at line 1 column 2, so parser recovery
+  remains deferred until a follow-up captures slightly richer sanitized structure such as tail shape
+  or wrapper/balance evidence
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking

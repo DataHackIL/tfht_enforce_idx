@@ -375,3 +375,97 @@ evidence for the next bounded robustness decision only. This slice does not chan
 prompts, parser recovery behavior, taxonomy validity policy, legacy taxonomy policy, queue
 fairness, scrape candidate selection, generic fetch behavior, browser/CDP scraping, scrape caps,
 source-family support, or source-targeted query fanout.
+
+## 2026-05-14 Addendum: Parse-Failure Evidence Interpretation
+
+`CLASSIFIER-PR-PARSE-FAILURE-EVIDENCE-INTERPRETATION` found no existing post-PR #131 generated
+artifact under `data/may_26_followup/` with persisted
+`classifier_summary.parse_failure_diagnostics` and
+`fallback_classifier_summary.parse_failure_diagnostics`, so it generated one new bounded Phase C
+January 1-7 pass. The generated local evidence root is
+`data/may_26_followup/20260514T202923Z/`; generated artifacts remain untracked.
+
+The run reused the tracked Brave+Exa/no-Google config, `agents/news/local_search_brave_exa.yaml`,
+and a temporary Chrome-CDP endpoint at `http://127.0.0.1:9222`. It did not broaden the date window,
+source/query scope, search-engine set, queue policy, scrape cap, scraper behavior, source-family
+support, or source-targeted query fanout.
+
+Exact inspected artifacts:
+
+- Discovery log:
+  `data/may_26_followup/20260514T202923Z/logs/backfill_discover_2026_01_01_07_brave_exa.log`
+- Post-discovery diagnostic:
+  `data/may_26_followup/20260514T202923Z/artifacts/diagnose_discovery_after_discover_brave_exa.json`
+- Scrape log:
+  `data/may_26_followup/20260514T202923Z/logs/backfill_scrape_2026_01_01_07_brave_exa_chrome_cdp.log`
+- Full scrape debug payload:
+  `data/may_26_followup/20260514T202923Z/state/news_items/backfill_scrape/logs/2026-05-14T20-38-09-972334Z.json`
+- Compact scrape debug summary:
+  `data/may_26_followup/20260514T202923Z/state/news_items/backfill_scrape/logs/2026-05-14T20-38-09-972334Z.summary.json`
+- Post-scrape discovery diagnostic:
+  `data/may_26_followup/20260514T202923Z/artifacts/diagnose_discovery_after_scrape_brave_exa_chrome_cdp.json`
+
+The run reported:
+
+| Figure | Value |
+| --- | ---: |
+| Persisted candidates | 3,734 |
+| Fallback classifier inputs | 100 |
+| Attempted candidates | 100 |
+| Persisted scrape attempts | 158 |
+| Provisional operational rows retained | 26 |
+| Partial pages | 97 |
+| Scrape failures | 3 |
+| Remaining eligible candidates | 3,139 |
+| Inferred stop reason | `budget_cap_reached` |
+
+Both the full debug payload and compact summary recorded the same warning counters:
+
+| Counter | Count | Rate |
+| --- | ---: | ---: |
+| `classifier_summary.warning_counts.parse_failure_count` | 5 | 5% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 2 | 2% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.parse_failure_count` | 5 | 5% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 2 | 2% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+
+Both `classifier_summary.parse_failure_diagnostics.category_counts` and
+`fallback_classifier_summary.parse_failure_diagnostics.category_counts` were identical:
+
+| Category | Count |
+| --- | ---: |
+| `empty_response` | 0 |
+| `json_decode_error` | 0 |
+| `non_object_json_array` | 0 |
+| `non_object_json_scalar` | 0 |
+| `object_like_non_json` | 5 |
+| `truncated_response` | 0 |
+| `other_parse_failure` | 0 |
+
+The five retained sanitized samples all had:
+
+- `category=object_like_non_json`
+- `line_count=1`
+- `json_error_kind=missing_property_name`
+- `json_error_position=1`, `json_error_line=1`, `json_error_column=2`
+- `starts_with_code_fence=false`, `ends_with_code_fence=false`
+- `response_length` between 153 and 177 characters
+- `normalized_length` equal to `response_length`
+- a bounded shape signature beginning with a double-opening object pattern such as
+  `{{"AAAAAAAA": ...`
+
+Interpretation: the evidence is consistent with repeated object-like outputs that start with an
+extra object opener or wrapper. It does not show markdown-fenced JSON, array-wrapped single objects,
+truncated responses, empty responses, or scalar JSON. However, the current sanitized sample stores
+only the leading 80-character shape signature, not a tail signature, brace balance, or explicit
+wrapper indicator. That makes the observed category suggestive but not safely recoverable yet.
+
+Parser recovery is therefore not recommended in this slice. A future bounded PR should slightly
+broaden sanitized capture with tail shape and wrapper/balance indicators, then decide whether a tiny
+fixture-backed recovery for a double-wrapped object is justified. This interpretation does not
+change classifier prompts, taxonomy validity policy, legacy taxonomy policy, queue behavior, scrape
+candidate selection, generic fetch behavior, browser/CDP scraper behavior, scrape caps,
+source-family support, or source-targeted query fanout.
