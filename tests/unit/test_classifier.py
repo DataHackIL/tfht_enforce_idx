@@ -160,11 +160,12 @@ class TestClassifierParsing:
             "invalid_taxonomy_pair_count": 0,
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 0,
         }
         assert classifier.parse_failure_diagnostics["category_counts"]["object_like_non_json"] == 1
 
-    def test_double_open_object_like_failure_records_wrapper_structure(self) -> None:
-        """Double-wrapped object-like failures should expose structure without recovery."""
+    def test_double_wrapped_valid_taxonomy_json_is_recovered(self) -> None:
+        """The proven balanced double-wrapper shape should classify through normal validation."""
         classifier = Classifier(api_key="test-key")
         response = (
             '{{"relevant": true, "enforcement_related": true, '
@@ -175,32 +176,32 @@ class TestClassifierParsing:
 
         result = classifier._parse_response(response)
 
-        assert result.relevant is False
-        assert result.enforcement_related is False
-        assert result.category == Category.NOT_RELEVANT
-        assert result.confidence == "low"
-        assert classifier.warning_counts["parse_failure_count"] == 1
-        diagnostics = classifier.parse_failure_diagnostics
-        sample = diagnostics["samples"][0]
-        assert diagnostics["category_counts"]["object_like_non_json"] == 1
-        assert sample["leading_brace_count"] == 2
-        assert sample["trailing_brace_count"] == 2
-        assert sample["brace_balance"] == 0
-        assert sample["starts_with_double_open_object"] is True
-        assert sample["ends_with_double_close_object"] is True
-        assert sample["outer_wrapper_candidate"] is True
-        assert sample["inner_object_candidate"] is True
-        assert sample["contains_balanced_inner_object"] is True
-        assert sample["inner_json_object_candidate"] is True
-        assert set(sample) == set(PARSE_FAILURE_SAMPLE_KEYS)
-        assert response not in str(diagnostics)
+        assert result.relevant is True
+        assert result.enforcement_related is True
+        assert result.taxonomy_version == "1"
+        assert result.taxonomy_category_id == "brothels"
+        assert result.taxonomy_subcategory_id == "administrative_closure"
+        assert result.category == Category.BROTHEL
+        assert result.sub_category == SubCategory.CLOSURE
+        assert result.index_relevant is True
+        assert result.confidence == "high"
+        assert classifier.warning_counts == {
+            "parse_failure_count": 0,
+            "invalid_taxonomy_pair_count": 0,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 1,
+        }
+        assert classifier.parse_failure_diagnostics["sample_count"] == 0
 
     def test_pseudo_json_double_wrapper_is_not_inner_json_candidate(self) -> None:
         """Balanced pseudo-JSON should not masquerade as a valid inner object."""
         classifier = Classifier(api_key="test-key")
 
-        classifier._parse_response("{{relevant: true}}")
+        result = classifier._parse_response("{{relevant: true}}")
 
+        assert result.relevant is False
+        assert classifier.warning_counts["parse_failure_count"] == 1
         sample = classifier.parse_failure_diagnostics["samples"][0]
         assert sample["leading_brace_count"] == 2
         assert sample["trailing_brace_count"] == 2
@@ -211,9 +212,9 @@ class TestClassifierParsing:
         assert sample["inner_json_object_candidate"] is False
 
     def test_structural_balance_ignores_braces_inside_json_strings(self) -> None:
-        """Brace balance should not be thrown off by literal braces inside strings."""
+        """Malformed inner JSON should still record quote-aware balanced structure."""
         classifier = Classifier(api_key="test-key")
-        response = '{{"relevant": true, "reason": "literal } brace and escaped \\" quote"}}'
+        response = '{{"relevant": true, "reason": "literal } brace and escaped \\" quote",}}'
 
         classifier._parse_response(response)
 
@@ -222,7 +223,32 @@ class TestClassifierParsing:
         assert sample["outer_wrapper_candidate"] is True
         assert sample["inner_object_candidate"] is True
         assert sample["contains_balanced_inner_object"] is True
-        assert sample["inner_json_object_candidate"] is True
+        assert sample["inner_json_object_candidate"] is False
+
+    def test_double_wrapped_valid_json_with_string_braces_is_recovered(self) -> None:
+        """Quote-aware brace balance should allow proven-shape recovery."""
+        classifier = Classifier(api_key="test-key")
+        response = (
+            '{{"relevant": false, "enforcement_related": false, '
+            '"taxonomy_category_id": null, "taxonomy_subcategory_id": null, '
+            '"reason": "literal } brace and escaped \\" quote", '
+            '"confidence": "high"}}'
+        )
+
+        result = classifier._parse_response(response)
+
+        assert result.relevant is False
+        assert result.enforcement_related is False
+        assert result.category == Category.NOT_RELEVANT
+        assert result.confidence == "high"
+        assert classifier.warning_counts == {
+            "parse_failure_count": 0,
+            "invalid_taxonomy_pair_count": 0,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 1,
+        }
+        assert classifier.parse_failure_diagnostics["sample_count"] == 0
 
     def test_unbalanced_object_like_failure_records_non_recoverable_structure(self) -> None:
         """Unbalanced wrappers should remain rejected and report non-candidate structure."""
@@ -246,6 +272,52 @@ class TestClassifierParsing:
         assert sample["inner_json_object_candidate"] is False
         assert "sk-ant-secret" not in str(diagnostics)
         assert '"secret"' not in str(diagnostics)
+
+    def test_code_fenced_recoverable_double_wrapped_json_is_not_recovered(self) -> None:
+        """Recovery is intentionally narrower than fenced JSON cleanup."""
+        classifier = Classifier(api_key="test-key")
+        response = """```json
+{{"relevant": true, "enforcement_related": true, "taxonomy_category_id": "brothels", "taxonomy_subcategory_id": "administrative_closure", "confidence": "high"}}
+```"""
+
+        result = classifier._parse_response(response)
+
+        assert result.relevant is False
+        assert result.category == Category.NOT_RELEVANT
+        assert result.confidence == "low"
+        assert classifier.warning_counts["parse_failure_count"] == 1
+        diagnostics = classifier.parse_failure_diagnostics
+        assert diagnostics["category_counts"]["object_like_non_json"] == 1
+        sample = diagnostics["samples"][0]
+        assert sample["starts_with_code_fence"] is True
+        assert sample["ends_with_code_fence"] is True
+        assert sample["inner_json_object_candidate"] is True
+
+    def test_double_wrapped_invalid_taxonomy_pair_still_rejects_normally(self) -> None:
+        """Recovery must not bypass taxonomy validity policy."""
+        classifier = Classifier(api_key="test-key")
+        response = (
+            '{{"relevant": true, "enforcement_related": true, '
+            '"taxonomy_category_id": "human_trafficking", '
+            '"taxonomy_subcategory_id": "phenomenon_coverage", '
+            '"confidence": "high"}}'
+        )
+
+        result = classifier._parse_response(response)
+
+        assert result.relevant is False
+        assert result.enforcement_related is False
+        assert result.category == Category.NOT_RELEVANT
+        assert result.taxonomy_category_id is None
+        assert result.taxonomy_subcategory_id is None
+        assert classifier.warning_counts == {
+            "parse_failure_count": 0,
+            "invalid_taxonomy_pair_count": 1,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 1,
+        }
+        assert classifier.parse_failure_diagnostics["sample_count"] == 0
 
     def test_parse_failure_tail_shape_is_bounded_and_sanitized(self) -> None:
         """Tail signatures should expose only bounded structure classes."""
@@ -368,6 +440,7 @@ class TestClassifierParsing:
             "invalid_taxonomy_pair_count": 0,
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 0,
         }
 
     def test_parse_invalid_taxonomy_pair_falls_back_to_not_relevant(self) -> None:
@@ -495,6 +568,7 @@ class TestClassifierParsing:
             "invalid_taxonomy_pair_count": 0,
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 0,
         }
         assert classifier.parse_failure_diagnostics["sample_count"] == 0
         assert all(

@@ -1184,6 +1184,7 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
     classifier.warning_counts = {
         "parse_failure_count": 3,
         "invalid_taxonomy_pair_count": 2,
+        "double_wrapper_recovery_count": 4,
     }
     monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: sources)
     monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
@@ -1231,6 +1232,7 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
         "invalid_taxonomy_pair_count": 2,
         "invalid_legacy_pair_count": 0,
         "relevant_without_usable_taxonomy_count": 0,
+        "double_wrapper_recovery_count": 4,
     }
     assert fallback.debug_payload["fallback_classifier_summary"] == {
         "fallback_classifier_input_count": 1,
@@ -1240,6 +1242,7 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
             "invalid_taxonomy_pair_count": 2,
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 4,
         },
         "parse_failure_diagnostics": {
             "category_counts": {

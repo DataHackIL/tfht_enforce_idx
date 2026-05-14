@@ -141,6 +141,7 @@ _CLASSIFIER_WARNING_COUNT_KEYS = (
     "invalid_taxonomy_pair_count",
     "invalid_legacy_pair_count",
     "relevant_without_usable_taxonomy_count",
+    "double_wrapper_recovery_count",
 )
 _PARSE_FAILURE_SAMPLE_STRING_KEYS = {
     "shape_signature",
@@ -188,7 +189,7 @@ def _mark_classifier_provider_error(
 
 
 def _classifier_warning_counts(classifier: object) -> dict[str, int]:
-    """Read passive classifier parser warning counters when the classifier exposes them."""
+    """Read passive classifier parser warning/recovery counters when exposed."""
     raw_counts = getattr(classifier, "warning_counts", None)
     if callable(raw_counts):
         raw_counts = raw_counts()
@@ -1476,7 +1477,7 @@ def _build_classifier_summary(
 def _normalize_classifier_warning_counts(
     counts: Mapping[str, int] | None,
 ) -> dict[str, int]:
-    """Normalize classifier warning counters into stable summary keys."""
+    """Normalize classifier warning/recovery counters into stable summary keys."""
     if counts is None:
         return dict.fromkeys(_CLASSIFIER_WARNING_COUNT_KEYS, 0)
     normalized: dict[str, int] = {}

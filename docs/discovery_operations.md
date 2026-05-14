@@ -732,13 +732,18 @@ double object braces, had `brace_balance=0`, and set `outer_wrapper_candidate=tr
 `inner_json_object_candidate=true`.
 
 That structure crosses the recovery decision gate established by the capture slice. Parser recovery
-is now justified only as a later fixture-backed, shape-specific PR for balanced double-wrapped
-classifier JSON where trimming exactly one outer wrapper exposes a valid inner JSON object. Recovery
-must remain rejected for pseudo-JSON, balanced-but-not-JSON inner text, unbalanced wrappers, mixed
-parse-failure categories, non-object JSON, code-fenced malformed JSON, and invalid taxonomy output.
-The interpretation does not itself change classifier prompts, parser behavior, taxonomy validity
-policy, legacy taxonomy policy, queue behavior, scrape candidate selection, generic fetch behavior,
-browser/CDP scraper behavior, scrape caps, source-family support, source-targeted query fanout, or
+is implemented only as a fixture-backed, shape-specific path for balanced double-wrapped classifier
+JSON where trimming exactly one outer wrapper exposes a valid inner JSON object. Recovered objects
+then pass through the same classifier validation and taxonomy handling as ordinary parsed objects,
+and each recovery increments `double_wrapper_recovery_count` in the existing classifier summary
+counters so future evidence passes can distinguish recovered outputs from ordinary valid JSON.
+Invalid taxonomy pairs inside recovered objects still increment the invalid-taxonomy warning
+counter and are rejected. Recovery remains rejected for pseudo-JSON, balanced-but-not-JSON inner
+text, unbalanced wrappers, mixed parse-failure categories, non-object JSON, code-fenced malformed
+JSON, and invalid taxonomy output. The implementation does not change classifier prompts, taxonomy
+validity policy, legacy taxonomy policy, queue behavior, scrape candidate selection, generic fetch
+behavior, browser/CDP scraper behavior, scrape caps, source-family support, source-targeted
+query fanout, or
 generated-data artifact tracking.
 
 ## One-Time 90-Day Re-Scan

@@ -351,6 +351,7 @@ class TestFetchAndClassifyHelpers:
             classifier_warning_counts={
                 "parse_failure_count": 2,
                 "invalid_taxonomy_pair_count": 1,
+                "double_wrapper_recovery_count": 3,
             },
             classifier_parse_failure_diagnostics={
                 "category_counts": {
@@ -393,6 +394,7 @@ class TestFetchAndClassifyHelpers:
             "invalid_taxonomy_pair_count": 1,
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 3,
         }
         assert classifier_summary["parse_failure_diagnostics"] == {
             "category_counts": {
@@ -1915,6 +1917,7 @@ class TestRunPipelineAsync:
         classifier.warning_counts = {
             "parse_failure_count": 2,
             "invalid_taxonomy_pair_count": 1,
+            "double_wrapper_recovery_count": 3,
         }
         classifier.parse_failure_diagnostics = {
             "category_counts": {
@@ -1995,6 +1998,7 @@ class TestRunPipelineAsync:
             "invalid_taxonomy_pair_count": 1,
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
+            "double_wrapper_recovery_count": 3,
         }
         assert (
             result.debug_payload["classifier_summary"]["parse_failure_diagnostics"][
@@ -2010,6 +2014,7 @@ class TestRunPipelineAsync:
                 "invalid_taxonomy_pair_count": 1,
                 "invalid_legacy_pair_count": 0,
                 "relevant_without_usable_taxonomy_count": 0,
+                "double_wrapper_recovery_count": 3,
             },
             "parse_failure_diagnostics": {
                 "category_counts": {
@@ -3537,6 +3542,7 @@ class TestRunPipeline:
                     "warning_counts": {
                         "parse_failure_count": 2,
                         "invalid_taxonomy_pair_count": 1,
+                        "double_wrapper_recovery_count": 3,
                     },
                 },
                 "problems": {"all_unseen_rejected": True},
@@ -3571,6 +3577,7 @@ class TestRunPipeline:
         assert summary_payload["classifier_summary"]["warning_counts"] == {
             "parse_failure_count": 2,
             "invalid_taxonomy_pair_count": 1,
+            "double_wrapper_recovery_count": 3,
         }
 
     def test_run_job_from_config_best_effort_debug_write_still_persists_snapshot(

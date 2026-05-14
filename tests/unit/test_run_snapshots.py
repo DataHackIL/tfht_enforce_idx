@@ -149,6 +149,7 @@ class TestRunSnapshots:
                         "invalid_taxonomy_pair_count": 0,
                         "invalid_legacy_pair_count": 0,
                         "relevant_without_usable_taxonomy_count": 0,
+                        "double_wrapper_recovery_count": 2,
                     },
                     "parse_failure_diagnostics": {
                         "category_counts": {"object_like_non_json": 1},
@@ -214,6 +215,7 @@ class TestRunSnapshots:
                 "invalid_taxonomy_pair_count": 0,
                 "invalid_legacy_pair_count": 0,
                 "relevant_without_usable_taxonomy_count": 0,
+                "double_wrapper_recovery_count": 2,
             },
             "parse_failure_diagnostics": {
                 "category_counts": {"object_like_non_json": 1},
