@@ -703,6 +703,44 @@ show repeat failures that are balanced, consistently double-wrapped object candi
 wrappers, mixed parse-failure categories, or no repeated parse failures should keep recovery
 deferred.
 
+After `CLASSIFIER-PR-PARSE-FAILURE-STRUCTURE-INTERPRETATION`, the next bounded Phase C January 1-7
+evidence pass used the same operator-local Brave+Exa/no-Google config and a fresh generated state
+root under `data/may_26_followup/20260514T222732Z/`. The run persisted 3,748 candidates, selected
+100 fallback classifier inputs during the scrape drain, recorded 159 scrape attempts, retained 30
+candidate-fallback operational rows, left 3,152 eligible candidates, and stopped at
+`budget_cap_reached`. The Chrome-CDP endpoint was reachable during setup, but later source-adapter
+attempts reported `ECONNREFUSED`; interpret this pass as valid classifier-output structure
+evidence, not as clean browser-CDP source-adapter health evidence.
+
+Both the full scrape debug payload and the compact summary recorded identical fallback warning
+counts: `parse_failure_count=5`, `invalid_taxonomy_pair_count=1`,
+`invalid_legacy_pair_count=0`, and `relevant_without_usable_taxonomy_count=0` across 100 fallback
+classifier inputs. The post-scrape diagnostic reported 30 retained candidate-fallback operational
+rows, all low-confidence fallback rows, with `invalid_taxonomy_pair_record_count=0`,
+`fallback_record_without_taxonomy_count=0`, and `partial_page_fallback_without_taxonomy_count=0`.
+The parse and invalid-taxonomy warnings therefore describe pre-retention classifier-output losses,
+not corrupted retained operational rows.
+
+Both `classifier_summary.parse_failure_diagnostics.category_counts` and
+`fallback_classifier_summary.parse_failure_diagnostics.category_counts` reported the same shape:
+all five failures were `object_like_non_json`, with zero empty responses, JSON arrays, JSON
+scalars, truncated responses, or other parse-failure categories. Every retained sanitized sample was
+one line, had `json_error_kind=missing_property_name` at line 1, column 2, did not start or end with
+a Markdown code fence, had equal `response_length` and `normalized_length`, began and ended with
+double object braces, had `brace_balance=0`, and set `outer_wrapper_candidate=true`,
+`inner_object_candidate=true`, `contains_balanced_inner_object=true`, and
+`inner_json_object_candidate=true`.
+
+That structure crosses the recovery decision gate established by the capture slice. Parser recovery
+is now justified only as a later fixture-backed, shape-specific PR for balanced double-wrapped
+classifier JSON where trimming exactly one outer wrapper exposes a valid inner JSON object. Recovery
+must remain rejected for pseudo-JSON, balanced-but-not-JSON inner text, unbalanced wrappers, mixed
+parse-failure categories, non-object JSON, code-fenced malformed JSON, and invalid taxonomy output.
+The interpretation does not itself change classifier prompts, parser behavior, taxonomy validity
+policy, legacy taxonomy policy, queue behavior, scrape candidate selection, generic fetch behavior,
+browser/CDP scraper behavior, scrape caps, source-family support, source-targeted query fanout, or
+generated-data artifact tracking.
+
 ## One-Time 90-Day Re-Scan
 
 `C-8` does not add a dedicated workflow. The catch-up run uses the existing backfill jobs with the
