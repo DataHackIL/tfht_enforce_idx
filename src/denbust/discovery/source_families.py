@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from denbust.discovery.candidate_filters import match_domain, normalize_domain
+from denbust.discovery.candidate_filters import normalize_domain
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,8 @@ class SourceFamily:
     name: str
     domains: frozenset[str]
     discovery_domain: str
+    include_subdomains: bool = True
+    source_targeted_discovery: bool = True
 
 
 GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
@@ -28,21 +30,28 @@ GENERIC_FETCH_SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
         domains=frozenset({"themarker.com"}),
         discovery_domain="www.themarker.com",
     ),
+    SourceFamily(
+        name="israelhayom",
+        domains=frozenset({"israelhayom.co.il"}),
+        discovery_domain="www.israelhayom.co.il",
+        include_subdomains=False,
+        source_targeted_discovery=False,
+    ),
 )
-
-_GENERIC_FETCH_DOMAIN_TO_SOURCE: dict[str, str] = {
-    domain: family.name for family in GENERIC_FETCH_SOURCE_FAMILIES for domain in family.domains
-}
-GENERIC_FETCH_SOURCE_DOMAINS: frozenset[str] = frozenset(_GENERIC_FETCH_DOMAIN_TO_SOURCE)
 
 
 def source_family_name_for_domain(domain: str | None) -> str | None:
     """Return the known generic-fetch source family for a domain."""
     normalized = normalize_domain(domain)
-    matched = match_domain(normalized, GENERIC_FETCH_SOURCE_DOMAINS)
-    if matched is None:
+    if normalized is None:
         return None
-    return _GENERIC_FETCH_DOMAIN_TO_SOURCE[matched]
+    for family in GENERIC_FETCH_SOURCE_FAMILIES:
+        for family_domain in family.domains:
+            if normalized == family_domain or (
+                family.include_subdomains and normalized.endswith(f".{family_domain}")
+            ):
+                return family.name
+    return None
 
 
 def source_family_name_for_url(url: str | None) -> str | None:
@@ -54,4 +63,8 @@ def source_family_name_for_url(url: str | None) -> str | None:
 
 def generic_fetch_source_domains() -> list[tuple[str, str]]:
     """Return source-targeted discovery domains for generic-fetch families."""
-    return [(family.name, family.discovery_domain) for family in GENERIC_FETCH_SOURCE_FAMILIES]
+    return [
+        (family.name, family.discovery_domain)
+        for family in GENERIC_FETCH_SOURCE_FAMILIES
+        if family.source_targeted_discovery
+    ]

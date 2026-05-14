@@ -109,3 +109,11 @@ operational rows, how many stayed metadata-only when operational matching is ena
 partial extraction came from generic fetch, a source adapter, or generic fallback after a
 source-adapter attempt, which domains/source hints dominate partials, and which persisted
 current-candidate classifier/taxonomy warning signals affect conversion interpretation.
+
+For `SRC-PR-ISRAELHAYOM`, fresh diagnostics over the same persisted state showed
+`israelhayom.co.il` as a repeated source suggestion with 25 candidate-only main-domain URLs across
+two runs. Direct candidate-state inspection showed 33 Israel Hayom-family candidate-only URLs and no
+Israel Hayom attempted scrape or partial-page evidence in the bounded drain. That evidence supports
+bounded main-domain generic-fetch source-family recognition, while leaving source-targeted
+discovery/backfill fanout, Israel Hayom subdomains, browser scraper work, queue fairness,
+Mako/Haaretz Chrome-CDP behavior, and unrelated source families out of scope.
