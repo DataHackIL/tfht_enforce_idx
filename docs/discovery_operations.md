@@ -324,6 +324,30 @@ evidence before adding Israel Hayom source-targeted query fanout, subdomain matc
 browser/CDP scraper. This slice intentionally does not change queue fairness, prioritization,
 scrape caps, Mako/Haaretz browser behavior, Kan/News1 coverage, or broader Israeli source coverage.
 
+After `SRC-PR-KAN`, search-discovered official Kan news article paths have low-confidence
+generic-fetch diagnostic labeling. Fresh diagnostics and candidate-state inspection over the January
+1-7 persisted state showed two official `kan.org.il/content/kan-news/` candidate-only URLs, one
+still scrape-eligible official Kan candidate after the bounded drain, and no official Kan
+attempted-scrape or partial-page evidence. The same evidence also showed unrelated Kan-named local
+domains and social posts, so this slice does not broaden to those domains. It:
+
+- recognizes official Kan news article URLs under `kan.org.il/content/kan-news/` as the `kan`
+  source family for diagnostic/fallback-provenance labeling;
+- labels generic fallback provenance as `kan` when search engines found a matching official Kan news
+  article URL and generic fetch later recovers usable metadata;
+- leaves unrelated Kan-named domains such as `kanisrael.co.il`, `kan-ashkelon.co.il`, and Facebook
+  posts linking to those domains ungrouped until separate evidence justifies them;
+- leaves non-article `kan.org.il` pages such as live, podcast, and homepage paths ungrouped;
+- does not emit source-targeted discovery/backfill fanout for Kan until stronger repeated backlog or
+  extraction evidence justifies spending recurring query budget;
+- keeps Kan eligible for source-suggestion diagnostics when candidate-only or weak conversion
+  evidence still shows backlog pressure.
+
+Future work should inspect fresh `partial_page_diagnostics` and attempted Kan scrape evidence before
+adding Kan source-targeted query fanout, unrelated Kan-named domains, non-article Kan pages, or any
+browser/CDP scraper. This slice intentionally does not change queue fairness, prioritization, scrape
+caps, Mako/Haaretz browser behavior, News1 coverage, or broader Israeli source coverage.
+
 ## GitHub Actions Run Path
 
 The operational workflow split is:

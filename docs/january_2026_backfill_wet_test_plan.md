@@ -405,8 +405,15 @@ PRs, for seven planned follow-ups total:
    source-targeted discovery/backfill queries remain out of scope until stronger extraction
    evidence exists.
 6. `SRC-PR-KAN` - source-family expansion.
-   Add or improve Kan support if the broader search corpus keeps surfacing relevant candidates that
-   current generic fetch cannot handle well.
+   Implemented as low-confidence generic-fetch diagnostic labeling, not as a browser scraper or
+   source-targeted query expansion. Fresh diagnostics and candidate-state inspection over the
+   January 1-7 persisted state showed two official `kan.org.il` candidate-only URLs under
+   `/content/kan-news/` and no attempted-scrape or partial-page evidence. Official Kan news article
+   paths can now be mapped to a source-family label for diagnostics/fallback provenance when future
+   generic fetches recover metadata. Unrelated Kan-named domains such as `kanisrael.co.il`,
+   `kan-ashkelon.co.il`, Facebook posts linking to those domains, and non-article `kan.org.il`
+   pages remain out of scope, as do recurring source-targeted discovery/backfill queries and any
+   browser/source-native scraper.
 7. `SRC-PR-NEWS1` - source-family expansion.
    Add or improve News1 support if repeated wet-test slices show relevant candidates and generic
    fetch/metadata extraction is insufficient.

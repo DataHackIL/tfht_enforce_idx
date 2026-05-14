@@ -25,7 +25,7 @@ from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     order_scrape_eligible_candidates,
 )
-from denbust.discovery.source_families import source_family_name_for_domain
+from denbust.discovery.source_families import source_family_name_for_url
 from denbust.discovery.state_paths import write_metrics_snapshot
 from denbust.news_items.normalize import canonicalize_news_url
 from denbust.ops.factory import create_operational_store
@@ -1051,7 +1051,7 @@ def _candidate_source(candidate: PersistentCandidate) -> str:
     for producer in candidate.discovered_via:
         if producer not in _SEARCH_ENGINE_NAMES:
             return producer
-    family_name = source_family_name_for_domain(candidate.domain)
+    family_name = source_family_name_for_url(str(candidate.current_url))
     if family_name is not None:
         return family_name
     return candidate.domain or "unknown"

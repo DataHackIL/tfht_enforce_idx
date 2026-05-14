@@ -796,7 +796,7 @@ def test_candidate_source_falls_back_to_non_search_producer_then_domain() -> Non
 
 
 def test_candidate_source_maps_supported_generic_source_family_domains() -> None:
-    """Search-only Globes/TheMarker candidates should be grouped by source family."""
+    """Search-only generic-fetch candidates should be grouped by source family."""
     now = datetime(2026, 5, 3, 15, 31, tzinfo=UTC)
     globes = _candidate(
         "globes",
@@ -814,9 +814,27 @@ def test_candidate_source_maps_supported_generic_source_family_domains() -> None
         first_seen_at=now,
         last_seen_at=now,
     ).model_copy(update={"source_hints": []})
+    kan = _candidate(
+        "kan",
+        url="https://www.kan.org.il/content/kan-news/local/296141/",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
+    kan_non_article = _candidate(
+        "kan-non-article",
+        url="https://www.kan.org.il/live/",
+        discovered_via=["brave"],
+        status=CandidateStatus.NEW,
+        first_seen_at=now,
+        last_seen_at=now,
+    ).model_copy(update={"source_hints": []})
 
     assert _candidate_source(globes) == "globes"
     assert _candidate_source(themarker) == "themarker"
+    assert _candidate_source(kan) == "kan"
+    assert _candidate_source(kan_non_article) == "www.kan.org.il"
 
 
 def test_candidate_source_scans_all_source_hints_before_domain_fallback() -> None:
