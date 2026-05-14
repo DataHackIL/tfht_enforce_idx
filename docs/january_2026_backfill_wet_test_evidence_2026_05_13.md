@@ -234,3 +234,26 @@ breakdowns for low-confidence fallback rows in `partial_page_diagnostics.classif
 It does not change classifier prompts or policy, taxonomy validity, queue fairness, scrape
 candidate selection, generic fetch behavior, browser/CDP scraping, source-family support, or source
 targeted query fanout.
+
+## 2026-05-14 Addendum: Run-Level Classifier Warning Artifacts
+
+`CLASSIFIER-PR-RUN-WARNING-ARTIFACTS` addresses the separate run-log-only warning gap from the same
+fresh Phase C bounded drain. The bounded implementation path is the existing run debug summary
+artifact, not discovery diagnostics: parse failures and invalid taxonomy pairs occur inside the
+classifier parser before there is necessarily a durable candidate or operational-record identity to
+attach to.
+
+Run debug summaries now persist `classifier_summary.warning_counts` with counts for:
+
+- `parse_failure_count`
+- `invalid_taxonomy_pair_count`
+- `invalid_legacy_pair_count`
+- `relevant_without_usable_taxonomy_count`
+
+Fallback-only `scrape_candidates` and `backfill_scrape` runs also emit a compact scrape debug
+payload so retained provisional candidate-fallback rows do not leave classifier parser warnings
+visible only in process logs. The compact payload includes a dedicated `fallback_classifier_summary`
+for fallback classifier input counts, retained fallback operational-record counts, and warning
+counts. This is diagnostic persistence only. It does not change classifier prompts, taxonomy
+validity, classifier policy, queue fairness, scrape candidate selection, generic fetch behavior,
+browser/CDP scraping, source-family support, or source-targeted query fanout.

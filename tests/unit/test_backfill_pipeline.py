@@ -1180,8 +1180,13 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
     """Backfill scrape should support fallback-only and ingest-processing paths with final batch updates."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     sources = [FakeSource("ynet")]
+    classifier = MagicMock()
+    classifier.warning_counts = {
+        "parse_failure_count": 3,
+        "invalid_taxonomy_pair_count": 2,
+    }
     monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: sources)
-    monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+    monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: classifier)
     monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
     monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
 
@@ -1218,6 +1223,25 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
         "fallback retention completed with 1 provisional row(s) for backfill batch batch-1"
     )
     assert "fallback_operational_records=1" in fallback.warnings
+    assert fallback.debug_payload is not None
+    assert fallback.debug_payload["schema_version"] == "news_items.scrape_candidates.debug.v1"
+    assert fallback.debug_payload["batch_id"] == "batch-1"
+    assert fallback.debug_payload["classifier_summary"]["warning_counts"] == {
+        "parse_failure_count": 3,
+        "invalid_taxonomy_pair_count": 2,
+        "invalid_legacy_pair_count": 0,
+        "relevant_without_usable_taxonomy_count": 0,
+    }
+    assert fallback.debug_payload["fallback_classifier_summary"] == {
+        "fallback_classifier_input_count": 1,
+        "fallback_operational_record_count": 1,
+        "warning_counts": {
+            "parse_failure_count": 3,
+            "invalid_taxonomy_pair_count": 2,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+        },
+    }
     assert fallback_store.get_backfill_batch("batch-1") is not None
 
     processed_store = build_store(tmp_path / "processed")

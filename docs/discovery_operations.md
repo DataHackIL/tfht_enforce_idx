@@ -280,9 +280,9 @@ many `partial_page` candidates:
   current-candidate fallback operational rows: fallback rows, partial fallback rows, low-confidence
   fallback rows, missing taxonomy pairs, invalid taxonomy pairs, fallback confidence distributions,
   and low-confidence fallback breakdowns by source, domain, and taxonomy label. Unrelated
-  historical fallback rows in the operational store are ignored. Run-level classifier parse warnings
-  that are not persisted in candidate or operational state still need the matching run log or debug
-  summary.
+  historical fallback rows in the operational store are ignored. Run-level classifier parser
+  warnings are tracked separately in the run debug summary because they are emitted before any
+  candidate or operational record identity exists.
 
 This diagnostic slice is interpretation-only. It does not change queue fairness, source
 prioritization, scrape caps, generic fetch behavior, or source-family scraper support.
@@ -303,6 +303,18 @@ to specific source labels, domains, taxonomy labels, or confidence fields. The s
 This is still diagnostic-only. It does not change classifier prompts, taxonomy policy, queue
 fairness, source prioritization, scrape candidate selection, generic fetch behavior,
 browser/CDP scraping, or source-family support.
+
+After `CLASSIFIER-PR-RUN-WARNING-ARTIFACTS`, scrape/backfill/ingest run debug summaries include
+`classifier_summary.warning_counts` with stable counters for classifier JSON parse failures, invalid
+taxonomy pairs, invalid legacy category/sub-category pairs, and relevant responses without a usable
+taxonomy or legacy category. Fallback-only `scrape_candidates` and `backfill_scrape` drains now emit
+a compact scrape debug payload, so a run that only retains provisional candidate-fallback rows still
+has a `.summary.json` artifact carrying those warning counts. Those fallback-only payloads also
+include `fallback_classifier_summary` with fallback classifier input counts, retained fallback
+operational-record counts, and the same warning counters so operators do not have to interpret
+fallback classification through zero full-article counts. These fields are diagnostic-only: they do
+not alter classifier prompts, taxonomy validity rules, candidate selection, queue fairness, generic
+fetch behavior, browser/CDP scraping, or source-family support.
 
 After `SRC-PR-GLOBES-THEMARKER`, search-discovered Globes and TheMarker article pages have bounded
 generic-fetch source-family support. The January 1-7 evidence showed Globes as a repeated

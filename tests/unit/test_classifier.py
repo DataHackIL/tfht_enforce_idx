@@ -219,6 +219,12 @@ class TestClassifierParsing:
         assert result.category == Category.BROTHEL
         assert result.sub_category == SubCategory.CLOSURE
         assert result.index_relevant is True
+        assert classifier.warning_counts == {
+            "parse_failure_count": 0,
+            "invalid_taxonomy_pair_count": 0,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+        }
 
     def test_parse_invalid_taxonomy_pair_falls_back_to_not_relevant(self) -> None:
         """Taxonomy pairs outside the packaged taxonomy should be rejected."""
@@ -239,6 +245,49 @@ class TestClassifierParsing:
         assert result.taxonomy_subcategory_id is None
         assert result.category == Category.NOT_RELEVANT
         assert result.sub_category is None
+        assert classifier.warning_counts["invalid_taxonomy_pair_count"] == 1
+
+    def test_parse_warning_counts_accumulate_parse_and_invalid_taxonomy_warnings(self) -> None:
+        """Parser warnings should be counted without changing returned classifications."""
+        classifier = Classifier(api_key="test-key")
+
+        parse_failure = classifier._parse_response("not-json")
+        invalid_taxonomy = classifier._parse_response(
+            '{"relevant": true, "enforcement_related": true, '
+            '"taxonomy_category_id": "human_trafficking", '
+            '"taxonomy_subcategory_id": "phenomenon_coverage", '
+            '"confidence": "high"}'
+        )
+
+        assert parse_failure.relevant is False
+        assert invalid_taxonomy.relevant is False
+        assert classifier.warning_counts["parse_failure_count"] == 1
+        assert classifier.warning_counts["invalid_taxonomy_pair_count"] == 1
+
+    def test_parse_non_object_json_counts_as_parse_failure(self) -> None:
+        """Valid JSON with the wrong top-level shape should not crash the run."""
+        classifier = Classifier(api_key="test-key")
+
+        result = classifier._parse_response("[]")
+
+        assert result.relevant is False
+        assert result.category == Category.NOT_RELEVANT
+        assert result.confidence == "low"
+        assert classifier.warning_counts["parse_failure_count"] == 1
+
+    def test_reset_warning_counts_clears_run_local_counters(self) -> None:
+        """Pipeline run boundaries can explicitly clear accumulated counters."""
+        classifier = Classifier(api_key="test-key")
+        classifier._parse_response("[]")
+
+        classifier.reset_warning_counts()
+
+        assert classifier.warning_counts == {
+            "parse_failure_count": 0,
+            "invalid_taxonomy_pair_count": 0,
+            "invalid_legacy_pair_count": 0,
+            "relevant_without_usable_taxonomy_count": 0,
+        }
 
     def test_parse_taxonomy_pair_derives_index_relevant_even_when_payload_disagrees(self) -> None:
         """index_relevant should be computed from the packaged taxonomy rather than the model payload."""

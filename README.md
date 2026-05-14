@@ -80,6 +80,10 @@ Planned future datasets:
   generic partial attempts, generic partials after source-adapter attempts, dominant partial
   domains/sources, and visible current-candidate classifier/taxonomy risk signals, including
   low-confidence fallback counts by source, domain, taxonomy label, and confidence field
+- Persists run-level classifier parser warning counts in run debug summaries under
+  `classifier_summary.warning_counts`, including JSON parse failures and invalid taxonomy pairs,
+  and exposes fallback-only scrape/backfill context under `fallback_classifier_summary`, without
+  changing classifier prompts, taxonomy policy, or scrape selection behavior
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking
