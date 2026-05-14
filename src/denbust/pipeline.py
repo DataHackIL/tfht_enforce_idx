@@ -14,6 +14,9 @@ from typing import Any
 from uuid import uuid4
 
 from denbust.classifier.relevance import (
+    PARSE_FAILURE_CATEGORY_KEYS,
+    PARSE_FAILURE_JSON_ERROR_KIND_KEYS,
+    PARSE_FAILURE_SAMPLE_KEYS,
     Classifier,
     ClassifierProviderError,
     create_classifier,
@@ -138,28 +141,6 @@ _CLASSIFIER_WARNING_COUNT_KEYS = (
     "invalid_taxonomy_pair_count",
     "invalid_legacy_pair_count",
     "relevant_without_usable_taxonomy_count",
-)
-_CLASSIFIER_PARSE_FAILURE_CATEGORY_KEYS = (
-    "empty_response",
-    "json_decode_error",
-    "non_object_json_array",
-    "non_object_json_scalar",
-    "object_like_non_json",
-    "markdown_wrapped_malformed_json",
-    "truncated_response",
-    "other_parse_failure",
-)
-_CLASSIFIER_PARSE_FAILURE_SAMPLE_KEYS = (
-    "category",
-    "response_length",
-    "normalized_length",
-    "line_count",
-    "shape_signature",
-    "json_error_position",
-    "json_error_line",
-    "json_error_column",
-    "starts_with_code_fence",
-    "ends_with_code_fence",
 )
 
 
@@ -1482,26 +1463,26 @@ def _normalize_classifier_parse_failure_diagnostics(
     diagnostics: Mapping[str, object] | None,
 ) -> dict[str, object]:
     """Normalize sanitized parse-failure diagnostics into stable summary keys."""
-    empty_counts = dict.fromkeys(_CLASSIFIER_PARSE_FAILURE_CATEGORY_KEYS, 0)
+    empty_counts = dict.fromkeys(PARSE_FAILURE_CATEGORY_KEYS, 0)
     if diagnostics is None:
         return {
             "category_counts": empty_counts,
             "samples": [],
             "sample_count": 0,
-            "sample_max_count": 5,
+            "sample_max_count": 8,
             "sample_shape_max_length": 80,
         }
     raw_counts = diagnostics.get("category_counts")
     category_counts: dict[str, int] = {}
-    for key in _CLASSIFIER_PARSE_FAILURE_CATEGORY_KEYS:
+    for key in PARSE_FAILURE_CATEGORY_KEYS:
         value = raw_counts.get(key, 0) if isinstance(raw_counts, Mapping) else 0
         category_counts[key] = (
             value if isinstance(value, int) and not isinstance(value, bool) else 0
         )
 
-    sample_max_count = diagnostics.get("sample_max_count", 5)
+    sample_max_count = diagnostics.get("sample_max_count", 8)
     if not isinstance(sample_max_count, int) or isinstance(sample_max_count, bool):
-        sample_max_count = 5
+        sample_max_count = 8
     sample_shape_max_length = diagnostics.get("sample_shape_max_length", 80)
     if not isinstance(sample_shape_max_length, int) or isinstance(sample_shape_max_length, bool):
         sample_shape_max_length = 80
@@ -1513,7 +1494,7 @@ def _normalize_classifier_parse_failure_diagnostics(
             if not isinstance(raw_sample, Mapping):
                 continue
             sample: dict[str, object] = {}
-            for key in _CLASSIFIER_PARSE_FAILURE_SAMPLE_KEYS:
+            for key in PARSE_FAILURE_SAMPLE_KEYS:
                 if key not in raw_sample:
                     continue
                 value = raw_sample[key]
@@ -1529,7 +1510,11 @@ def _normalize_classifier_parse_failure_diagnostics(
                     "json_error_column",
                     "starts_with_code_fence",
                     "ends_with_code_fence",
-                }:
+                } or (
+                    key == "json_error_kind"
+                    and isinstance(value, str)
+                    and value in PARSE_FAILURE_JSON_ERROR_KIND_KEYS
+                ):
                     sample[key] = value
             samples.append(sample)
 

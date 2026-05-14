@@ -14,6 +14,7 @@ from denbust.classifier.relevance import (
     ALLOWED_SUBCATEGORIES,
     CLASSIFICATION_PROMPT,
     CLASSIFICATION_SYSTEM_PROMPT,
+    PARSE_FAILURE_SAMPLE_KEYS,
     PARSE_FAILURE_SAMPLE_MAX_COUNT,
     PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH,
     Classifier,
@@ -125,6 +126,8 @@ class TestClassifierParsing:
         assert sample["category"] == "json_decode_error"
         assert sample["response_length"] == len(response)
         assert sample["shape_signature"] == "AAAA AA AAA AAAAA AAAA"
+        assert sample["json_error_kind"] == "expecting_value"
+        assert set(sample) == set(PARSE_FAILURE_SAMPLE_KEYS)
         assert response not in str(diagnostics)
 
     @pytest.mark.parametrize(
@@ -332,8 +335,8 @@ class TestClassifierParsing:
             classifier.parse_failure_diagnostics["category_counts"]["non_object_json_scalar"] == 1
         )
 
-    def test_markdown_wrapped_malformed_json_records_shape_without_raw_text(self) -> None:
-        """Malformed fenced JSON should be categorized without retaining response text."""
+    def test_markdown_wrapped_object_like_json_keeps_underlying_category(self) -> None:
+        """Markdown wrapping should be metadata, not a category that hides parse shape."""
         classifier = Classifier(api_key="test-key")
         response = """```json
 {"relevant": true, "secret": "sk-ant-secret"
@@ -343,31 +346,42 @@ class TestClassifierParsing:
 
         assert result.relevant is False
         diagnostics = classifier.parse_failure_diagnostics
-        assert diagnostics["category_counts"]["markdown_wrapped_malformed_json"] == 1
+        assert diagnostics["category_counts"]["truncated_response"] == 1
         sample = diagnostics["samples"][0]
+        assert sample["category"] == "truncated_response"
+        assert sample["json_error_kind"] == "missing_comma_or_delimiter"
         assert sample["starts_with_code_fence"] is True
         assert sample["ends_with_code_fence"] is True
         assert "sk-ant-secret" not in str(diagnostics)
         assert '"secret"' not in str(diagnostics)
 
-    def test_parse_failure_samples_are_bounded_and_shape_signature_is_truncated(self) -> None:
-        """Diagnostic samples should be bounded and structural only."""
+    def test_parse_failure_samples_prefer_category_coverage_within_bound(self) -> None:
+        """Diagnostic samples should preserve rare categories before duplicate early failures."""
         classifier = Classifier(api_key="test-key")
         long_response = "{" + ("alpha: " * 40)
 
         for _ in range(PARSE_FAILURE_SAMPLE_MAX_COUNT + 2):
             classifier._parse_response(long_response)
+        classifier._parse_response("[]")
 
         diagnostics = classifier.parse_failure_diagnostics
         assert diagnostics["category_counts"]["truncated_response"] == (
             PARSE_FAILURE_SAMPLE_MAX_COUNT + 2
         )
+        assert diagnostics["category_counts"]["non_object_json_array"] == 1
         assert diagnostics["sample_count"] == PARSE_FAILURE_SAMPLE_MAX_COUNT
         assert len(diagnostics["samples"]) == PARSE_FAILURE_SAMPLE_MAX_COUNT
+        assert {sample["category"] for sample in diagnostics["samples"]} == {
+            "truncated_response",
+            "non_object_json_array",
+        }
         assert diagnostics["sample_shape_max_length"] == PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH
         assert all(
             len(sample["shape_signature"]) <= PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH
             for sample in diagnostics["samples"]
+        )
+        assert all(
+            set(sample) == set(PARSE_FAILURE_SAMPLE_KEYS) for sample in diagnostics["samples"]
         )
         assert "alpha" not in str(diagnostics)
 

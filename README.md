@@ -95,8 +95,8 @@ Planned future datasets:
 - Persists sanitized classifier parse-failure shape diagnostics in run debug summaries under
   `classifier_summary.parse_failure_diagnostics` and, for fallback-only scrape/backfill drains,
   `fallback_classifier_summary.parse_failure_diagnostics`; compact summaries retain the same
-  bounded category counts and structural samples without storing raw classifier response text,
-  article text, secrets, or generated data artifacts
+  bounded category counts, sanitized JSON error kinds, and structural samples without storing raw
+  classifier response text, article text, secrets, or generated data artifacts
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking

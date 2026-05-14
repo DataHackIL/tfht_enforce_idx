@@ -363,10 +363,11 @@ the same object under `fallback_classifier_summary.parse_failure_diagnostics`. C
 
 The diagnostic object records stable category counts for `empty_response`, `json_decode_error`,
 `non_object_json_array`, `non_object_json_scalar`, `object_like_non_json`,
-`markdown_wrapped_malformed_json`, `truncated_response`, and `other_parse_failure`. It also keeps up
-to five samples with only structural metadata: response length, normalized length, line count, JSON
-error position, Markdown-code-fence flags, and a bounded character-class `shape_signature` of at
-most 80 characters.
+`truncated_response`, and `other_parse_failure`. Markdown wrapping is stored as sample flags rather
+than as a category so the underlying malformed shape remains visible. The diagnostic object keeps up
+to eight samples, preferring category coverage within that cap, with only structural metadata:
+response length, normalized length, line count, sanitized JSON error kind, JSON error position,
+Markdown-code-fence flags, and a bounded character-class `shape_signature` of at most 80 characters.
 
 The shape samples intentionally do not store raw classifier response text, full article text,
 secrets, provider headers, prompts, candidate bodies, or generated `data/` artifacts. The fields are

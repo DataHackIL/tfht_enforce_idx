@@ -123,7 +123,7 @@ class TestRunSnapshots:
                         "category_counts": {"object_like_non_json": 1},
                         "samples": [{"category": "object_like_non_json"}],
                         "sample_count": 1,
-                        "sample_max_count": 5,
+                        "sample_max_count": 8,
                         "sample_shape_max_length": 80,
                     },
                 },
@@ -140,7 +140,7 @@ class TestRunSnapshots:
                         "category_counts": {"object_like_non_json": 1},
                         "samples": [{"category": "object_like_non_json"}],
                         "sample_count": 1,
-                        "sample_max_count": 5,
+                        "sample_max_count": 8,
                         "sample_shape_max_length": 80,
                     },
                 },
@@ -161,7 +161,7 @@ class TestRunSnapshots:
             "category_counts": {"object_like_non_json": 1},
             "samples": [{"category": "object_like_non_json"}],
             "sample_count": 1,
-            "sample_max_count": 5,
+            "sample_max_count": 8,
             "sample_shape_max_length": 80,
         }
         assert payload["fallback_classifier_summary"] == {
@@ -177,7 +177,7 @@ class TestRunSnapshots:
                 "category_counts": {"object_like_non_json": 1},
                 "samples": [{"category": "object_like_non_json"}],
                 "sample_count": 1,
-                "sample_max_count": 5,
+                "sample_max_count": 8,
                 "sample_shape_max_length": 80,
             },
         }
