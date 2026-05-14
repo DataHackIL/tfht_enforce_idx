@@ -84,6 +84,10 @@ Planned future datasets:
   `classifier_summary.warning_counts`, including JSON parse failures and invalid taxonomy pairs,
   and exposes fallback-only scrape/backfill context under `fallback_classifier_summary`, without
   changing classifier prompts, taxonomy policy, or scrape selection behavior
+- Documents the first post-persistence warning-count interpretation pass: the bounded January 1-7
+  Brave+Exa/no-Google scrape/backfill run saw 4 parse failures and 1 invalid taxonomy pair across
+  100 fallback classifier inputs, and compact summaries now retain `fallback_classifier_summary`
+  for future fallback-only drains
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking
@@ -424,6 +428,13 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
 - `SRC-PR-NEWS1` adds low-confidence generic-fetch diagnostic labeling for main-domain News1
   archive article paths under `news1.co.il/Archive/`; this is not source-targeted fanout, a
   source-native adapter, a browser scraper, or broad support for non-archive News1 pages
+- `CLASSIFIER-PR-WARNING-EVIDENCE-INTERPRETATION` records the first post-warning-counter Phase C
+  interpretation pass under generated local root `data/may_26_followup/20260514T182934Z/`: 100
+  fallback classifier inputs produced 4 parse failures, 1 invalid taxonomy pair, no invalid legacy
+  pairs, and no relevant-without-usable-taxonomy warnings. It also keeps
+  `fallback_classifier_summary` in compact run summaries going forward and sets the next PR to
+  characterize observed parse-failure shapes before any bounded parser robustness change. It does
+  not recommend prompt, taxonomy-policy, queue, scraper, or source-family changes
 - `DL-PR-12` adds explicit future self-heal hooks while preserving current behavior:
   `self_heal_eligible` is visible in queue diagnostics, failed scrape attempts are grouped by
   attempt kind/status/error/source/domain, source-adapter and generic-fetch failures carry stable

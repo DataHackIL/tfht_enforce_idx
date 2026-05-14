@@ -54,6 +54,7 @@ def write_run_debug_summary(
         "workflow": payload.get("workflow", {}),
         "source_summaries": payload.get("source_summaries", []),
         "classifier_summary": payload.get("classifier_summary", {}),
+        "fallback_classifier_summary": payload.get("fallback_classifier_summary"),
         "problems": payload.get("problems", {}),
         "suspicions": payload.get("suspicions", []),
         "warnings": payload.get("warnings", []),

@@ -257,3 +257,69 @@ for fallback classifier input counts, retained fallback operational-record count
 counts. This is diagnostic persistence only. It does not change classifier prompts, taxonomy
 validity, classifier policy, queue fairness, scrape candidate selection, generic fetch behavior,
 browser/CDP scraping, source-family support, or source-targeted query fanout.
+
+## 2026-05-14 Addendum: Warning-Count Evidence Interpretation
+
+`CLASSIFIER-PR-WARNING-EVIDENCE-INTERPRETATION` ran the next bounded Phase C January 1-7 evidence
+pass after run-level classifier warning counts were persisted. The generated local evidence root is
+`data/may_26_followup/20260514T182934Z/`; generated artifacts remain untracked.
+
+The run reused the established local Brave+Exa/no-Google configuration,
+`agents/news/local_search_brave_exa.yaml`, because the local Google CSE path is still treated as an
+operator-dependent API-access risk. The scrape drain used a temporary Chrome-CDP endpoint at
+`http://127.0.0.1:9222` and did not broaden the window, source list, search-engine set, queue
+policy, scrape cap, scraper behavior, or source-family support.
+
+Operator notes: the first discovery attempt failed before this shell loaded the repo-local
+`direnv` environment, so the successful run used `direnv exec .` to load `.env.local` without
+printing secret values. The initial Chrome-CDP preflight also failed because no browser was
+listening on port 9222; the successful scrape used a temporary Chrome profile with remote debugging
+enabled for this evidence pass.
+
+The run reported:
+
+| Figure | Value |
+| --- | ---: |
+| Persisted candidates | 3,743 |
+| Attempted candidates | 100 |
+| Persisted scrape attempts | 159 |
+| Provisional operational rows retained | 30 |
+| Partial pages | 97 |
+| Scrape failures | 3 |
+| Remaining eligible candidates | 3,148 |
+| Inferred stop reason | `budget_cap_reached` |
+
+The full post-scrape run payload
+`data/may_26_followup/20260514T182934Z/state/news_items/backfill_scrape/logs/2026-05-14T18-38-54-795669Z.json`
+persisted these warning counters:
+
+| Counter | Count | Rate |
+| --- | ---: | ---: |
+| `classifier_summary.warning_counts.parse_failure_count` | 4 | 4% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 1 | 1% of 100 fallback classifier inputs |
+| `classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.parse_failure_count` | 4 | 4% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_taxonomy_pair_count` | 1 | 1% of 100 fallback classifier inputs |
+| `fallback_classifier_summary.warning_counts.invalid_legacy_pair_count` | 0 | 0% |
+| `fallback_classifier_summary.warning_counts.relevant_without_usable_taxonomy_count` | 0 | 0% |
+
+The same payload recorded `fallback_classifier_input_count=100` and
+`fallback_operational_record_count=30`. During this interpretation pass, the matching compact
+`.summary.json` retained `classifier_summary.warning_counts` but did not yet include
+`fallback_classifier_summary`; this PR closes that compact-summary artifact gap for future runs so
+operators do not need the full debug JSON to see fallback classifier input counts and warning
+counts.
+
+The post-scrape discovery diagnostic still showed that all 30 retained fallback rows had valid
+persisted taxonomy pairs and that `invalid_taxonomy_pair_record_count` was zero. That means the
+observed warning pressure is real classifier-output loss before retention, not corrupted persisted
+operational taxonomy.
+
+Interpretation: 5 warning events across 100 fallback classifier inputs, including four parse
+failures, is enough to justify a bounded classifier-output follow-up, but the next PR should first
+characterize the observed parse-failure output shapes and add fixture-backed regression coverage
+before changing parser behavior. The evidence does not justify changing classifier prompts,
+taxonomy validity policy, legacy taxonomy policy, queue fairness, scrape candidate selection,
+generic fetch behavior, browser/CDP scraper behavior, scrape caps, source-family support, or
+source-targeted query fanout in this interpretation slice.
