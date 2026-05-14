@@ -117,7 +117,16 @@ class TestRunSnapshots:
                 "counts": {"unseen_article_count": 2},
                 "workflow": {"run_id": "123"},
                 "source_summaries": [{"source_name": "mako", "raw_article_count": 0}],
-                "classifier_summary": {"rejected_article_count": 2},
+                "classifier_summary": {
+                    "rejected_article_count": 2,
+                    "parse_failure_diagnostics": {
+                        "category_counts": {"object_like_non_json": 1},
+                        "samples": [{"category": "object_like_non_json"}],
+                        "sample_count": 1,
+                        "sample_max_count": 5,
+                        "sample_shape_max_length": 80,
+                    },
+                },
                 "fallback_classifier_summary": {
                     "fallback_classifier_input_count": 3,
                     "fallback_operational_record_count": 1,
@@ -126,6 +135,13 @@ class TestRunSnapshots:
                         "invalid_taxonomy_pair_count": 0,
                         "invalid_legacy_pair_count": 0,
                         "relevant_without_usable_taxonomy_count": 0,
+                    },
+                    "parse_failure_diagnostics": {
+                        "category_counts": {"object_like_non_json": 1},
+                        "samples": [{"category": "object_like_non_json"}],
+                        "sample_count": 1,
+                        "sample_max_count": 5,
+                        "sample_shape_max_length": 80,
                     },
                 },
                 "problems": {"all_unseen_rejected": True},
@@ -141,6 +157,13 @@ class TestRunSnapshots:
         assert '"schema_version": "news_items.ingest.debug.v1"' in content
         assert '"suspicions": [' in content
         payload = json.loads(content)
+        assert payload["classifier_summary"]["parse_failure_diagnostics"] == {
+            "category_counts": {"object_like_non_json": 1},
+            "samples": [{"category": "object_like_non_json"}],
+            "sample_count": 1,
+            "sample_max_count": 5,
+            "sample_shape_max_length": 80,
+        }
         assert payload["fallback_classifier_summary"] == {
             "fallback_classifier_input_count": 3,
             "fallback_operational_record_count": 1,
@@ -149,6 +172,13 @@ class TestRunSnapshots:
                 "invalid_taxonomy_pair_count": 0,
                 "invalid_legacy_pair_count": 0,
                 "relevant_without_usable_taxonomy_count": 0,
+            },
+            "parse_failure_diagnostics": {
+                "category_counts": {"object_like_non_json": 1},
+                "samples": [{"category": "object_like_non_json"}],
+                "sample_count": 1,
+                "sample_max_count": 5,
+                "sample_shape_max_length": 80,
             },
         }
         assert '"rejected_articles"' not in content

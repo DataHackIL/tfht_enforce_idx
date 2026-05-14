@@ -14,6 +14,8 @@ from denbust.classifier.relevance import (
     ALLOWED_SUBCATEGORIES,
     CLASSIFICATION_PROMPT,
     CLASSIFICATION_SYSTEM_PROMPT,
+    PARSE_FAILURE_SAMPLE_MAX_COUNT,
+    PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH,
     Classifier,
     ClassifierProviderError,
     _render_classification_prompt,
@@ -116,6 +118,14 @@ class TestClassifierParsing:
         assert result.relevant is False
         assert result.category == Category.NOT_RELEVANT
         assert result.confidence == "low"
+        assert classifier.warning_counts["parse_failure_count"] == 1
+        diagnostics = classifier.parse_failure_diagnostics
+        assert diagnostics["category_counts"]["json_decode_error"] == 1
+        sample = diagnostics["samples"][0]
+        assert sample["category"] == "json_decode_error"
+        assert sample["response_length"] == len(response)
+        assert sample["shape_signature"] == "AAAA AA AAA AAAAA AAAA"
+        assert response not in str(diagnostics)
 
     @pytest.mark.parametrize(
         "response",
@@ -148,6 +158,7 @@ class TestClassifierParsing:
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
         }
+        assert classifier.parse_failure_diagnostics["category_counts"]["object_like_non_json"] == 1
 
     def test_parse_unknown_category(self) -> None:
         """Test parsing unknown category defaults to not_relevant."""
@@ -306,6 +317,59 @@ class TestClassifierParsing:
         assert result.category == Category.NOT_RELEVANT
         assert result.confidence == "low"
         assert classifier.warning_counts["parse_failure_count"] == 1
+        assert classifier.parse_failure_diagnostics["category_counts"]["non_object_json_array"] == 1
+
+    def test_parse_non_object_json_scalar_records_shape_diagnostic(self) -> None:
+        """Scalar JSON should keep existing rejection behavior and record shape counts."""
+        classifier = Classifier(api_key="test-key")
+
+        result = classifier._parse_response('"not an object"')
+
+        assert result.relevant is False
+        assert result.category == Category.NOT_RELEVANT
+        assert classifier.warning_counts["parse_failure_count"] == 1
+        assert (
+            classifier.parse_failure_diagnostics["category_counts"]["non_object_json_scalar"] == 1
+        )
+
+    def test_markdown_wrapped_malformed_json_records_shape_without_raw_text(self) -> None:
+        """Malformed fenced JSON should be categorized without retaining response text."""
+        classifier = Classifier(api_key="test-key")
+        response = """```json
+{"relevant": true, "secret": "sk-ant-secret"
+```"""
+
+        result = classifier._parse_response(response)
+
+        assert result.relevant is False
+        diagnostics = classifier.parse_failure_diagnostics
+        assert diagnostics["category_counts"]["markdown_wrapped_malformed_json"] == 1
+        sample = diagnostics["samples"][0]
+        assert sample["starts_with_code_fence"] is True
+        assert sample["ends_with_code_fence"] is True
+        assert "sk-ant-secret" not in str(diagnostics)
+        assert '"secret"' not in str(diagnostics)
+
+    def test_parse_failure_samples_are_bounded_and_shape_signature_is_truncated(self) -> None:
+        """Diagnostic samples should be bounded and structural only."""
+        classifier = Classifier(api_key="test-key")
+        long_response = "{" + ("alpha: " * 40)
+
+        for _ in range(PARSE_FAILURE_SAMPLE_MAX_COUNT + 2):
+            classifier._parse_response(long_response)
+
+        diagnostics = classifier.parse_failure_diagnostics
+        assert diagnostics["category_counts"]["truncated_response"] == (
+            PARSE_FAILURE_SAMPLE_MAX_COUNT + 2
+        )
+        assert diagnostics["sample_count"] == PARSE_FAILURE_SAMPLE_MAX_COUNT
+        assert len(diagnostics["samples"]) == PARSE_FAILURE_SAMPLE_MAX_COUNT
+        assert diagnostics["sample_shape_max_length"] == PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH
+        assert all(
+            len(sample["shape_signature"]) <= PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH
+            for sample in diagnostics["samples"]
+        )
+        assert "alpha" not in str(diagnostics)
 
     def test_reset_warning_counts_clears_run_local_counters(self) -> None:
         """Pipeline run boundaries can explicitly clear accumulated counters."""
@@ -320,6 +384,10 @@ class TestClassifierParsing:
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
         }
+        assert classifier.parse_failure_diagnostics["sample_count"] == 0
+        assert all(
+            count == 0 for count in classifier.parse_failure_diagnostics["category_counts"].values()
+        )
 
     def test_parse_taxonomy_pair_derives_index_relevant_even_when_payload_disagrees(self) -> None:
         """index_relevant should be computed from the packaged taxonomy rather than the model payload."""

@@ -1241,6 +1241,22 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
         },
+        "parse_failure_diagnostics": {
+            "category_counts": {
+                "empty_response": 0,
+                "json_decode_error": 0,
+                "non_object_json_array": 0,
+                "non_object_json_scalar": 0,
+                "object_like_non_json": 0,
+                "markdown_wrapped_malformed_json": 0,
+                "truncated_response": 0,
+                "other_parse_failure": 0,
+            },
+            "samples": [],
+            "sample_count": 0,
+            "sample_max_count": 5,
+            "sample_shape_max_length": 80,
+        },
     }
     assert fallback_store.get_backfill_batch("batch-1") is not None
 
