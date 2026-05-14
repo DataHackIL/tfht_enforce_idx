@@ -121,7 +121,21 @@ class TestRunSnapshots:
                     "rejected_article_count": 2,
                     "parse_failure_diagnostics": {
                         "category_counts": {"object_like_non_json": 1},
-                        "samples": [{"category": "object_like_non_json"}],
+                        "samples": [
+                            {
+                                "category": "object_like_non_json",
+                                "tail_shape_signature": 'AAAA": "AAAA"}}',
+                                "leading_brace_count": 2,
+                                "trailing_brace_count": 2,
+                                "brace_balance": 0,
+                                "starts_with_double_open_object": True,
+                                "ends_with_double_close_object": True,
+                                "outer_wrapper_candidate": True,
+                                "inner_object_candidate": True,
+                                "contains_balanced_inner_object": True,
+                                "inner_json_object_candidate": True,
+                            }
+                        ],
                         "sample_count": 1,
                         "sample_max_count": 8,
                         "sample_shape_max_length": 80,
@@ -138,7 +152,21 @@ class TestRunSnapshots:
                     },
                     "parse_failure_diagnostics": {
                         "category_counts": {"object_like_non_json": 1},
-                        "samples": [{"category": "object_like_non_json"}],
+                        "samples": [
+                            {
+                                "category": "object_like_non_json",
+                                "tail_shape_signature": 'AAAA": "AAAA"}}',
+                                "leading_brace_count": 2,
+                                "trailing_brace_count": 2,
+                                "brace_balance": 0,
+                                "starts_with_double_open_object": True,
+                                "ends_with_double_close_object": True,
+                                "outer_wrapper_candidate": True,
+                                "inner_object_candidate": True,
+                                "contains_balanced_inner_object": True,
+                                "inner_json_object_candidate": True,
+                            }
+                        ],
                         "sample_count": 1,
                         "sample_max_count": 8,
                         "sample_shape_max_length": 80,
@@ -159,7 +187,21 @@ class TestRunSnapshots:
         payload = json.loads(content)
         assert payload["classifier_summary"]["parse_failure_diagnostics"] == {
             "category_counts": {"object_like_non_json": 1},
-            "samples": [{"category": "object_like_non_json"}],
+            "samples": [
+                {
+                    "category": "object_like_non_json",
+                    "tail_shape_signature": 'AAAA": "AAAA"}}',
+                    "leading_brace_count": 2,
+                    "trailing_brace_count": 2,
+                    "brace_balance": 0,
+                    "starts_with_double_open_object": True,
+                    "ends_with_double_close_object": True,
+                    "outer_wrapper_candidate": True,
+                    "inner_object_candidate": True,
+                    "contains_balanced_inner_object": True,
+                    "inner_json_object_candidate": True,
+                }
+            ],
             "sample_count": 1,
             "sample_max_count": 8,
             "sample_shape_max_length": 80,
@@ -175,7 +217,21 @@ class TestRunSnapshots:
             },
             "parse_failure_diagnostics": {
                 "category_counts": {"object_like_non_json": 1},
-                "samples": [{"category": "object_like_non_json"}],
+                "samples": [
+                    {
+                        "category": "object_like_non_json",
+                        "tail_shape_signature": 'AAAA": "AAAA"}}',
+                        "leading_brace_count": 2,
+                        "trailing_brace_count": 2,
+                        "brace_balance": 0,
+                        "starts_with_double_open_object": True,
+                        "ends_with_double_close_object": True,
+                        "outer_wrapper_candidate": True,
+                        "inner_object_candidate": True,
+                        "contains_balanced_inner_object": True,
+                        "inner_json_object_candidate": True,
+                    }
+                ],
                 "sample_count": 1,
                 "sample_max_count": 8,
                 "sample_shape_max_length": 80,
