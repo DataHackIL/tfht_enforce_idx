@@ -352,3 +352,26 @@ structured parse-error evidence in run debug artifacts before considering any pa
 future evidence-capture work should still avoid prompt changes, taxonomy-policy changes, queue
 behavior changes, scraper behavior changes, scrape-cap changes, source-family support, and raw
 generated data commits.
+
+## 2026-05-14 Addendum: Parse-Failure Shape Evidence Capture
+
+`CLASSIFIER-PR-PARSE-FAILURE-EVIDENCE-CAPTURE` closes the artifact gap identified above for future
+runs. Run debug payloads now carry sanitized parse-failure shape evidence under
+`classifier_summary.parse_failure_diagnostics`; fallback-only scrape/backfill payloads also carry
+the same object under `fallback_classifier_summary.parse_failure_diagnostics`. Compact
+`.summary.json` artifacts retain both summary objects.
+
+The diagnostic object records stable category counts for `empty_response`, `json_decode_error`,
+`non_object_json_array`, `non_object_json_scalar`, `object_like_non_json`,
+`truncated_response`, and `other_parse_failure`. Markdown wrapping is stored as sample flags rather
+than as a category so the underlying malformed shape remains visible. The diagnostic object keeps up
+to eight samples, preferring category coverage within that cap, with only structural metadata:
+response length, normalized length, line count, sanitized JSON error kind, JSON error position,
+Markdown-code-fence flags, and a bounded character-class `shape_signature` of at most 80 characters.
+
+The shape samples intentionally do not store raw classifier response text, full article text,
+secrets, provider headers, prompts, candidate bodies, or generated `data/` artifacts. The fields are
+evidence for the next bounded robustness decision only. This slice does not change classifier
+prompts, parser recovery behavior, taxonomy validity policy, legacy taxonomy policy, queue
+fairness, scrape candidate selection, generic fetch behavior, browser/CDP scraping, scrape caps,
+source-family support, or source-targeted query fanout.

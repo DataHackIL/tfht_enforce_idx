@@ -6,7 +6,9 @@ import contextlib
 import json
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
+from typing import Any
 
 import anthropic
 from anthropic.types import TextBlock
@@ -27,6 +29,40 @@ _SECRET_FRAGMENT_PATTERN = re.compile(
 )
 _PROMPT_FIELD_PATTERN = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _SUPPORTED_PROMPT_FIELDS = frozenset({"title", "snippet"})
+PARSE_FAILURE_SAMPLE_MAX_COUNT = 8
+PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH = 80
+PARSE_FAILURE_CATEGORY_KEYS = (
+    "empty_response",
+    "json_decode_error",
+    "non_object_json_array",
+    "non_object_json_scalar",
+    "object_like_non_json",
+    "truncated_response",
+    "other_parse_failure",
+)
+PARSE_FAILURE_JSON_ERROR_KIND_KEYS = (
+    "expecting_value",
+    "missing_property_name",
+    "missing_colon",
+    "missing_comma_or_delimiter",
+    "unterminated_string",
+    "extra_data",
+    "invalid_control_character",
+    "unknown_json_decode_error",
+)
+PARSE_FAILURE_SAMPLE_KEYS = (
+    "category",
+    "response_length",
+    "normalized_length",
+    "line_count",
+    "shape_signature",
+    "json_error_kind",
+    "json_error_position",
+    "json_error_line",
+    "json_error_column",
+    "starts_with_code_fence",
+    "ends_with_code_fence",
+)
 
 # Legacy compatibility matrix kept for older parser paths and tests.
 ALLOWED_SUBCATEGORIES: dict[Category, set[SubCategory]] = {
@@ -136,6 +172,189 @@ class ClassifierWarningCounts:
         }
 
 
+@dataclass(frozen=True)
+class ClassifierParseFailureSample:
+    """Sanitized classifier parse-failure shape sample for debug artifacts."""
+
+    category: str
+    response_length: int
+    normalized_length: int
+    line_count: int
+    shape_signature: str
+    json_error_kind: str | None = None
+    json_error_position: int | None = None
+    json_error_line: int | None = None
+    json_error_column: int | None = None
+    starts_with_code_fence: bool = False
+    ends_with_code_fence: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        """Return artifact-safe sample metadata without raw response text."""
+        return {
+            "category": self.category,
+            "response_length": self.response_length,
+            "normalized_length": self.normalized_length,
+            "line_count": self.line_count,
+            "shape_signature": self.shape_signature,
+            "json_error_kind": self.json_error_kind,
+            "json_error_position": self.json_error_position,
+            "json_error_line": self.json_error_line,
+            "json_error_column": self.json_error_column,
+            "starts_with_code_fence": self.starts_with_code_fence,
+            "ends_with_code_fence": self.ends_with_code_fence,
+        }
+
+
+@dataclass
+class ClassifierParseFailureDiagnostics:
+    """Run-local sanitized parse-failure shape diagnostics."""
+
+    category_counts: Counter[str]
+    samples: list[ClassifierParseFailureSample]
+    sample_max_count: int = PARSE_FAILURE_SAMPLE_MAX_COUNT
+    sample_shape_max_length: int = PARSE_FAILURE_SAMPLE_SHAPE_MAX_LENGTH
+
+    @classmethod
+    def empty(cls) -> ClassifierParseFailureDiagnostics:
+        """Create an empty diagnostics collector."""
+        return cls(category_counts=Counter(), samples=[])
+
+    def record(
+        self,
+        *,
+        text: str,
+        normalized_text: str,
+        category: str,
+        json_error: json.JSONDecodeError | None = None,
+    ) -> None:
+        """Record one sanitized parse-failure shape."""
+        stable_category = (
+            category if category in PARSE_FAILURE_CATEGORY_KEYS else "other_parse_failure"
+        )
+        self.category_counts[stable_category] += 1
+        sample = ClassifierParseFailureSample(
+            category=stable_category,
+            response_length=len(text),
+            normalized_length=len(normalized_text),
+            line_count=text.count("\n") + 1 if text else 0,
+            shape_signature=_shape_signature(
+                normalized_text,
+                max_length=self.sample_shape_max_length,
+            ),
+            json_error_kind=(
+                _json_decode_error_kind(json_error) if json_error is not None else None
+            ),
+            json_error_position=json_error.pos if json_error is not None else None,
+            json_error_line=json_error.lineno if json_error is not None else None,
+            json_error_column=json_error.colno if json_error is not None else None,
+            starts_with_code_fence=text.strip().startswith("```"),
+            ends_with_code_fence=text.strip().endswith("```"),
+        )
+        existing_categories = {existing.category for existing in self.samples}
+        if stable_category in existing_categories:
+            if len(self.samples) < self.sample_max_count:
+                self.samples.append(sample)
+            return
+        if len(self.samples) < self.sample_max_count:
+            self.samples.append(sample)
+            return
+        duplicate_index = next(
+            (
+                index
+                for index, existing in enumerate(self.samples)
+                if sum(1 for candidate in self.samples if candidate.category == existing.category)
+                > 1
+            ),
+            None,
+        )
+        if duplicate_index is not None:
+            self.samples[duplicate_index] = sample
+
+    def as_dict(self) -> dict[str, object]:
+        """Return stable artifact fields for run/debug summaries."""
+        category_counts = {
+            key: self.category_counts.get(key, 0) for key in PARSE_FAILURE_CATEGORY_KEYS
+        }
+        return {
+            "category_counts": category_counts,
+            "samples": [sample.as_dict() for sample in self.samples],
+            "sample_count": len(self.samples),
+            "sample_max_count": self.sample_max_count,
+            "sample_shape_max_length": self.sample_shape_max_length,
+        }
+
+
+def _shape_signature(text: str, *, max_length: int) -> str:
+    """Return bounded structural character classes instead of raw response text."""
+    signature: list[str] = []
+    for char in text[:max_length]:
+        if char.isalpha():
+            signature.append("A")
+        elif char.isdigit():
+            signature.append("0")
+        elif char.isspace():
+            signature.append(" ")
+        elif char in "{}[]():,.'\"`-_":
+            signature.append(char)
+        else:
+            signature.append("?")
+    return "".join(signature)
+
+
+def _strip_markdown_fence(text: str) -> tuple[str, bool]:
+    """Strip a leading Markdown code fence using the existing parser behavior."""
+    normalized_text = text.strip()
+    if not normalized_text.startswith("```"):
+        return normalized_text, False
+    lines = normalized_text.split("\n")
+    return "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:]), True
+
+
+def _json_value_parse_failure_category(value: Any) -> str:
+    """Classify valid JSON that is not the expected object shape."""
+    if isinstance(value, list):
+        return "non_object_json_array"
+    return "non_object_json_scalar"
+
+
+def _json_decode_parse_failure_category(
+    *,
+    normalized_text: str,
+    error: json.JSONDecodeError,
+) -> str:
+    """Classify malformed JSON without inspecting or retaining raw text."""
+    if not normalized_text:
+        return "empty_response"
+    stripped = normalized_text.strip()
+    if stripped[:1] in {"{", "["} and stripped[-1:] not in {"}", "]"}:
+        return "truncated_response"
+    if error.msg.startswith("Unterminated string"):
+        return "truncated_response"
+    if stripped.startswith("{"):
+        return "object_like_non_json"
+    return "json_decode_error"
+
+
+def _json_decode_error_kind(error: json.JSONDecodeError) -> str:
+    """Return a stable safe JSON error kind without persisting raw exception text."""
+    message = error.msg
+    if message == "Expecting value":
+        return "expecting_value"
+    if message == "Expecting property name enclosed in double quotes":
+        return "missing_property_name"
+    if message == "Expecting ':' delimiter":
+        return "missing_colon"
+    if message == "Expecting ',' delimiter":
+        return "missing_comma_or_delimiter"
+    if message.startswith("Unterminated string"):
+        return "unterminated_string"
+    if message == "Extra data":
+        return "extra_data"
+    if message.startswith("Invalid control character"):
+        return "invalid_control_character"
+    return "unknown_json_decode_error"
+
+
 def sanitize_provider_error_message(error: BaseException | str) -> str:
     """Return compact provider error text safe for logs and artifacts."""
     raw_message = str(error) or type(error).__name__
@@ -180,15 +399,22 @@ class Classifier:
         self._user_prompt_template = user_prompt_template or CLASSIFICATION_PROMPT
         self._taxonomy = default_taxonomy()
         self._warning_counts = ClassifierWarningCounts()
+        self._parse_failure_diagnostics = ClassifierParseFailureDiagnostics.empty()
 
     @property
     def warning_counts(self) -> dict[str, int]:
         """Return run-local parser warning counters for diagnostic artifacts."""
         return self._warning_counts.as_dict()
 
+    @property
+    def parse_failure_diagnostics(self) -> dict[str, object]:
+        """Return sanitized run-local parse-failure shape diagnostics."""
+        return self._parse_failure_diagnostics.as_dict()
+
     def reset_warning_counts(self) -> None:
         """Reset parser warning counters at a pipeline run boundary."""
         self._warning_counts = ClassifierWarningCounts()
+        self._parse_failure_diagnostics = ClassifierParseFailureDiagnostics.empty()
 
     async def classify(self, article: RawArticle) -> ClassificationResult:
         """Classify a single article."""
@@ -231,14 +457,16 @@ class Classifier:
     def _parse_response(self, text: str) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
         try:
-            normalized_text = text.strip()
-            if normalized_text.startswith("```"):
-                lines = normalized_text.split("\n")
-                normalized_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+            normalized_text, _ = _strip_markdown_fence(text)
 
             data = json.loads(normalized_text)
             if not isinstance(data, dict):
                 self._warning_counts.parse_failure_count += 1
+                self._parse_failure_diagnostics.record(
+                    text=text,
+                    normalized_text=normalized_text,
+                    category=_json_value_parse_failure_category(data),
+                )
                 logger.warning(
                     "Failed to parse classification response: expected JSON object, got %s",
                     type(data).__name__,
@@ -329,8 +557,32 @@ class Classifier:
                 confidence=confidence,
             )
 
-        except (json.JSONDecodeError, KeyError) as error:
+        except json.JSONDecodeError as error:
             self._warning_counts.parse_failure_count += 1
+            self._parse_failure_diagnostics.record(
+                text=text,
+                normalized_text=normalized_text,
+                category=_json_decode_parse_failure_category(
+                    normalized_text=normalized_text,
+                    error=error,
+                ),
+                json_error=error,
+            )
+            logger.warning("Failed to parse classification response: %s", error)
+            return ClassificationResult(
+                relevant=False,
+                enforcement_related=False,
+                category=Category.NOT_RELEVANT,
+                sub_category=None,
+                confidence="low",
+            )
+        except KeyError as error:
+            self._warning_counts.parse_failure_count += 1
+            self._parse_failure_diagnostics.record(
+                text=text,
+                normalized_text=normalized_text,
+                category="other_parse_failure",
+            )
             logger.warning("Failed to parse classification response: %s", error)
             return ClassificationResult(
                 relevant=False,

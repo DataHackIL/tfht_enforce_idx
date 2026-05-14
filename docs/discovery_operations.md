@@ -618,9 +618,32 @@ observable from the retained artifacts.
 Parser recovery therefore remains intentionally deferred unless a future artifact captures exact
 malformed payload shape evidence safely. Representative non-JSON strings now prove only the current
 rejection policy: malformed object-like outputs return the low-confidence not-relevant fallback and
-increment `parse_failure_count`. Canonical JSON responses and invalid taxonomy-pair rejection remain
-unchanged. Do not broaden this into prompt changes, taxonomy-policy changes, queue behavior
-changes, scrape behavior changes, scrape-cap changes, or source-family expansion.
+increment `parse_failure_count`.
+
+After `CLASSIFIER-PR-PARSE-FAILURE-EVIDENCE-CAPTURE`, future run debug artifacts persist sanitized
+parse-failure shape diagnostics beside the existing warning counters under
+`classifier_summary.parse_failure_diagnostics` and, for fallback-only scrape/backfill drains,
+`fallback_classifier_summary.parse_failure_diagnostics`. The diagnostic object contains stable
+`category_counts`, a bounded `samples` array, `sample_count`, `sample_max_count=8`, and
+`sample_shape_max_length=80`. Samples store only structural metadata such as response length,
+normalized length, line count, a sanitized allowlisted JSON error kind, JSON error position,
+code-fence flags, and a character-class `shape_signature`; they do not store raw classifier
+response text, article text, secrets, provider headers, prompts, or candidate payloads. The sample
+selection prefers category coverage within the cap, so a rare later category can replace an earlier
+duplicate sample. Compact `.summary.json` files retain the same summary fields so operators can
+review parse-failure shape pressure without opening generated full debug logs.
+
+The stable parse-failure categories are `empty_response`, `json_decode_error`,
+`non_object_json_array`, `non_object_json_scalar`, `object_like_non_json`,
+`truncated_response`, and `other_parse_failure`. Markdown code fences are captured as sample flags
+rather than a category, so fenced object-like or truncated JSON remains grouped by its underlying
+parse-failure shape. These fields are diagnostic evidence only. They do not change parser recovery
+behavior, classifier prompts, taxonomy validity policy, legacy taxonomy policy, queue fairness,
+scrape candidate selection, generic fetch behavior, browser/CDP scraping, scrape caps,
+source-family support, or source-targeted query fanout. Canonical JSON responses and invalid
+taxonomy-pair rejection remain unchanged. Do not broaden this into prompt changes, taxonomy-policy
+changes, queue behavior changes, scrape behavior changes, scrape-cap changes, or source-family
+expansion.
 
 ## One-Time 90-Day Re-Scan
 

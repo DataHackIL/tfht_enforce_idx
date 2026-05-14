@@ -13,7 +13,7 @@ import pytest
 from pydantic import HttpUrl
 
 import denbust.pipeline as pipeline_module
-from denbust.classifier.relevance import ClassifierProviderError
+from denbust.classifier.relevance import PARSE_FAILURE_SAMPLE_KEYS, ClassifierProviderError
 from denbust.config import Config, OutputConfig, OutputFormat, SourceConfig, SourceType
 from denbust.data_models import (
     Category,
@@ -352,6 +352,30 @@ class TestFetchAndClassifyHelpers:
                 "parse_failure_count": 2,
                 "invalid_taxonomy_pair_count": 1,
             },
+            classifier_parse_failure_diagnostics={
+                "category_counts": {
+                    "object_like_non_json": 1,
+                    "truncated_response": 1,
+                },
+                "samples": [
+                    {
+                        "category": "object_like_non_json",
+                        "response_length": 44,
+                        "normalized_length": 44,
+                        "line_count": 1,
+                        "shape_signature": "{AAAAAAAA: AAAA",
+                        "json_error_kind": "missing_property_name",
+                        "json_error_position": 1,
+                        "json_error_line": 1,
+                        "json_error_column": 2,
+                        "starts_with_code_fence": False,
+                        "ends_with_code_fence": False,
+                        "raw_response": '{"secret": "sk-ant-secret"}',
+                    },
+                ],
+                "sample_max_count": 8,
+                "sample_shape_max_length": 80,
+            },
         )
 
         assert classifier_summary["warning_counts"] == {
@@ -360,6 +384,40 @@ class TestFetchAndClassifyHelpers:
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
         }
+        assert classifier_summary["parse_failure_diagnostics"] == {
+            "category_counts": {
+                "empty_response": 0,
+                "json_decode_error": 0,
+                "non_object_json_array": 0,
+                "non_object_json_scalar": 0,
+                "object_like_non_json": 1,
+                "truncated_response": 1,
+                "other_parse_failure": 0,
+            },
+            "samples": [
+                {
+                    "category": "object_like_non_json",
+                    "response_length": 44,
+                    "normalized_length": 44,
+                    "line_count": 1,
+                    "shape_signature": "{AAAAAAAA: AAAA",
+                    "json_error_kind": "missing_property_name",
+                    "json_error_position": 1,
+                    "json_error_line": 1,
+                    "json_error_column": 2,
+                    "starts_with_code_fence": False,
+                    "ends_with_code_fence": False,
+                },
+            ],
+            "sample_count": 1,
+            "sample_max_count": 8,
+            "sample_shape_max_length": 80,
+        }
+        assert all(
+            set(sample) == set(PARSE_FAILURE_SAMPLE_KEYS)
+            for sample in classifier_summary["parse_failure_diagnostics"]["samples"]
+        )
+        assert "sk-ant-secret" not in str(classifier_summary["parse_failure_diagnostics"])
 
     def test_mark_seen_collects_all_source_urls(self, tmp_path: Path) -> None:
         """mark_seen should persist every source URL from unified items."""
@@ -1807,6 +1865,30 @@ class TestRunPipelineAsync:
             "parse_failure_count": 2,
             "invalid_taxonomy_pair_count": 1,
         }
+        classifier.parse_failure_diagnostics = {
+            "category_counts": {
+                "object_like_non_json": 1,
+                "non_object_json_array": 1,
+            },
+            "samples": [
+                {
+                    "category": "object_like_non_json",
+                    "response_length": 38,
+                    "normalized_length": 38,
+                    "line_count": 1,
+                    "shape_signature": "{AAAAAAAA: AAAA",
+                    "json_error_kind": "missing_property_name",
+                    "json_error_position": 1,
+                    "json_error_line": 1,
+                    "json_error_column": 2,
+                    "starts_with_code_fence": False,
+                    "ends_with_code_fence": False,
+                },
+            ],
+            "sample_count": 1,
+            "sample_max_count": 8,
+            "sample_shape_max_length": 80,
+        }
         monkeypatch.setattr(
             "denbust.pipeline.create_sources", lambda _config: [FakeSource("test", [])]
         )
@@ -1853,6 +1935,12 @@ class TestRunPipelineAsync:
             "invalid_legacy_pair_count": 0,
             "relevant_without_usable_taxonomy_count": 0,
         }
+        assert (
+            result.debug_payload["classifier_summary"]["parse_failure_diagnostics"][
+                "category_counts"
+            ]["object_like_non_json"]
+            == 1
+        )
         assert result.debug_payload["fallback_classifier_summary"] == {
             "fallback_classifier_input_count": 1,
             "fallback_operational_record_count": 1,
@@ -1861,6 +1949,35 @@ class TestRunPipelineAsync:
                 "invalid_taxonomy_pair_count": 1,
                 "invalid_legacy_pair_count": 0,
                 "relevant_without_usable_taxonomy_count": 0,
+            },
+            "parse_failure_diagnostics": {
+                "category_counts": {
+                    "empty_response": 0,
+                    "json_decode_error": 0,
+                    "non_object_json_array": 1,
+                    "non_object_json_scalar": 0,
+                    "object_like_non_json": 1,
+                    "truncated_response": 0,
+                    "other_parse_failure": 0,
+                },
+                "samples": [
+                    {
+                        "category": "object_like_non_json",
+                        "response_length": 38,
+                        "normalized_length": 38,
+                        "line_count": 1,
+                        "shape_signature": "{AAAAAAAA: AAAA",
+                        "json_error_kind": "missing_property_name",
+                        "json_error_position": 1,
+                        "json_error_line": 1,
+                        "json_error_column": 2,
+                        "starts_with_code_fence": False,
+                        "ends_with_code_fence": False,
+                    },
+                ],
+                "sample_count": 1,
+                "sample_max_count": 8,
+                "sample_shape_max_length": 80,
             },
         }
 

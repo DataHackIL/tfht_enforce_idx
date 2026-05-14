@@ -14,6 +14,9 @@ from typing import Any
 from uuid import uuid4
 
 from denbust.classifier.relevance import (
+    PARSE_FAILURE_CATEGORY_KEYS,
+    PARSE_FAILURE_JSON_ERROR_KIND_KEYS,
+    PARSE_FAILURE_SAMPLE_KEYS,
     Classifier,
     ClassifierProviderError,
     create_classifier,
@@ -169,6 +172,16 @@ def _classifier_warning_counts(classifier: object) -> dict[str, int]:
         value = raw_counts.get(key, 0)
         counts[key] = value if isinstance(value, int) and not isinstance(value, bool) else 0
     return counts
+
+
+def _classifier_parse_failure_diagnostics(classifier: object) -> dict[str, object]:
+    """Read sanitized parse-failure shape diagnostics when exposed by the classifier."""
+    raw_diagnostics = getattr(classifier, "parse_failure_diagnostics", None)
+    if callable(raw_diagnostics):
+        raw_diagnostics = raw_diagnostics()
+    if not isinstance(raw_diagnostics, Mapping):
+        return _normalize_classifier_parse_failure_diagnostics(None)
+    return _normalize_classifier_parse_failure_diagnostics(raw_diagnostics)
 
 
 def _reset_classifier_warning_counts(classifier: object) -> None:
@@ -1136,6 +1149,9 @@ async def _process_ingest_articles(
                 classified_articles=classified_articles,
                 unified_items=unified_items,
                 classifier_warning_counts=_classifier_warning_counts(classifier),
+                classifier_parse_failure_diagnostics=_classifier_parse_failure_diagnostics(
+                    classifier
+                ),
             )
         )
         return result
@@ -1156,6 +1172,9 @@ async def _process_ingest_articles(
                 classified_articles=classified_articles,
                 unified_items=unified_items,
                 classifier_warning_counts=_classifier_warning_counts(classifier),
+                classifier_parse_failure_diagnostics=_classifier_parse_failure_diagnostics(
+                    classifier
+                ),
             )
         )
         return result
@@ -1187,6 +1206,9 @@ async def _process_ingest_articles(
                 unified_items=unified_items,
                 classifier_error=sanitized_error,
                 classifier_warning_counts=_classifier_warning_counts(classifier),
+                classifier_parse_failure_diagnostics=_classifier_parse_failure_diagnostics(
+                    classifier
+                ),
             )
         )
         return result
@@ -1207,6 +1229,9 @@ async def _process_ingest_articles(
                 classified_articles=classified_articles,
                 unified_items=unified_items,
                 classifier_warning_counts=_classifier_warning_counts(classifier),
+                classifier_parse_failure_diagnostics=_classifier_parse_failure_diagnostics(
+                    classifier
+                ),
             )
         )
         return result
@@ -1246,6 +1271,7 @@ async def _process_ingest_articles(
             classified_articles=classified_articles,
             unified_items=unified_items,
             classifier_warning_counts=_classifier_warning_counts(classifier),
+            classifier_parse_failure_diagnostics=_classifier_parse_failure_diagnostics(classifier),
         )
     )
     return result
@@ -1390,6 +1416,7 @@ def _build_classifier_summary(
     classified_articles: list[ClassifiedArticle],
     classifier_error: str | None = None,
     classifier_warning_counts: Mapping[str, int] | None = None,
+    classifier_parse_failure_diagnostics: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Summarize classifier outputs and anomalies."""
     rejected_by_category: dict[str, int] = {}
@@ -1410,6 +1437,9 @@ def _build_classifier_summary(
         "rejected_article_count": rejected_count,
         "rejected_by_category": rejected_by_category,
         "warning_counts": _normalize_classifier_warning_counts(classifier_warning_counts),
+        "parse_failure_diagnostics": _normalize_classifier_parse_failure_diagnostics(
+            classifier_parse_failure_diagnostics
+        ),
         "classification_output_anomaly": len(classified_articles) != len(unseen_articles),
         "classification_failed": classifier_error is not None,
         "classifier_error": classifier_error,
@@ -1427,6 +1457,74 @@ def _normalize_classifier_warning_counts(
         value = counts.get(key, 0)
         normalized[key] = value if isinstance(value, int) and not isinstance(value, bool) else 0
     return normalized
+
+
+def _normalize_classifier_parse_failure_diagnostics(
+    diagnostics: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Normalize sanitized parse-failure diagnostics into stable summary keys."""
+    empty_counts = dict.fromkeys(PARSE_FAILURE_CATEGORY_KEYS, 0)
+    if diagnostics is None:
+        return {
+            "category_counts": empty_counts,
+            "samples": [],
+            "sample_count": 0,
+            "sample_max_count": 8,
+            "sample_shape_max_length": 80,
+        }
+    raw_counts = diagnostics.get("category_counts")
+    category_counts: dict[str, int] = {}
+    for key in PARSE_FAILURE_CATEGORY_KEYS:
+        value = raw_counts.get(key, 0) if isinstance(raw_counts, Mapping) else 0
+        category_counts[key] = (
+            value if isinstance(value, int) and not isinstance(value, bool) else 0
+        )
+
+    sample_max_count = diagnostics.get("sample_max_count", 8)
+    if not isinstance(sample_max_count, int) or isinstance(sample_max_count, bool):
+        sample_max_count = 8
+    sample_shape_max_length = diagnostics.get("sample_shape_max_length", 80)
+    if not isinstance(sample_shape_max_length, int) or isinstance(sample_shape_max_length, bool):
+        sample_shape_max_length = 80
+
+    samples: list[dict[str, object]] = []
+    raw_samples = diagnostics.get("samples")
+    if isinstance(raw_samples, list):
+        for raw_sample in raw_samples[:sample_max_count]:
+            if not isinstance(raw_sample, Mapping):
+                continue
+            sample: dict[str, object] = {}
+            for key in PARSE_FAILURE_SAMPLE_KEYS:
+                if key not in raw_sample:
+                    continue
+                value = raw_sample[key]
+                if key == "shape_signature" and isinstance(value, str):
+                    sample[key] = value[:sample_shape_max_length]
+                elif key in {
+                    "category",
+                    "response_length",
+                    "normalized_length",
+                    "line_count",
+                    "json_error_position",
+                    "json_error_line",
+                    "json_error_column",
+                    "starts_with_code_fence",
+                    "ends_with_code_fence",
+                } or (
+                    key == "json_error_kind"
+                    and isinstance(value, str)
+                    and value in PARSE_FAILURE_JSON_ERROR_KIND_KEYS
+                ):
+                    sample[key] = value
+            samples.append(sample)
+
+    return {
+        "category_counts": category_counts,
+        "samples": samples,
+        "sample_count": len(samples),
+        "sample_max_count": sample_max_count,
+        "sample_shape_max_length": sample_shape_max_length,
+    }
 
 
 def _summary_int(payload: dict[str, object], key: str) -> int:
@@ -1549,6 +1647,7 @@ def _build_ingest_debug_payload(
     unified_items: list[UnifiedItem],
     classifier_error: str | None = None,
     classifier_warning_counts: Mapping[str, int] | None = None,
+    classifier_parse_failure_diagnostics: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build a detailed ingest diagnostic log for state-repo inspection."""
     relevant_articles = [
@@ -1576,6 +1675,7 @@ def _build_ingest_debug_payload(
         classified_articles=classified_articles,
         classifier_error=classifier_error,
         classifier_warning_counts=classifier_warning_counts,
+        classifier_parse_failure_diagnostics=classifier_parse_failure_diagnostics,
     )
     problems = _build_problem_summary(
         source_summaries=source_summaries,
@@ -1643,11 +1743,13 @@ def _build_scrape_candidate_debug_payload(
         unseen_articles=[],
         classified_articles=[],
         classifier_warning_counts=_classifier_warning_counts(classifier),
+        classifier_parse_failure_diagnostics=_classifier_parse_failure_diagnostics(classifier),
     )
     fallback_classifier_summary = {
         "fallback_classifier_input_count": fallback_input_count,
         "fallback_operational_record_count": fallback_record_count,
         "warning_counts": _classifier_warning_counts(classifier),
+        "parse_failure_diagnostics": _classifier_parse_failure_diagnostics(classifier),
     }
     return {
         "schema_version": "news_items.scrape_candidates.debug.v1",
