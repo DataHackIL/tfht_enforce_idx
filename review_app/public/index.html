@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TFHT Review Workbench</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">DenBust News</p>
+        <h1>TFHT Review Workbench</h1>
+      </div>
+      <div class="userbox">
+        <span id="reviewerEmail">Checking access...</span>
+        <span id="syncState" class="state">Loading</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="filters" aria-label="Candidate filters">
+        <label>
+          Search
+          <input id="searchInput" type="search" placeholder="Title, URL, source, taxonomy..." />
+        </label>
+        <label>
+          Status
+          <select id="statusFilter">
+            <option value="pending">Pending review</option>
+            <option value="all">All fetched</option>
+            <option value="candidate_only">Discovery candidates</option>
+            <option value="news_items">Materialized news items</option>
+            <option value="approved">Approved</option>
+            <option value="suppressed">Suppressed</option>
+          </select>
+        </label>
+        <label>
+          Domain
+          <input id="domainFilter" type="search" placeholder="mako.co.il" />
+        </label>
+        <button id="refreshButton" type="button">Refresh</button>
+      </section>
+
+      <section class="summary" aria-label="Review summary">
+        <div><strong id="visibleCount">0</strong><span>shown</span></div>
+        <div><strong id="filteredCount">0</strong><span>matching</span></div>
+        <div><strong id="candidateCount">0</strong><span>candidates fetched</span></div>
+        <div><strong id="newsCount">0</strong><span>news rows fetched</span></div>
+      </section>
+
+      <section class="workspace">
+        <aside class="listPane" aria-label="Candidate list">
+          <div id="candidateList" class="candidateList"></div>
+          <button id="loadMoreButton" class="loadMore" type="button" hidden>Load more</button>
+        </aside>
+
+        <section class="detailPane" aria-label="Review details">
+          <div id="emptyState" class="emptyState">
+            <h2>Select a candidate</h2>
+            <p>Rows are sorted by the app's current likelihood score, strongest review candidates first.</p>
+          </div>
+
+          <article id="detailView" class="detailView" hidden>
+            <div class="detailHeader">
+              <div>
+                <p id="detailKind" class="eyebrow"></p>
+                <h2 id="detailTitle"></h2>
+              </div>
+              <a id="detailLink" class="sourceLink" href="#" target="_blank" rel="noreferrer">Open source</a>
+            </div>
+
+            <p id="detailSnippet" class="snippet"></p>
+            <div id="detailMeta" class="metaGrid"></div>
+            <div id="scoreReasons" class="chips"></div>
+
+            <form id="reviewForm" class="reviewForm">
+              <fieldset>
+                <legend>Decision</legend>
+                <div class="decisionGrid">
+                  <label><input type="radio" name="decision" value="include" checked /> Include</label>
+                  <label><input type="radio" name="decision" value="needs_review" /> Needs review</label>
+                  <label><input type="radio" name="decision" value="exclude" /> Exclude</label>
+                  <label><input type="radio" name="decision" value="internal_only" /> Internal only</label>
+                </div>
+              </fieldset>
+
+              <div class="taxonomyGrid">
+                <label>
+                  Category
+                  <select id="categorySelect"></select>
+                </label>
+                <label>
+                  Subcategory
+                  <select id="subcategorySelect"></select>
+                </label>
+                <label class="checkLabel">
+                  <input id="indexRelevantInput" type="checkbox" />
+                  Index relevant
+                </label>
+              </div>
+
+              <div class="fieldGrid">
+                <label>
+                  Event label
+                  <input id="eventLabelInput" type="text" placeholder="Short internal label" />
+                </label>
+                <label>
+                  City
+                  <input id="cityInput" type="text" placeholder="Optional city" />
+                </label>
+              </div>
+
+              <label>
+                Tags
+                <input id="tagsInput" type="text" placeholder="comma-separated operational tags" />
+              </label>
+
+              <label>
+                Review notes
+                <textarea id="notesInput" rows="4" placeholder="Why this belongs, why it does not, or what needs checking"></textarea>
+              </label>
+
+              <div class="actions">
+                <button id="saveButton" type="submit">Save review</button>
+                <span id="saveState" class="saveState"></span>
+              </div>
+            </form>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

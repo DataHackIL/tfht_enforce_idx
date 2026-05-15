@@ -237,3 +237,5 @@ uv.lock
 
 .live_checks/
 .temp/
+.wrangler/
+review_app/.wrangler/
