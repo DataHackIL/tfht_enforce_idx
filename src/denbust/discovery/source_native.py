@@ -324,6 +324,7 @@ def persist_discovered_candidates(
     run.merged_candidate_count = len(persisted_candidates)
     run.queued_for_scrape_count = 0
     try:
+        persistence.write_run(run)
         persistence.upsert_candidates(persisted_candidates)
         persistence.append_provenance(provenance_events)
     except Exception as exc:

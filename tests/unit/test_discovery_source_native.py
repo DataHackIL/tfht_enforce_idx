@@ -563,8 +563,9 @@ def test_persist_discovered_candidates_writes_failed_run_before_reraising() -> N
     else:
         raise AssertionError("expected RuntimeError")
 
-    assert len(persistence.written_runs) == 1
-    failed_run = persistence.written_runs[0]
+    assert len(persistence.written_runs) == 2
+    assert persistence.written_runs[0].status.value == "pending"
+    failed_run = persistence.written_runs[1]
     assert failed_run.status.value == "failed"
     assert failed_run.finished_at is not None
     assert failed_run.errors == ["persistence: RuntimeError: candidate write failed"]

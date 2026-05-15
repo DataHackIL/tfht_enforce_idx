@@ -21,6 +21,7 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
     def handler(request: httpx.Request) -> httpx.Response:
         captured["query"] = request.url.params["q"]
         captured["count"] = request.url.params["count"]
+        captured["freshness"] = request.url.params["freshness"]
         captured["token"] = request.headers["X-Subscription-Token"]
         return httpx.Response(
             200,
@@ -51,10 +52,12 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
             DiscoveryQuery(
                 query_text="בית בושת",
                 query_kind=DiscoveryQueryKind.SOURCE_TARGETED,
+                date_from=datetime(2026, 4, 15, 0, 0, tzinfo=UTC),
+                date_to=datetime(2026, 4, 15, 23, 59, tzinfo=UTC),
                 preferred_domains=["www.ynet.co.il"],
                 source_hint="ynet",
                 language="he",
-                tags=["ynet", "taxonomy", "category:brothels"],
+                tags=["backfill", "ynet", "taxonomy", "category:brothels"],
             )
         ],
         DiscoveryContext(run_id="run-1", max_results_per_query=5),
@@ -65,6 +68,7 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
         "query": "(site:www.ynet.co.il) בית בושת",
         "count": "5",
         "token": "brave-key",
+        "freshness": "2026-04-15to2026-04-15",
     }
     assert len(candidates) == 1
     assert candidates[0].producer_name == "brave"
@@ -75,7 +79,12 @@ async def test_brave_search_engine_normalizes_results_and_renders_site_query() -
     assert str(candidates[0].canonical_url) == "https://ynet.co.il/news/article/abc"
     assert candidates[0].publication_datetime_hint == datetime(2026, 4, 15, 8, 0, tzinfo=UTC)
     assert candidates[0].metadata["query_kind"] == "source_targeted"
-    assert candidates[0].metadata["query_tags"] == ["ynet", "taxonomy", "category:brothels"]
+    assert candidates[0].metadata["query_tags"] == [
+        "backfill",
+        "ynet",
+        "taxonomy",
+        "category:brothels",
+    ]
     assert candidates[0].metadata["source_targeted_taxonomy"] is True
     assert candidates[0].metadata["result_url"] == "https://www.ynet.co.il/news/article/abc"
     assert candidates[0].metadata["result_title"] == "פשיטה על בית בושת"
@@ -240,3 +249,103 @@ async def test_brave_search_engine_ignores_invalid_page_age() -> None:
 
     assert len(candidates) == 1
     assert candidates[0].publication_datetime_hint is None
+
+
+@pytest.mark.asyncio
+async def test_brave_search_engine_filters_dated_results_outside_query_window() -> None:
+    """Historical backfill queries should not retain dated Brave results outside their window."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["freshness"] == "2026-01-01to2026-01-07"
+        return httpx.Response(
+            200,
+            json={
+                "web": {
+                    "results": [
+                        {
+                            "url": "https://www.ynet.co.il/news/article/old",
+                            "title": "old",
+                            "page_age": "2025-12-31T23:59:00Z",
+                        },
+                        {
+                            "url": "https://www.ynet.co.il/news/article/in-window",
+                            "title": "in window",
+                            "page_age": "2026-01-03T09:00:00Z",
+                        },
+                        {
+                            "url": "https://www.ynet.co.il/news/article/undated",
+                            "title": "undated",
+                        },
+                    ]
+                }
+            },
+        )
+
+    engine = BraveSearchEngine(
+        api_key="brave-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = await engine.discover(
+        [
+            DiscoveryQuery(
+                query_text="זנות",
+                query_kind=DiscoveryQueryKind.BROAD,
+                date_from=datetime(2026, 1, 1, tzinfo=UTC),
+                date_to=datetime(2026, 1, 7, 23, 59, tzinfo=UTC),
+                tags=["backfill"],
+            )
+        ],
+        DiscoveryContext(run_id="run-6"),
+    )
+    await engine.aclose()
+
+    assert [str(candidate.candidate_url) for candidate in candidates] == [
+        "https://www.ynet.co.il/news/article/in-window",
+        "https://www.ynet.co.il/news/article/undated",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_brave_search_engine_filters_off_domain_source_targeted_results() -> None:
+    """Provider results must still honor preferred-domain contracts locally."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "web": {
+                    "results": [
+                        {
+                            "url": "https://he.wikipedia.org/wiki/%D7%96%D7%A0%D7%95%D7%AA",
+                            "title": "off domain",
+                        },
+                        {
+                            "url": "https://news.walla.co.il/item/3806949",
+                            "title": "on domain",
+                        },
+                    ]
+                }
+            },
+        )
+
+    engine = BraveSearchEngine(
+        api_key="brave-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    candidates = await engine.discover(
+        [
+            DiscoveryQuery(
+                query_text="זנות",
+                query_kind=DiscoveryQueryKind.SOURCE_TARGETED,
+                preferred_domains=["news.walla.co.il"],
+            )
+        ],
+        DiscoveryContext(run_id="run-7"),
+    )
+    await engine.aclose()
+
+    assert [str(candidate.candidate_url) for candidate in candidates] == [
+        "https://news.walla.co.il/item/3806949"
+    ]

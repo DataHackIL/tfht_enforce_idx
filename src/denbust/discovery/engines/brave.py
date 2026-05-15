@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import HttpUrl
@@ -63,6 +64,7 @@ class BraveSearchEngine:
                         self._max_results_per_query,
                     ),
                     "search_lang": query.language or "he",
+                    **_freshness_params(query),
                 },
             )
             response.raise_for_status()
@@ -99,14 +101,18 @@ class BraveSearchEngine:
         url = result.get("url")
         if not isinstance(url, str) or not url:
             return None
+        if not _matches_preferred_domains(url, query.preferred_domains):
+            return None
         publication_datetime_hint: datetime | None = None
         page_age = result.get("page_age")
         if isinstance(page_age, str):
             normalized = page_age.replace("Z", "+00:00")
             try:
-                publication_datetime_hint = datetime.fromisoformat(normalized)
+                publication_datetime_hint = _normalize_datetime(datetime.fromisoformat(normalized))
             except ValueError:
                 publication_datetime_hint = None
+        if not _matches_query_date_window(publication_datetime_hint, query):
+            return None
         try:
             parsed_url = HttpUrl(url)
             canonical_url = HttpUrl(canonicalize_news_url(url))
@@ -139,3 +145,50 @@ class BraveSearchEngine:
             )
         except ValueError:
             return None
+
+
+def _normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _freshness_params(query: DiscoveryQuery) -> dict[str, str]:
+    if not _is_backfill_query(query) or query.date_from is None or query.date_to is None:
+        return {}
+    date_from = _normalize_datetime(query.date_from).date().isoformat()
+    date_to = _normalize_datetime(query.date_to).date().isoformat()
+    return {"freshness": f"{date_from}to{date_to}"}
+
+
+def _matches_query_date_window(
+    publication_datetime_hint: datetime | None,
+    query: DiscoveryQuery,
+) -> bool:
+    if publication_datetime_hint is None or not _is_backfill_query(query):
+        return True
+    hint = _normalize_datetime(publication_datetime_hint)
+    if query.date_from is not None and hint < _normalize_datetime(query.date_from):
+        return False
+    return not (query.date_to is not None and hint > _normalize_datetime(query.date_to))
+
+
+def _is_backfill_query(query: DiscoveryQuery) -> bool:
+    return "backfill" in query.tags
+
+
+def _matches_preferred_domains(url: str, preferred_domains: list[str]) -> bool:
+    if not preferred_domains:
+        return True
+    result_domain = _normalize_domain(urlparse(url).netloc)
+    if not result_domain:
+        return False
+    return any(
+        result_domain == preferred_domain or result_domain.endswith(f".{preferred_domain}")
+        for preferred_domain in {_normalize_domain(domain) for domain in preferred_domains}
+    )
+
+
+def _normalize_domain(domain: str) -> str:
+    normalized = domain.lower().strip().removeprefix("www.")
+    return normalized

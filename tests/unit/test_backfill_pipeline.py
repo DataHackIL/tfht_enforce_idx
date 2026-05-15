@@ -721,12 +721,19 @@ async def test_run_news_backfill_scrape_job_marks_classifier_provider_error_fata
             return_value=build_scrape_batch(
                 raw_articles=[
                     RawArticle(
+                        url=HttpUrl("https://example.com/outside-window"),
+                        title="outside",
+                        snippet="outside",
+                        date=datetime(2026, 3, 2, tzinfo=UTC),
+                        source_name="ynet",
+                    ),
+                    RawArticle(
                         url=HttpUrl("https://example.com/raw"),
                         title="title",
                         snippet="snippet",
                         date=datetime(2026, 1, 2, tzinfo=UTC),
                         source_name="ynet",
-                    )
+                    ),
                 ]
             )
         ),
@@ -773,7 +780,20 @@ async def test_run_news_backfill_scrape_job_marks_fallback_provider_error_fatal(
         "denbust.pipeline._run_backfill_candidate_scrape_job",
         AsyncMock(
             return_value=build_scrape_batch(
-                fallback_candidates=[build_candidate("batch-1")],
+                fallback_candidates=[
+                    build_candidate("batch-1").model_copy(
+                        update={
+                            "metadata": {
+                                "backfill_window_start": datetime(
+                                    2026, 1, 1, tzinfo=UTC
+                                ).isoformat(),
+                                "fallback_publication_datetime": datetime(
+                                    2026, 1, 2, tzinfo=UTC
+                                ).isoformat(),
+                            }
+                        }
+                    )
+                ],
                 raw_articles=[],
             )
         ),
@@ -1275,12 +1295,19 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
             return_value=build_scrape_batch(
                 raw_articles=[
                     RawArticle(
+                        url=HttpUrl("https://example.com/outside-window"),
+                        title="outside",
+                        snippet="outside",
+                        date=datetime(2026, 3, 2, tzinfo=UTC),
+                        source_name="ynet",
+                    ),
+                    RawArticle(
                         url=HttpUrl("https://example.com/raw"),
                         title="title",
                         snippet="snippet",
                         date=datetime(2026, 1, 2, tzinfo=UTC),
                         source_name="ynet",
-                    )
+                    ),
                 ]
             )
         ),
@@ -1289,11 +1316,14 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
         "denbust.pipeline._build_fallback_operational_records",
         AsyncMock(return_value=[]),
     )
-    processed_snapshot = RunSnapshot(job_name=JobName.BACKFILL_SCRAPE).finish("processed 1 article")
-    monkeypatch.setattr(
-        "denbust.pipeline._process_ingest_articles",
-        AsyncMock(return_value=processed_snapshot),
-    )
+
+    async def fake_process_ingest_articles(**kwargs: object) -> RunSnapshot:
+        result = kwargs["result"]
+        assert isinstance(result, RunSnapshot)
+        return result.finish("processed 1 article")
+
+    process = AsyncMock(side_effect=fake_process_ingest_articles)
+    monkeypatch.setattr("denbust.pipeline._process_ingest_articles", process)
 
     processed = await run_news_backfill_scrape_job(
         Config(job_name=JobName.BACKFILL_SCRAPE, store={"state_root": tmp_path / "processed"})
@@ -1301,4 +1331,6 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
 
     assert processed.result_summary == "backfill batch batch-1: processed 1 article"
     assert processed.debug_payload == {"batch_id": "batch-1"}
+    assert processed.warnings == ["raw_articles_skipped_outside_backfill_window=1"]
+    assert [article.title for article in process.await_args.kwargs["all_articles"]] == ["title"]
     assert processed_store.get_backfill_batch("batch-1") is not None

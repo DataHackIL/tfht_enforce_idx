@@ -604,9 +604,10 @@ class TestFetchAndClassifyHelpers:
             }
         )
         assert pipeline_module._fallback_source_name(no_text_candidate) == "example.com"
-        assert pipeline_module._fallback_publication_datetime(no_text_candidate) == datetime(
-            2026, 4, 11, 9, 0, tzinfo=UTC
-        )
+        assert pipeline_module._fallback_publication_datetime(no_text_candidate) is None
+        assert pipeline_module._fallback_publication_datetime_or_seen(
+            no_text_candidate
+        ) == datetime(2026, 4, 11, 9, 0, tzinfo=UTC)
         assert pipeline_module._fallback_input_article(no_text_candidate) is None
 
         candidate_fallback = no_text_candidate.model_copy(
@@ -628,7 +629,8 @@ class TestFetchAndClassifyHelpers:
         invalid_publication_candidate = candidate.model_copy(
             update={"metadata": {"fallback_publication_datetime": "not-a-date"}}
         )
-        assert pipeline_module._fallback_publication_datetime(
+        assert pipeline_module._fallback_publication_datetime(invalid_publication_candidate) is None
+        assert pipeline_module._fallback_publication_datetime_or_seen(
             invalid_publication_candidate
         ) == datetime(2026, 4, 11, 9, 0, tzinfo=UTC)
 
@@ -694,6 +696,60 @@ class TestFetchAndClassifyHelpers:
         assert record.source_name == "brave"
         assert record.title == "Relevant title"
         assert record.summary_one_sentence == "Enriched: Relevant title"
+
+    @pytest.mark.asyncio
+    async def test_build_fallback_operational_records_can_require_publication_datetime(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Backfill fallback rows should require a real extracted publication date."""
+        dated_candidate = build_persistent_candidate(
+            "candidate-dated",
+            current_url="https://example.com/dated",
+        ).model_copy(
+            update={
+                "metadata": {
+                    "fallback_title": "Dated title",
+                    "fallback_snippet": "Dated summary",
+                    "fallback_publication_datetime": "2026-01-02T12:00:00+00:00",
+                },
+            }
+        )
+        undated_candidate = build_persistent_candidate(
+            "candidate-undated",
+            current_url="https://example.com/undated",
+        ).model_copy(
+            update={
+                "metadata": {
+                    "fallback_title": "Undated title",
+                    "fallback_snippet": "Undated summary",
+                },
+            }
+        )
+        classifier = MagicMock()
+        classifier.classify_batch = AsyncMock(
+            return_value=[build_classified_article("https://example.com/dated", relevant=True)]
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.fallback_enrichment",
+            lambda item: NewsItemEnrichment(summary_one_sentence=f"Enriched: {item.headline}"),
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.infer_privacy_risk",
+            lambda _text: (PrivacyRisk.LOW, "low"),
+        )
+
+        records = await pipeline_module._build_fallback_operational_records(
+            candidates=[dated_candidate, undated_candidate],
+            classifier=classifier,
+            require_publication_datetime=True,
+            publication_window=(
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 7, tzinfo=UTC),
+            ),
+        )
+
+        assert [record.event_candidate_ids for record in records] == [["candidate-dated"]]
+        classifier.classify_batch.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_build_fallback_operational_records_rejects_classifier_length_mismatch(

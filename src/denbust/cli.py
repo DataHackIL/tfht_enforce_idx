@@ -1,5 +1,6 @@
 """CLI entry point for denbust."""
 
+import os
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -172,6 +173,7 @@ def diagnose_discovery(
     )
 
     if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
 
     if format == DiagnosticOutputFormat.JSON:
@@ -191,12 +193,29 @@ def release(
         Path | None,
         typer.Option("--config", "-c", help="Path to YAML config file"),
     ] = None,
+    publish: Annotated[
+        bool | None,
+        typer.Option(
+            "--publish/--no-publish",
+            help="Enable or disable publication to configured public targets.",
+        ),
+    ] = None,
 ) -> None:
     """Run the scaffolded release job for a dataset."""
     from denbust.pipeline import run_release
 
     config_path = config or Path("agents/release/news_items.yaml")
-    run_release(config_path=config_path, dataset_name=dataset)
+    previous_publish = os.environ.get("DENBUST_RELEASE_PUBLISH")
+    try:
+        if publish is not None:
+            os.environ["DENBUST_RELEASE_PUBLISH"] = "true" if publish else "false"
+        run_release(config_path=config_path, dataset_name=dataset)
+    finally:
+        if publish is not None:
+            if previous_publish is None:
+                os.environ.pop("DENBUST_RELEASE_PUBLISH", None)
+            else:
+                os.environ["DENBUST_RELEASE_PUBLISH"] = previous_publish
 
 
 @app.command()

@@ -42,6 +42,30 @@ from the packaged TFHT taxonomy in addition to the coarse operator keyword list.
 When source-targeted taxonomy expansion is enabled for backfill, each window is capped by
 `backfill.max_source_targeted_taxonomy_queries_per_window` so historical recovery does not
 silently multiply search-engine quota use across every source and taxonomy term.
+Historical backfills may set `backfill.query_kinds` to use a narrower query mix than daily
+discovery. The 2026 long-run harness uses source-targeted Brave queries only, with local Brave
+date-window and preferred-domain enforcement, because broad/taxonomy historical searches produced
+too much off-domain noise for unattended recovery.
+
+For the budget-guarded 2026 backfill/release pass, use:
+
+```bash
+direnv exec . .venv/bin/python scripts/run_2026_backfill_release_daily.py \
+  --date-from 2026-01-01 \
+  --date-to 2026-05-15 \
+  --state-root data/2026_backfill_state_<run_id> \
+  --artifacts-root data/2026_backfill_run_<run_id> \
+  --max-budget-usd 50 \
+  --soft-budget-usd 45 \
+  --operational-provider supabase \
+  --max-scrape-drains-per-window 1 \
+  --denbust-bin .venv/bin/denbust
+```
+
+The harness forces release publication off and skips release generation after any failed step.
+The 2026-05-15 attempt stopped during the 2026-03-19 through 2026-03-25 window when Anthropic
+reported a workspace API usage limit until 2026-06-01 00:00 UTC; see the checked-in run report for
+the current resume point and counts.
 
 Use `agents/news/local_search.yaml` only when intentionally exercising source-native discovery
 plus Brave, Exa, and Google CSE locally:
@@ -528,6 +552,35 @@ Optional email-output secrets for ingest-family jobs:
 
 Backfill workflows reuse the same discovery and ingest secrets. They do not require any extra
 credential surface beyond the explicit `workflow_dispatch` inputs.
+
+## 2026 Backfill Harness And Release Dry Run
+
+`scripts/run_2026_backfill_release_daily.py` is the operator harness for the broad 2026 catch-up
+pass. It slices the requested date range into configured backfill windows, runs discovery and scrape
+drains, captures discovery diagnostics, and then builds the release bundle with public publication
+disabled.
+
+The default provider mode is Brave-only:
+
+```bash
+.venv/bin/python scripts/run_2026_backfill_release_daily.py \
+  --date-from 2026-01-01 \
+  --date-to 2026-05-15 \
+  --state-root data/2026_backfill_state \
+  --artifacts-root data/2026_backfill_run
+```
+
+The harness writes generated ledgers and logs below the configured `--artifacts-root`; those files
+remain outside the code repo commit. It also writes a generated effective config there so operator
+runs can switch between:
+
+- `--search-mode brave-only`, the default budget-safe mode;
+- `--search-mode brave-exa`, for selected low-yield windows when cost headroom remains;
+- `--search-mode config`, for using the checked-in config exactly as written.
+
+All harness runs set `DENBUST_RELEASE_PUBLISH=false`. The release command also supports
+`--no-publish`, and `agents/release/news_items_no_publish.yaml` keeps release-readiness checks from
+publishing to Kaggle or Hugging Face even when public-target env vars are present.
 
 ## State Repo Layout And Workflow Ownership
 

@@ -345,7 +345,7 @@ def _fallback_source_name(candidate: PersistentCandidate) -> str:
     return candidate.domain or "candidate_fallback"
 
 
-def _fallback_publication_datetime(candidate: PersistentCandidate) -> datetime:
+def _fallback_publication_datetime(candidate: PersistentCandidate) -> datetime | None:
     value = candidate.metadata.get("fallback_publication_datetime")
     if isinstance(value, str):
         try:
@@ -356,7 +356,12 @@ def _fallback_publication_datetime(candidate: PersistentCandidate) -> datetime:
             if parsed.tzinfo is None:
                 return parsed.replace(tzinfo=UTC)
             return parsed.astimezone(UTC)
-    return candidate.last_seen_at
+    return None
+
+
+def _fallback_publication_datetime_or_seen(candidate: PersistentCandidate) -> datetime:
+    """Return a fallback publication datetime for legacy non-backfill paths."""
+    return _fallback_publication_datetime(candidate) or candidate.last_seen_at
 
 
 def _fallback_text(candidate: PersistentCandidate) -> tuple[str | None, str | None]:
@@ -372,17 +377,33 @@ def _fallback_text(candidate: PersistentCandidate) -> tuple[str | None, str | No
     return normalized_title or None, normalized_snippet or None
 
 
-def _fallback_input_article(candidate: PersistentCandidate) -> RawArticle | None:
+def _fallback_input_article(
+    candidate: PersistentCandidate,
+    *,
+    require_publication_datetime: bool = False,
+) -> RawArticle | None:
     title, snippet = _fallback_text(candidate)
     if title is None and snippet is None:
+        return None
+    publication_datetime = _fallback_publication_datetime(candidate)
+    if require_publication_datetime and publication_datetime is None:
         return None
     return RawArticle(
         url=candidate.canonical_url or candidate.current_url,
         title=title or snippet or str(candidate.current_url),
         snippet=snippet or title or "",
-        date=_fallback_publication_datetime(candidate),
+        date=publication_datetime or candidate.last_seen_at,
         source_name=_fallback_source_name(candidate),
     )
+
+
+def _article_in_window(article: RawArticle, *, start: datetime, end: datetime) -> bool:
+    article_date = article.date
+    if article_date.tzinfo is None:
+        article_date = article_date.replace(tzinfo=UTC)
+    else:
+        article_date = article_date.astimezone(UTC)
+    return start <= article_date <= end
 
 
 def _fallback_combined_privacy_input(item: UnifiedItem) -> str:
@@ -427,10 +448,19 @@ async def _build_fallback_operational_records(
     *,
     candidates: list[PersistentCandidate],
     classifier: Classifier,
+    require_publication_datetime: bool = False,
+    publication_window: tuple[datetime, datetime] | None = None,
 ) -> list[NewsItemOperationalRecord]:
     fallback_inputs: list[tuple[PersistentCandidate, RawArticle]] = []
     for candidate in candidates:
-        article = _fallback_input_article(candidate)
+        article = _fallback_input_article(
+            candidate,
+            require_publication_datetime=require_publication_datetime,
+        )
+        if article is not None and publication_window is not None:
+            start, end = publication_window
+            if not _article_in_window(article, start=start, end=end):
+                article = None
         if article is not None:
             fallback_inputs.append((candidate, article))
     if not fallback_inputs:
@@ -2469,6 +2499,8 @@ async def run_news_backfill_scrape_job(
             fallback_records = await _build_fallback_operational_records(
                 candidates=scrape_batch.fallback_candidates,
                 classifier=classifier,
+                require_publication_datetime=True,
+                publication_window=(batch.requested_date_from, batch.requested_date_to),
             )
         except ClassifierProviderError as exc:
             sanitized_error = _mark_classifier_provider_error(result, exc)
@@ -2478,6 +2510,11 @@ async def run_news_backfill_scrape_job(
             )
             result.seen_count_after = seen_store.count
             return result.finish("fatal: classifier provider error")
+        skipped_fallback_count = len(scrape_batch.fallback_candidates) - len(fallback_records)
+        if skipped_fallback_count > 0:
+            result.warnings.append(
+                f"fallback_candidates_without_retained_rows={skipped_fallback_count}"
+            )
         if fallback_records and store is not None:
             store.upsert_records(
                 config.dataset_name.value,
@@ -2490,6 +2527,39 @@ async def run_news_backfill_scrape_job(
             result.finish(
                 "fallback retention completed with "
                 f"{len(fallback_records)} provisional row(s) for backfill batch {batch_id}"
+            )
+            result.set_debug_payload(
+                _build_scrape_candidate_debug_payload(
+                    result=result,
+                    classifier=classifier,
+                    scrape_batch=scrape_batch,
+                    fallback_record_count=len(fallback_records),
+                    batch_id=batch_id,
+                )
+            )
+            return result
+
+        out_of_window_article_count = len(scrape_batch.raw_articles)
+        scrape_batch.raw_articles = [
+            article
+            for article in scrape_batch.raw_articles
+            if _article_in_window(
+                article,
+                start=batch.requested_date_from,
+                end=batch.requested_date_to,
+            )
+        ]
+        out_of_window_article_count -= len(scrape_batch.raw_articles)
+        if out_of_window_article_count > 0:
+            result.warnings.append(
+                f"raw_articles_skipped_outside_backfill_window={out_of_window_article_count}"
+            )
+        if not scrape_batch.raw_articles:
+            result.unified_item_count = len(fallback_records)
+            result.finish(
+                "backfill batch "
+                f"{batch_id}: no raw articles remained inside requested backfill window; "
+                f"retained {len(fallback_records)} fallback row(s)"
             )
             result.set_debug_payload(
                 _build_scrape_candidate_debug_payload(
@@ -2594,11 +2664,14 @@ async def run_news_items_release_job(
         publication_dir=config.state_paths.publication_dir,
         rows=corrected_rows,
     )
-    published_targets = publish_release_bundle(
-        config=config,
-        release_dir=config.state_paths.publication_dir / manifest.release_version,
-        manifest=manifest,
-    )
+    if config.release.publish_public_targets:
+        published_targets = publish_release_bundle(
+            config=config,
+            release_dir=config.state_paths.publication_dir / manifest.release_version,
+            manifest=manifest,
+        )
+    else:
+        published_targets = []
     result.release_manifest = manifest.model_dump(mode="json")
     result.unified_item_count = manifest.row_count
     if published_targets:
@@ -2614,6 +2687,10 @@ async def run_news_items_release_job(
             dataset_name,
             public_ids,
             "published",
+        )
+    elif not config.release.publish_public_targets:
+        result.warnings.append(
+            "Public publication disabled by release config; built release bundle only."
         )
     else:
         result.warnings.append("No publication targets configured; built release bundle only.")

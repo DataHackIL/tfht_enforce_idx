@@ -616,12 +616,46 @@ def test_supabase_discovery_persistence_crud_and_headers() -> None:
 
     assert client.closed is True
     assert client.calls[0]["url"] == "https://supabase.example.com/rest/v1/discovery_runs"
+    assert client.calls[0]["params"] == {"on_conflict": "run_id"}
     assert client.calls[0]["json"]["errors"] == ["boom"]  # type: ignore[index]
     assert client.calls[5]["params"]["backfill_batch_id"] == "eq.batch-1"  # type: ignore[index]
     headers = client.calls[0]["headers"]
     assert isinstance(headers, dict)
     assert headers["Accept-Profile"] == "custom"
     assert headers["Authorization"] == "Bearer service-role"
+
+
+def test_supabase_discovery_persistence_strips_nul_characters_from_candidate_payloads() -> None:
+    """PostgREST payloads should not contain NUL characters rejected by Postgres JSON/text."""
+    client = FakeHttpClient([httpx.Response(200, json=[])])
+    store = SupabaseDiscoveryPersistence(
+        base_url="https://supabase.example.com",
+        service_role_key="service-role",
+        schema="public",
+        table_names={
+            "discovery_runs": "discovery_runs",
+            "persistent_candidates": "persistent_candidates",
+            "backfill_batches": "backfill_batches",
+            "candidate_provenance": "candidate_provenance",
+            "scrape_attempts": "scrape_attempts",
+        },
+        client=client,
+    )
+    candidate = build_candidate().model_copy(
+        update={
+            "titles": ["bad\x00title"],
+            "snippets": ["bad\x00snippet"],
+            "metadata": {"nested": ["bad\x00metadata"]},
+        }
+    )
+
+    store.upsert_candidates([candidate])
+
+    payload = client.calls[0]["json"]
+    assert isinstance(payload, list)
+    assert payload[0]["titles"] == ["badtitle"]
+    assert payload[0]["snippets"] == ["badsnippet"]
+    assert payload[0]["metadata"] == {"nested": ["badmetadata"]}
 
 
 def test_supabase_discovery_persistence_counts_candidates_server_side() -> None:

@@ -105,7 +105,8 @@ def build_backfill_queries(
     from denbust.discovery.queries import _taxonomy_query_specs
 
     keywords = _normalize_keywords(config.keywords)
-    taxonomy_enabled = DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds
+    query_kinds = config.backfill.query_kinds or config.discovery.default_query_kinds
+    taxonomy_enabled = DiscoveryQueryKind.TAXONOMY_TARGETED in query_kinds
     if not keywords and not taxonomy_enabled:
         return []
 
@@ -113,7 +114,7 @@ def build_backfill_queries(
     seen_keys: set[tuple[object, ...]] = set()
     source_domains = enabled_discovery_domains(config)
     for keyword in keywords:
-        if DiscoveryQueryKind.BROAD in config.discovery.default_query_kinds:
+        if DiscoveryQueryKind.BROAD in query_kinds:
             broad_key = (DiscoveryQueryKind.BROAD, keyword, window.index)
             if broad_key not in seen_keys:
                 queries.append(
@@ -128,7 +129,7 @@ def build_backfill_queries(
                 )
                 seen_keys.add(broad_key)
 
-        if DiscoveryQueryKind.SOURCE_TARGETED in config.discovery.default_query_kinds:
+        if DiscoveryQueryKind.SOURCE_TARGETED in query_kinds:
             for source_name, domain in source_domains:
                 source_key = (
                     DiscoveryQueryKind.SOURCE_TARGETED,
@@ -152,7 +153,7 @@ def build_backfill_queries(
                     )
                 )
                 seen_keys.add(source_key)
-        if DiscoveryQueryKind.SOCIAL_TARGETED in config.discovery.default_query_kinds:
+        if DiscoveryQueryKind.SOCIAL_TARGETED in query_kinds:
             for domain in SOCIAL_DISCOVERY_DOMAINS:
                 queries.append(
                     DiscoveryQuery(
@@ -188,7 +189,7 @@ def build_backfill_queries(
                 )
             )
             seen_keys.add(taxonomy_key)
-            if DiscoveryQueryKind.SOURCE_TARGETED in config.discovery.default_query_kinds:
+            if DiscoveryQueryKind.SOURCE_TARGETED in query_kinds:
                 for source_name, domain in source_domains:
                     if source_targeted_taxonomy_query_count >= source_targeted_taxonomy_query_limit:
                         break

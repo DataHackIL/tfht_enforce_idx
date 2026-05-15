@@ -347,6 +347,24 @@ class TestConfig:
 
         assert config.kaggle_dataset == "owner/news-items"
         assert config.huggingface_repo_id == "org/news-items"
+        assert config.publish_public_targets is True
+
+    def test_release_config_publish_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Release config should allow an explicit public-publication kill switch."""
+        monkeypatch.setenv("DENBUST_RELEASE_PUBLISH", "false")
+
+        config = ReleaseConfig.model_validate(None)
+
+        assert config.publish_public_targets is False
+
+    def test_release_config_publish_env_rejects_ambiguous_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Publication env override should not accept ambiguous truthy strings."""
+        monkeypatch.setenv("DENBUST_RELEASE_PUBLISH", "maybe")
+
+        with pytest.raises(ValueError, match="DENBUST_RELEASE_PUBLISH must be a boolean value"):
+            ReleaseConfig.model_validate(None)
 
     def test_release_config_validator_passthrough_for_non_mapping(self) -> None:
         """ReleaseConfig's pre-validator should leave non-mapping values untouched."""
@@ -525,3 +543,17 @@ store:
         assert config.source_discovery.persist_candidates is True
         assert config.backfill.enabled is True
         assert config.backfill.batch_window_days == 7
+
+    def test_github_news_config_enables_brave_exa_search_and_backfill(self) -> None:
+        """The scheduled GitHub config should run online discovery without Google CSE."""
+        config = load_config(Path("agents/news/github.yaml"))
+
+        assert config.discovery.enabled is True
+        assert config.discovery.engines.brave.enabled is True
+        assert config.discovery.engines.exa.enabled is True
+        assert config.discovery.engines.google_cse.enabled is False
+        assert config.source_discovery.enabled is True
+        assert config.candidates.keep_search_only_fallbacks is True
+        assert config.candidates.require_review_for_search_only is True
+        assert config.backfill.enabled is True
+        assert config.backfill.max_scrape_attempts_per_run == 100
