@@ -18,6 +18,7 @@ from denbust.discovery.models import (
     ContentBasis,
     FetchStatus,
     PersistentCandidate,
+    ScrapeAttemptKind,
 )
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
@@ -338,6 +339,49 @@ def test_select_backfill_candidates_for_scrape_uses_batch_filter_when_provided(
     assert [candidate.candidate_id for candidate in selected] == ["first"]
 
 
+def test_select_backfill_candidates_for_scrape_skips_dated_candidates_outside_window(
+    tmp_path: Path,
+) -> None:
+    """Backfill scrape drains should not spend budget on candidates with out-of-window hints."""
+    store = build_store(tmp_path)
+    window_start = "2026-01-01T00:00:00+00:00"
+    window_end = "2026-01-07T23:59:59+00:00"
+    outside = build_candidate("outside", status=CandidateStatus.NEW).model_copy(
+        update={
+            "backfill_batch_id": "batch-1",
+            "metadata": {
+                "backfill_window_start": window_start,
+                "backfill_window_end": window_end,
+                "latest_publication_datetime_hint": "2025-12-31T23:59:00+00:00",
+            },
+        }
+    )
+    in_window = build_candidate("in-window", status=CandidateStatus.NEW).model_copy(
+        update={
+            "backfill_batch_id": "batch-1",
+            "metadata": {
+                "backfill_window_start": window_start,
+                "backfill_window_end": window_end,
+                "latest_publication_datetime_hint": "2026-01-03T12:00:00+00:00",
+            },
+        }
+    )
+    undated = build_candidate("undated", status=CandidateStatus.NEW).model_copy(
+        update={
+            "backfill_batch_id": "batch-1",
+            "metadata": {
+                "backfill_window_start": window_start,
+                "backfill_window_end": window_end,
+            },
+        }
+    )
+    store.upsert_candidates([outside, in_window, undated])
+
+    selected = select_backfill_candidates_for_scrape(store, limit=10, batch_id="batch-1")
+
+    assert [candidate.candidate_id for candidate in selected] == ["in-window", "undated"]
+
+
 @pytest.mark.asyncio
 async def test_scrape_candidates_returns_empty_batch_for_no_candidates(tmp_path: Path) -> None:
     """An empty scrape pass should return an empty batch without persistence writes."""
@@ -387,6 +431,47 @@ async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path:
     assert len(batch.attempts) == 1
     assert batch.attempts[0].fetch_status is FetchStatus.SUCCESS
     assert source.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_backfill_scrape_candidates_skips_source_adapter_fetch(tmp_path: Path) -> None:
+    """Backfill candidate drains should avoid current-window source adapter searches."""
+    store = build_store(tmp_path)
+    candidate = build_candidate("candidate-backfill", status=CandidateStatus.NEW).model_copy(
+        update={"backfill_batch_id": "batch-1"}
+    )
+    store.upsert_candidates([candidate])
+    source = FailingSource("ynet", RuntimeError("source adapter should not run"))
+    original_fetch = scrape_candidates.__globals__["_fetch_partial_page"]
+
+    async def fake_fetch_partial_page(
+        _candidate: PersistentCandidate, *, client: object
+    ) -> GenericFetchResult:
+        del client
+        return GenericFetchResult(
+            fetch_status=FetchStatus.PARTIAL,
+            title="candidate title",
+            snippet="candidate snippet",
+            publication_datetime=datetime(2026, 1, 3, tzinfo=UTC),
+        )
+
+    scrape_candidates.__globals__["_fetch_partial_page"] = fake_fetch_partial_page
+
+    try:
+        batch = await scrape_candidates(
+            config=Config(store={"state_root": tmp_path}),
+            persistence=store,
+            candidates=[candidate],
+            sources=[source],
+            backfill_mode=True,
+        )
+    finally:
+        scrape_candidates.__globals__["_fetch_partial_page"] = original_fetch
+
+    assert source.calls == 0
+    assert len(batch.fallback_candidates) == 1
+    assert len(batch.attempts) == 1
+    assert batch.attempts[0].attempt_kind is ScrapeAttemptKind.GENERIC_FETCH
 
 
 @pytest.mark.asyncio

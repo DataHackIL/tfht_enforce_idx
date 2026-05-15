@@ -238,6 +238,37 @@ def test_build_backfill_queries_normalizes_keywords_and_emits_source_targeted() 
     }
 
 
+def test_build_backfill_queries_can_override_query_kinds_for_historical_runs() -> None:
+    """Backfill can use a narrower query mix than always-on daily discovery."""
+    config = Config(
+        keywords=["זנות"],
+        sources=[
+            {"name": "mako", "type": "scraper", "enabled": True},
+            {"name": "ynet", "type": "rss", "url": "https://www.ynet.co.il/rss", "enabled": True},
+        ],
+        discovery={
+            "default_query_kinds": [
+                "broad",
+                "source_targeted",
+                "taxonomy_targeted",
+                "social_targeted",
+            ]
+        },
+        backfill={"query_kinds": ["source_targeted"]},
+    )
+    window = plan_backfill_windows(
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        date_to=datetime(2026, 1, 7, tzinfo=UTC),
+        batch_window_days=7,
+    )[0]
+
+    queries = build_backfill_queries(config, window=window)
+
+    assert queries
+    assert all(query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED for query in queries)
+    assert all(query.preferred_domains for query in queries)
+
+
 def test_build_backfill_queries_excludes_news1_source_targeted_fanout() -> None:
     """Candidate-only News1 evidence should not spend recurring backfill query budget."""
     config = Config(

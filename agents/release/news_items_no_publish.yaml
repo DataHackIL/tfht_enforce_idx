@@ -1,0 +1,25 @@
+# Release configuration for building a news_items bundle without public publication.
+#
+# Use this for release-readiness checks, dry runs, and pre-publication QA. The
+# bundle is still generated and release metadata is still written, but configured
+# Kaggle/Hugging Face targets are ignored even if their env vars are present.
+name: news-items-release-no-publish
+dataset_name: news_items
+job_name: release
+
+output:
+  formats:
+    - cli
+
+store:
+  state_root: data
+
+operational:
+  provider: supabase
+
+release:
+  schema_version: news_items-v1
+  include_csv: true
+  publish_public_targets: false
+  rights_policy_version: news_items-v1
+  privacy_policy_version: news_items-v1

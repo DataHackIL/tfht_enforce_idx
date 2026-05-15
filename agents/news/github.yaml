@@ -58,6 +58,42 @@ classifier:
 dedup:
   similarity_threshold: 0.7
 
+discovery:
+  enabled: true
+  persist_candidates: true
+  engines:
+    brave:
+      enabled: true
+      api_key_env: DENBUST_BRAVE_SEARCH_API_KEY
+      max_results_per_query: 20
+    exa:
+      enabled: true
+      api_key_env: DENBUST_EXA_API_KEY
+      max_results_per_query: 20
+      allow_find_similar: true
+    google_cse:
+      enabled: false
+      api_key_env: DENBUST_GOOGLE_CSE_API_KEY
+      cse_id_env: DENBUST_GOOGLE_CSE_ID
+      max_results_per_query: 10
+
+source_discovery:
+  enabled: true
+  persist_candidates: true
+
+candidates:
+  keep_search_only_fallbacks: true
+  require_review_for_search_only: true
+  allow_retry_on_fetch_failure: true
+
+backfill:
+  enabled: true
+  batch_window_days: 7
+  max_candidates_per_run: 500
+  max_scrape_attempts_per_run: 100
+  query_kinds:
+    - source_targeted
+
 output:
   formats:
     - cli

@@ -1136,3 +1136,88 @@ async def test_release_publication_dir_and_release_job_mark_published(
 
     assert result.result_summary == "release built for 1 public row(s)"
     assert store.mark_calls == [("news_items", ["row-1"], "published")]
+
+
+@pytest.mark.asyncio
+async def test_release_job_no_publish_builds_bundle_without_publication(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    release_config = Config(
+        job_name="release",
+        store={"publication_dir": tmp_path / "release-pub"},
+        release={
+            "publish_public_targets": False,
+            "kaggle_dataset": "owner/news",
+            "huggingface_repo_id": "org/news-items",
+        },
+    )
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.mark_calls: list[tuple[str, list[str], str]] = []
+
+        def fetch_records(
+            self, dataset_name: str, *, limit: int | None = None
+        ) -> list[dict[str, Any]]:
+            del dataset_name, limit
+            return [{"id": "row-1"}]
+
+        def mark_publication_state(
+            self, dataset_name: str, record_ids: list[str], publication_status: str
+        ) -> None:
+            self.mark_calls.append((dataset_name, record_ids, publication_status))
+
+        def write_run_metadata(self, snapshot: RunSnapshot) -> None:
+            del snapshot
+
+        def upsert_records(self, dataset_name: str, records: list[dict[str, Any]]) -> None:
+            del dataset_name, records
+
+        def fetch_suppression_rules(self, dataset_name: str) -> list[dict[str, Any]]:
+            del dataset_name
+            return []
+
+        def fetch_news_item_corrections(self, dataset_name: str) -> list[dict[str, Any]]:
+            del dataset_name
+            return []
+
+        def fetch_missing_news_items(self, dataset_name: str) -> list[dict[str, Any]]:
+            del dataset_name
+            return []
+
+        def upsert_news_item_corrections(
+            self, dataset_name: str, records: list[dict[str, Any]]
+        ) -> None:
+            del dataset_name, records
+
+        def upsert_missing_news_items(
+            self, dataset_name: str, records: list[dict[str, Any]]
+        ) -> None:
+            del dataset_name, records
+
+    manifest = ReleaseManifest(dataset_name="news_items", release_version="2026-03-19", row_count=1)
+
+    class FakeBuilder:
+        def __init__(self, *, config: Config) -> None:
+            del config
+
+        def build_release_bundle(
+            self, *, publication_dir: Path, rows: list[dict[str, Any]]
+        ) -> ReleaseManifest:
+            del publication_dir, rows
+            return manifest
+
+    monkeypatch.setattr("denbust.pipeline.NewsItemsReleaseBuilder", FakeBuilder)
+    monkeypatch.setattr(
+        "denbust.pipeline.publish_release_bundle",
+        lambda **_kwargs: pytest.fail("public publishers must not run"),
+    )
+
+    store = FakeStore()
+    result = await run_news_items_release_job(release_config, operational_store=store)
+
+    assert result.result_summary == "release built for 1 public row(s)"
+    assert store.mark_calls == []
+    assert result.warnings == [
+        "Public publication disabled by release config; built release bundle only."
+    ]

@@ -174,6 +174,7 @@ class ReleaseConfig(BaseModel):
 
     schema_version: str = "news_items-v1"
     include_csv: bool = True
+    publish_public_targets: bool = True
     kaggle_dataset: str | None = None
     huggingface_repo_id: str | None = None
     rights_policy_version: str = "news_items-v1"
@@ -193,7 +194,22 @@ class ReleaseConfig(BaseModel):
             normalized["kaggle_dataset"] = os.environ["DENBUST_KAGGLE_DATASET"]
         if os.environ.get("DENBUST_HUGGINGFACE_REPO_ID"):
             normalized["huggingface_repo_id"] = os.environ["DENBUST_HUGGINGFACE_REPO_ID"]
+        if os.environ.get("DENBUST_RELEASE_PUBLISH") is not None:
+            normalized["publish_public_targets"] = _parse_env_bool(
+                os.environ["DENBUST_RELEASE_PUBLISH"],
+                env_name="DENBUST_RELEASE_PUBLISH",
+            )
         return normalized
+
+
+def _parse_env_bool(raw_value: str, *, env_name: str) -> bool:
+    """Parse a boolean environment variable with explicit accepted values."""
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{env_name} must be a boolean value")
 
 
 class GoogleDriveBackupConfig(BaseModel):
@@ -384,6 +400,7 @@ class BackfillConfig(BaseModel):
     max_candidates_per_run: int = Field(default=500, ge=1)
     max_scrape_attempts_per_run: int = Field(default=100, ge=1)
     max_source_targeted_taxonomy_queries_per_window: int = Field(default=50, ge=0)
+    query_kinds: list[DiscoveryQueryKind] | None = None
 
 
 # Default keywords for searching news articles (Hebrew)

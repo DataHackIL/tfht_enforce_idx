@@ -157,6 +157,17 @@ def _backfill_publication_datetime(candidate: PersistentCandidate) -> datetime |
     )
 
 
+def _matches_backfill_window(candidate: PersistentCandidate) -> bool:
+    publication_datetime = _backfill_publication_datetime(candidate)
+    if publication_datetime is None:
+        return True
+    window_start = _metadata_datetime(candidate, "backfill_window_start")
+    if window_start is not None and publication_datetime < window_start:
+        return False
+    window_end = _metadata_datetime(candidate, "backfill_window_end")
+    return not (window_end is not None and publication_datetime > window_end)
+
+
 def select_backfill_candidates_for_scrape(
     persistence: DiscoveryPersistence,
     *,
@@ -174,6 +185,7 @@ def select_backfill_candidates_for_scrape(
         candidate
         for candidate in listed_candidates
         if candidate.backfill_batch_id is not None
+        and _matches_backfill_window(candidate)
         and (
             candidate.next_scrape_attempt_at is None
             or candidate.next_scrape_attempt_at <= current_time
@@ -454,7 +466,7 @@ async def scrape_candidates(
                 else None
             )
 
-            if source_name is not None:
+            if source_name is not None and not backfill_mode:
                 source = sources_by_name[source_name]
                 try:
                     articles = source_articles_cache.get(source_name)

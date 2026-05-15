@@ -36,6 +36,17 @@ from denbust.discovery.state_paths import (
 )
 
 
+def _remove_postgres_unsupported_nuls(value: Any) -> Any:
+    """Remove NUL characters before sending JSON/text payloads to PostgREST."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_remove_postgres_unsupported_nuls(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _remove_postgres_unsupported_nuls(item) for key, item in value.items()}
+    return value
+
+
 class DiscoveryPersistence(
     DiscoveryRunStore,
     CandidateStore,
@@ -427,17 +438,23 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
         self._request(
             "POST",
             self._table_names["discovery_runs"],
-            json={
-                **run.model_dump(mode="json"),
-                "errors": run.errors,
-            },
-            extra_headers={"Prefer": "return=minimal"},
+            params={"on_conflict": "run_id"},
+            json=_remove_postgres_unsupported_nuls(
+                {
+                    **run.model_dump(mode="json"),
+                    "errors": run.errors,
+                }
+            ),
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
         )
 
     def upsert_candidates(self, candidates: Sequence[PersistentCandidate]) -> None:
         if not candidates:
             return
-        payload = [candidate.model_dump(mode="json") for candidate in candidates]
+        payload = [
+            _remove_postgres_unsupported_nuls(candidate.model_dump(mode="json"))
+            for candidate in candidates
+        ]
         self._request(
             "POST",
             self._table_names["persistent_candidates"],
@@ -449,7 +466,9 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
     def upsert_backfill_batches(self, batches: Sequence[BackfillBatch]) -> None:
         if not batches:
             return
-        payload = [batch.model_dump(mode="json") for batch in batches]
+        payload = [
+            _remove_postgres_unsupported_nuls(batch.model_dump(mode="json")) for batch in batches
+        ]
         self._request(
             "POST",
             self._table_names["backfill_batches"],
@@ -589,7 +608,9 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
         self._request(
             "POST",
             self._table_names["candidate_provenance"],
-            json=[event.model_dump(mode="json") for event in events],
+            json=[
+                _remove_postgres_unsupported_nuls(event.model_dump(mode="json")) for event in events
+            ],
             extra_headers={"Prefer": "return=minimal"},
         )
 
@@ -618,7 +639,10 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
         self._request(
             "POST",
             self._table_names["scrape_attempts"],
-            json=[attempt.model_dump(mode="json") for attempt in attempts],
+            json=[
+                _remove_postgres_unsupported_nuls(attempt.model_dump(mode="json"))
+                for attempt in attempts
+            ],
             extra_headers={"Prefer": "return=minimal"},
         )
 
@@ -667,7 +691,15 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
             json=json,
             headers=headers,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = response.text[:1000]
+            raise httpx.HTTPStatusError(
+                f"{exc}; response_body={body}",
+                request=exc.request,
+                response=exc.response,
+            ) from exc
         return response
 
 

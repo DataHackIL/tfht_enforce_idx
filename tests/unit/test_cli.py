@@ -1,6 +1,7 @@
 """Unit tests for CLI command wiring."""
 
 import json
+import os
 import runpy
 from pathlib import Path
 
@@ -123,6 +124,25 @@ class TestCli:
         assert backup_result.exit_code == 0
         assert release_calls == [(Path("agents/release/news_items.yaml"), DatasetName.NEWS_ITEMS)]
         assert backup_calls == [(Path("agents/backup/news_items.yaml"), DatasetName.NEWS_ITEMS)]
+
+    def test_release_no_publish_sets_temporary_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """release --no-publish should disable public targets for that invocation only."""
+        seen_values: list[str | None] = []
+        monkeypatch.delenv("DENBUST_RELEASE_PUBLISH", raising=False)
+
+        def fake_run_release(*, config_path: Path, dataset_name: DatasetName) -> None:
+            del config_path, dataset_name
+            seen_values.append(os.environ.get("DENBUST_RELEASE_PUBLISH"))
+
+        monkeypatch.setattr("denbust.pipeline.run_release", fake_run_release)
+
+        result = runner.invoke(app, ["release", "--no-publish"])
+
+        assert result.exit_code == 0
+        assert seen_values == ["false"]
+        assert os.environ.get("DENBUST_RELEASE_PUBLISH") is None
 
     def test_report_monthly_forwards_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """report monthly should forward its explicit options to the pipeline wrapper."""
