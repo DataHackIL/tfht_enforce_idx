@@ -444,17 +444,20 @@ export function parseReviewBody(rawBody) {
 
   const taxonomyCategoryId = cleanString(body.taxonomyCategoryId);
   const taxonomySubcategoryId = cleanString(body.taxonomySubcategoryId);
-  if (decision === "include" && !findTaxonomyPair(taxonomyCategoryId, taxonomySubcategoryId)) {
+  const taxonomyPair = findTaxonomyPair(taxonomyCategoryId, taxonomySubcategoryId);
+  if (decision === "include" && !taxonomyPair) {
     throw new Error("A valid taxonomy category and subcategory are required for include decisions.");
   }
+  const validCategoryId = taxonomyPair ? taxonomyCategoryId : "";
+  const validSubcategoryId = taxonomyPair ? taxonomySubcategoryId : "";
 
   return {
     itemType,
     id,
     decision,
-    taxonomyCategoryId,
-    taxonomySubcategoryId,
-    taxonomyVersion: taxonomyCategoryId && taxonomySubcategoryId ? TAXONOMY.version : "",
+    taxonomyCategoryId: validCategoryId,
+    taxonomySubcategoryId: validSubcategoryId,
+    taxonomyVersion: validCategoryId && validSubcategoryId ? TAXONOMY.version : "",
     indexRelevant: Boolean(body.indexRelevant),
     notes: cleanString(body.notes),
     manualEventLabel: cleanString(body.manualEventLabel),

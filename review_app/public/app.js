@@ -209,7 +209,9 @@ function renderDetail(item) {
   selectRadio("decision", decisionFromItem(item));
   els.categorySelect.value = item.taxonomyCategoryId || state.taxonomy.categories[0].id;
   renderSubcategories(item.taxonomySubcategoryId);
-  els.indexRelevantInput.checked = Boolean(item.indexRelevant);
+  if (item.taxonomyCategoryId) {
+    els.indexRelevantInput.checked = Boolean(item.indexRelevant);
+  }
   els.eventLabelInput.value =
     item.metadata?.annotation?.manualEventLabel ?? item.metadata?.manualEventLabel ?? item.metadata?.manualStatus ?? "";
   els.cityInput.value = item.metadata?.annotation?.manualCity ?? item.metadata?.manualCity ?? "";
@@ -288,12 +290,13 @@ async function saveReview(event) {
   if (!state.selected) return;
   els.saveButton.disabled = true;
   els.saveState.textContent = "Saving...";
+  const decision = selectedRadio("decision");
   const body = {
     itemType: state.selected.itemType,
     id: state.selected.id,
-    decision: selectedRadio("decision"),
-    taxonomyCategoryId: els.categorySelect.value,
-    taxonomySubcategoryId: els.subcategorySelect.value,
+    decision,
+    taxonomyCategoryId: decision === "include" ? els.categorySelect.value : "",
+    taxonomySubcategoryId: decision === "include" ? els.subcategorySelect.value : "",
     indexRelevant: els.indexRelevantInput.checked,
     manualEventLabel: els.eventLabelInput.value,
     manualCity: els.cityInput.value,

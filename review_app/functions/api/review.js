@@ -35,15 +35,14 @@ async function updateNewsItem(env, review, reviewerEmail) {
     annotation_notes: review.notes,
     manual_event_label: review.manualEventLabel || null,
     manual_city: review.manualCity || null,
+    geography_city: review.manualCity || null,
     manual_status: review.manualEventLabel || null,
     taxonomy_version: review.taxonomyVersion || null,
     taxonomy_category_id: review.taxonomyCategoryId || null,
     taxonomy_subcategory_id: review.taxonomySubcategoryId || null,
     index_relevant: review.decision === "include" ? review.indexRelevant : false,
   };
-  if (review.tags.length > 0) {
-    patch.topic_tags = review.tags;
-  }
+  patch.topic_tags = review.tags;
 
   if (review.decision === "include") {
     patch.publication_status = "approved";
@@ -65,7 +64,9 @@ async function updateNewsItem(env, review, reviewerEmail) {
 
   const params = new URLSearchParams({ id: `eq.${review.id}` });
   const response = await supabaseFetch(env, "news_items", { method: "PATCH", params, body: patch });
-  return Array.isArray(response.payload) ? response.payload[0] : response.payload;
+  const row = Array.isArray(response.payload) ? response.payload[0] : null;
+  if (!row) throw new Error("News item was not found.");
+  return row;
 }
 
 async function updateCandidate(env, review, reviewerEmail) {
