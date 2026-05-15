@@ -4,11 +4,13 @@ const state = {
   selected: null,
   nextOffset: 0,
   loading: false,
+  theme: "day",
 };
 
 const els = {
   reviewerEmail: document.querySelector("#reviewerEmail"),
   syncState: document.querySelector("#syncState"),
+  themeToggle: document.querySelector("#themeToggle"),
   searchInput: document.querySelector("#searchInput"),
   statusFilter: document.querySelector("#statusFilter"),
   domainFilter: document.querySelector("#domainFilter"),
@@ -40,6 +42,7 @@ const els = {
 };
 
 async function boot() {
+  initializeTheme();
   bindEvents();
   setSyncState("Loading");
   const [me, taxonomy] = await Promise.all([fetchJson("/api/me"), fetchJson("/api/taxonomy")]);
@@ -50,6 +53,7 @@ async function boot() {
 }
 
 function bindEvents() {
+  els.themeToggle.addEventListener("click", () => toggleTheme());
   els.refreshButton.addEventListener("click", () => refresh());
   els.loadMoreButton.addEventListener("click", () => loadCandidates({ append: true }));
   els.searchInput.addEventListener("input", debounce(() => refresh(), 250));
@@ -58,6 +62,26 @@ function bindEvents() {
   els.categorySelect.addEventListener("change", () => renderSubcategories());
   els.subcategorySelect.addEventListener("change", () => syncIndexRelevantFromSubcategory());
   els.reviewForm.addEventListener("submit", saveReview);
+}
+
+function initializeTheme() {
+  const storedTheme = window.localStorage.getItem("tfht-review-theme");
+  state.theme = storedTheme === "night" ? "night" : "day";
+  applyTheme();
+}
+
+function toggleTheme() {
+  state.theme = state.theme === "night" ? "day" : "night";
+  window.localStorage.setItem("tfht-review-theme", state.theme);
+  applyTheme();
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+  document.body.classList.toggle("theme-night", state.theme === "night");
+  document.body.classList.toggle("theme-day", state.theme !== "night");
+  els.themeToggle.setAttribute("aria-pressed", String(state.theme === "night"));
+  els.themeToggle.textContent = state.theme === "night" ? "Day mode" : "Night mode";
 }
 
 async function refresh() {

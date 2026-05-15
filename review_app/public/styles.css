@@ -3,6 +3,10 @@
   --bg: #f5f6f4;
   --panel: #ffffff;
   --panel-strong: #f0f2ee;
+  --panel-hover: #fbfdfc;
+  --field-bg: #ffffff;
+  --topbar-bg: #17201d;
+  --topbar-text: #ffffff;
   --text: #1e2524;
   --muted: #69736f;
   --line: #d8ded9;
@@ -11,6 +15,41 @@
   --danger: #a43b33;
   --warning: #a16312;
   --shadow: 0 10px 32px rgba(20, 35, 30, 0.08);
+  --snippet: #34403c;
+  --score-bg: #d9f3ef;
+  --score-text: #06544d;
+  --score-line: #b5dcd5;
+  --warning-bg: #fff4df;
+  --warning-line: #f1d4a7;
+  --danger-bg: #fdecea;
+  --danger-line: #efc0bc;
+}
+
+:root[data-theme="night"] {
+  color-scheme: dark;
+  --bg: #101815;
+  --panel: #17211d;
+  --panel-strong: #202c27;
+  --panel-hover: #1b2924;
+  --field-bg: #111b17;
+  --topbar-bg: #0b1210;
+  --topbar-text: #edf7f3;
+  --text: #edf7f3;
+  --muted: #a4b7af;
+  --line: #34423c;
+  --accent: #40c4b3;
+  --accent-strong: #62d8c9;
+  --danger: #ffb0a8;
+  --warning: #ffd38c;
+  --shadow: 0 12px 36px rgba(0, 0, 0, 0.32);
+  --snippet: #cbd9d4;
+  --score-bg: #123f38;
+  --score-text: #9cf0df;
+  --score-line: #23695e;
+  --warning-bg: #3c2d14;
+  --warning-line: #735526;
+  --danger-bg: #44201e;
+  --danger-line: #7a3934;
 }
 
 * {
@@ -41,7 +80,8 @@ textarea {
   justify-content: space-between;
   gap: 24px;
   background: #17201d;
-  color: #fff;
+  background: var(--topbar-bg);
+  color: var(--topbar-text);
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -68,6 +108,18 @@ textarea {
   gap: 12px;
   color: #dce5e1;
   font-size: 13px;
+}
+
+.themeToggle {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--topbar-text);
+}
+
+.themeToggle:hover {
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .state,
@@ -119,7 +171,7 @@ textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--field-bg);
   color: var(--text);
   padding: 10px 11px;
   outline: none;
@@ -210,7 +262,7 @@ button:disabled {
 .candidateCard:hover,
 .candidateCard.active {
   border-color: var(--accent);
-  background: #fbfdfc;
+  background: var(--panel-hover);
 }
 
 .candidateCard h3 {
@@ -242,21 +294,21 @@ button:disabled {
 }
 
 .pill.score {
-  background: #d9f3ef;
-  color: #06544d;
-  border-color: #b5dcd5;
+  background: var(--score-bg);
+  color: var(--score-text);
+  border-color: var(--score-line);
 }
 
 .pill.warning {
-  background: #fff4df;
+  background: var(--warning-bg);
   color: var(--warning);
-  border-color: #f1d4a7;
+  border-color: var(--warning-line);
 }
 
 .pill.danger {
-  background: #fdecea;
+  background: var(--danger-bg);
   color: var(--danger);
-  border-color: #efc0bc;
+  border-color: var(--danger-line);
 }
 
 .detailPane {
@@ -296,7 +348,7 @@ button:disabled {
 }
 
 .snippet {
-  color: #34403c;
+  color: var(--snippet);
   line-height: 1.55;
   margin: 16px 0;
 }
@@ -312,7 +364,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
-  background: #fafbf9;
+  background: var(--panel-strong);
 }
 
 .metaItem span {
@@ -366,7 +418,7 @@ legend {
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--text);
-  background: #fff;
+  background: var(--field-bg);
 }
 
 .decisionGrid input,

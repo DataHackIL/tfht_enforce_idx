@@ -9,10 +9,18 @@ rows from Supabase.
 - Sort the fetched review queue by a local likelihood score.
 - Let allowed reviewers mark rows as include, exclude, needs review, or internal only.
 - Let reviewers assign the Phase C taxonomy pair, index relevance, notes, city, event label, and tags.
+- Provide a local day/night theme preference for long review sessions.
 - Store `news_items` annotations on the existing operational row fields.
 - Store discovery-only candidate annotations under `persistent_candidates.metadata.review_app_annotation`.
 
 This app does not publish public release bundles, change scrape queue behavior, or run discovery.
+
+## Theme
+
+Day mode is the default. Night mode is a browser-local UI preference stored in `localStorage` under
+`tfht-review-theme`; it is not a user profile setting, permission, or server-side identity claim.
+The page applies the stored theme in an early `<head>` script before first paint and scopes dark
+colors through `:root[data-theme="night"]`.
 
 ## Cloudflare Pages
 

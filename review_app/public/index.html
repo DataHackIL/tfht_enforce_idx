@@ -4,6 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TFHT Review Workbench</title>
+    <script>
+      (() => {
+        const storedTheme = window.localStorage.getItem("tfht-review-theme");
+        const theme = storedTheme === "night" ? "night" : "day";
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -13,6 +20,7 @@
         <h1>TFHT Review Workbench</h1>
       </div>
       <div class="userbox">
+        <button id="themeToggle" class="themeToggle" type="button" aria-pressed="false">Night mode</button>
         <span id="reviewerEmail">Checking access...</span>
         <span id="syncState" class="state">Loading</span>
       </div>
