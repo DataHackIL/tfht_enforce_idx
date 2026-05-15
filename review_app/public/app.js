@@ -7,6 +7,23 @@ const state = {
   theme: "day",
 };
 
+const WORKFLOW_TAGS = [
+  { id: "strong-positive", label: "Strong positive" },
+  { id: "weak-positive", label: "Weak positive" },
+  { id: "false-positive", label: "False positive" },
+  { id: "duplicate-risk", label: "Duplicate risk" },
+  { id: "needs-source-check", label: "Needs source check" },
+  { id: "needs-fact-check", label: "Needs fact check" },
+  { id: "needs-privacy-check", label: "Needs privacy check" },
+  { id: "paywall", label: "Paywall" },
+  { id: "partial-page", label: "Partial page" },
+  { id: "policy-context", label: "Policy context" },
+  { id: "court", label: "Court" },
+  { id: "police", label: "Police" },
+  { id: "welfare", label: "Welfare" },
+  { id: "reporting-context", label: "Reporting context" },
+];
+
 const els = {
   reviewerEmail: document.querySelector("#reviewerEmail"),
   syncState: document.querySelector("#syncState"),
@@ -35,7 +52,10 @@ const els = {
   indexRelevantInput: document.querySelector("#indexRelevantInput"),
   eventLabelInput: document.querySelector("#eventLabelInput"),
   cityInput: document.querySelector("#cityInput"),
-  tagsInput: document.querySelector("#tagsInput"),
+  tagOptions: document.querySelector("#tagOptions"),
+  customTagInput: document.querySelector("#customTagInput"),
+  addCustomTagButton: document.querySelector("#addCustomTagButton"),
+  selectedTags: document.querySelector("#selectedTags"),
   notesInput: document.querySelector("#notesInput"),
   saveButton: document.querySelector("#saveButton"),
   saveState: document.querySelector("#saveState"),
@@ -61,6 +81,13 @@ function bindEvents() {
   els.domainFilter.addEventListener("input", debounce(() => refresh(), 250));
   els.categorySelect.addEventListener("change", () => renderSubcategories());
   els.subcategorySelect.addEventListener("change", () => syncIndexRelevantFromSubcategory());
+  els.addCustomTagButton.addEventListener("click", () => addCustomTag());
+  els.customTagInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addCustomTag();
+    }
+  });
   els.reviewForm.addEventListener("submit", saveReview);
 }
 
@@ -185,8 +212,47 @@ function renderDetail(item) {
   els.indexRelevantInput.checked = Boolean(item.indexRelevant);
   els.eventLabelInput.value = item.metadata?.annotation?.manualEventLabel || item.metadata?.manualStatus || "";
   els.cityInput.value = item.metadata?.annotation?.manualCity || "";
-  els.tagsInput.value = Array.isArray(item.metadata?.annotation?.tags) ? item.metadata.annotation.tags.join(", ") : "";
+  renderWorkflowTags(tagsFromItem(item));
   els.notesInput.value = item.metadata?.annotation?.notes || item.metadata?.annotationNotes || "";
+}
+
+function renderWorkflowTags(selected = []) {
+  const selectedSet = new Set(selected);
+  const standardTagIds = new Set(WORKFLOW_TAGS.map((tag) => tag.id));
+  const customTags = selected.filter((tag) => !standardTagIds.has(tag));
+  const allTags = [...WORKFLOW_TAGS, ...customTags.map((tag) => ({ id: tag, label: tag }))];
+  els.tagOptions.innerHTML = allTags
+    .map(
+      (tag) => `
+        <label class="tagOption">
+          <input type="checkbox" name="workflowTag" value="${escapeAttr(tag.id)}" ${selectedSet.has(tag.id) ? "checked" : ""} />
+          <span>${escapeHtml(tag.label)}</span>
+        </label>
+      `,
+    )
+    .join("");
+  els.customTagInput.value = "";
+  updateSelectedTagSummary();
+  els.tagOptions.querySelectorAll('input[name="workflowTag"]').forEach((input) => {
+    input.addEventListener("change", updateSelectedTagSummary);
+  });
+}
+
+function addCustomTag() {
+  const tag = normalizeTag(els.customTagInput.value);
+  if (!tag) return;
+  const selected = new Set(selectedWorkflowTags());
+  selected.add(tag);
+  renderWorkflowTags([...selected]);
+}
+
+function selectedWorkflowTags() {
+  return [...els.tagOptions.querySelectorAll('input[name="workflowTag"]:checked')].map((input) => input.value);
+}
+
+function updateSelectedTagSummary() {
+  const tags = selectedWorkflowTags();
+  els.selectedTags.textContent = tags.length > 0 ? `Selected: ${tags.join(", ")}` : "No workflow tags selected";
 }
 
 function renderTaxonomy() {
@@ -230,10 +296,7 @@ async function saveReview(event) {
     indexRelevant: els.indexRelevantInput.checked,
     manualEventLabel: els.eventLabelInput.value,
     manualCity: els.cityInput.value,
-    tags: els.tagsInput.value
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean),
+    tags: selectedWorkflowTags(),
     notes: els.notesInput.value,
   };
 
@@ -250,6 +313,12 @@ async function saveReview(event) {
   } finally {
     els.saveButton.disabled = false;
   }
+}
+
+function tagsFromItem(item) {
+  if (Array.isArray(item.metadata?.annotation?.tags)) return item.metadata.annotation.tags;
+  if (Array.isArray(item.metadata?.topicTags)) return item.metadata.topicTags;
+  return [];
 }
 
 function metaItems(item) {
@@ -330,6 +399,16 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value);
+}
+
+function normalizeTag(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("_", "-")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 }
 
 boot().catch((error) => {

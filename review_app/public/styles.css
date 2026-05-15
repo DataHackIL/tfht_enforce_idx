@@ -314,6 +314,8 @@ button:disabled {
 .detailPane {
   position: sticky;
   top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -409,7 +411,8 @@ legend {
 }
 
 .decisionGrid label,
-.checkLabel {
+.checkLabel,
+.tagOption {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -422,8 +425,39 @@ legend {
 }
 
 .decisionGrid input,
-.checkLabel input {
+.checkLabel input,
+.tagOption input {
   width: auto;
+}
+
+.tagFieldset {
+  display: grid;
+  gap: 12px;
+}
+
+.tagOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tagOption {
+  min-height: 34px;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.customTagRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  gap: 10px;
+}
+
+.selectedTags {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .taxonomyGrid {
@@ -464,6 +498,8 @@ legend {
   .taxonomyGrid,
   .fieldGrid,
   .decisionGrid,
+  .tagOptions,
+  .customTagRow,
   .metaGrid {
     grid-template-columns: 1fr;
   }

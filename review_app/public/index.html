@@ -110,8 +110,8 @@
 
               <div class="fieldGrid">
                 <label>
-                  Event label
-                  <input id="eventLabelInput" type="text" placeholder="Short internal label" />
+                  Case / event label
+                  <input id="eventLabelInput" type="text" placeholder="Short unique case name" />
                 </label>
                 <label>
                   City
@@ -119,10 +119,15 @@
                 </label>
               </div>
 
-              <label>
-                Tags
-                <input id="tagsInput" type="text" placeholder="comma-separated operational tags" />
-              </label>
+              <fieldset class="tagFieldset">
+                <legend>Workflow tags</legend>
+                <div id="tagOptions" class="tagOptions"></div>
+                <div class="customTagRow">
+                  <input id="customTagInput" type="text" placeholder="Add custom tag after reviewing the list" />
+                  <button id="addCustomTagButton" type="button">Add tag</button>
+                </div>
+                <div id="selectedTags" class="selectedTags" aria-live="polite"></div>
+              </fieldset>
 
               <label>
                 Review notes

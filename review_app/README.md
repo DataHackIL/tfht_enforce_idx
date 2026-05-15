@@ -8,7 +8,9 @@ rows from Supabase.
 - Read operational rows from Supabase through Cloudflare Pages Functions.
 - Sort the fetched review queue by a local likelihood score.
 - Let allowed reviewers mark rows as include, exclude, needs review, or internal only.
-- Let reviewers assign the Phase C taxonomy pair, index relevance, notes, city, event label, and tags.
+- Let reviewers assign the Phase C taxonomy pair, index relevance, notes, city, case/event label,
+  and workflow tags.
+- Show the standard workflow tag vocabulary before allowing custom tag additions.
 - Provide a local day/night theme preference for long review sessions.
 - Store `news_items` annotations on the existing operational row fields.
 - Store discovery-only candidate annotations under `persistent_candidates.metadata.review_app_annotation`.
@@ -21,6 +23,32 @@ Day mode is the default. Night mode is a browser-local UI preference stored in `
 `tfht-review-theme`; it is not a user profile setting, permission, or server-side identity claim.
 The page applies the stored theme in an early `<head>` script before first paint and scopes dark
 colors through `:root[data-theme="night"]`.
+
+## Review Vocabulary
+
+The app keeps taxonomy and workflow tagging separate:
+
+- `Case / event label` is free text for a short human-readable case name.
+- `Workflow tags` are selected from a visible standard list first.
+- Reviewers can add a custom workflow tag only from the custom-tag control shown below the standard
+  list.
+
+Current standard workflow tags:
+
+- `strong-positive`
+- `weak-positive`
+- `false-positive`
+- `duplicate-risk`
+- `needs-source-check`
+- `needs-fact-check`
+- `needs-privacy-check`
+- `paywall`
+- `partial-page`
+- `policy-context`
+- `court`
+- `police`
+- `welfare`
+- `reporting-context`
 
 ## Cloudflare Pages
 
