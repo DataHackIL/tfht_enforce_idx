@@ -35,7 +35,7 @@ async function updateNewsItem(env, review, reviewerEmail) {
     annotation_notes: review.notes,
     manual_event_label: review.manualEventLabel || null,
     manual_city: review.manualCity || null,
-    manual_status: review.decision,
+    manual_status: review.manualEventLabel || null,
     taxonomy_version: review.taxonomyVersion || null,
     taxonomy_category_id: review.taxonomyCategoryId || null,
     taxonomy_subcategory_id: review.taxonomySubcategoryId || null,

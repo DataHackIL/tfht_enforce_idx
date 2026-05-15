@@ -194,12 +194,16 @@ export function errorResponse(message, status = 500, details = undefined) {
 }
 
 export function getAccessEmail(request, env) {
-  return (
+  const cfEmail = (
     request.headers.get("cf-access-authenticated-user-email") ||
     request.headers.get("CF-Access-Authenticated-User-Email") ||
-    env.TFHT_REVIEW_DEV_EMAIL ||
     ""
   ).trim();
+  if (cfEmail) return cfEmail;
+  if (env.TFHT_REVIEW_DEV_MODE && env.TFHT_REVIEW_DEV_EMAIL) {
+    return String(env.TFHT_REVIEW_DEV_EMAIL).trim();
+  }
+  return "";
 }
 
 export function parseAllowedEmails(env) {
@@ -215,7 +219,7 @@ export function requireReviewer(request, env) {
   if (!email) {
     return { ok: false, email: "", response: errorResponse("Cloudflare Access email is missing.", 401) };
   }
-  if (allowed.length > 0 && !allowed.includes(email)) {
+  if (allowed.length === 0 || !allowed.includes(email)) {
     return { ok: false, email, response: errorResponse("Reviewer email is not allowed.", 403) };
   }
   return { ok: true, email, response: null };
@@ -316,6 +320,8 @@ export function normalizeNewsItem(row) {
       rightsClass: row.rights_class || "",
       privacyRiskLevel: row.privacy_risk_level || "",
       manualStatus: row.manual_status || "",
+      manualEventLabel: row.manual_event_label || "",
+      manualCity: row.manual_city || "",
       manuallyReviewed: Boolean(row.manually_reviewed),
       annotationNotes: row.annotation_notes || "",
       organizations: row.organizations_mentioned || [],
@@ -476,8 +482,9 @@ function scoreItem({ text, confidence, status, basis, needsReview, sourceHints, 
     }
   }
 
-  if (confidence !== null && confidence !== undefined && confidence !== "" && Number.isFinite(Number(confidence))) {
-    const confidenceScore = Math.round(Number(confidence) * 20);
+  const resolvedConfidence = resolveConfidence(confidence);
+  if (resolvedConfidence !== null) {
+    const confidenceScore = Math.round(resolvedConfidence * 20);
     score += confidenceScore;
     reasons.push(`classifier confidence +${confidenceScore}`);
   }
@@ -508,8 +515,17 @@ function scoreItem({ text, confidence, status, basis, needsReview, sourceHints, 
   return { score, reasons: [...new Set(reasons)].slice(0, 8) };
 }
 
+function resolveConfidence(confidence) {
+  if (confidence === null || confidence === undefined || confidence === "") return null;
+  const CONFIDENCE_MAP = { high: 0.9, medium: 0.6, low: 0.3 };
+  const lc = String(confidence).toLowerCase();
+  if (lc in CONFIDENCE_MAP) return CONFIDENCE_MAP[lc];
+  const numeric = Number(confidence);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function isCompleted(item) {
-  return ["approved", "suppressed", "include", "exclude"].includes(item.publicationStatus);
+  return ["approved", "suppressed", "include", "exclude", "internal_only"].includes(item.publicationStatus);
 }
 
 function parseContentRangeCount(value) {

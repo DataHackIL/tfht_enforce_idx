@@ -210,8 +210,9 @@ function renderDetail(item) {
   els.categorySelect.value = item.taxonomyCategoryId || state.taxonomy.categories[0].id;
   renderSubcategories(item.taxonomySubcategoryId);
   els.indexRelevantInput.checked = Boolean(item.indexRelevant);
-  els.eventLabelInput.value = item.metadata?.annotation?.manualEventLabel || item.metadata?.manualStatus || "";
-  els.cityInput.value = item.metadata?.annotation?.manualCity || "";
+  els.eventLabelInput.value =
+    item.metadata?.annotation?.manualEventLabel ?? item.metadata?.manualEventLabel ?? item.metadata?.manualStatus ?? "";
+  els.cityInput.value = item.metadata?.annotation?.manualCity ?? item.metadata?.manualCity ?? "";
   renderWorkflowTags(tagsFromItem(item));
   els.notesInput.value = item.metadata?.annotation?.notes || item.metadata?.annotationNotes || "";
 }
@@ -337,13 +338,15 @@ function metaItems(item) {
 function decisionFromItem(item) {
   if (item.publicationStatus === "approved" || item.publicationStatus === "include") return "include";
   if (item.publicationStatus === "suppressed" || item.publicationStatus === "exclude") return "exclude";
+  if (item.publicationStatus === "internal_only") return "internal_only";
   if (item.reviewStatus && item.reviewStatus !== "none") return "needs_review";
   return "include";
 }
 
 function statusPill(item) {
   const status = item.publicationStatus || item.reviewStatus || item.candidateStatus || "pending";
-  const className = ["suppressed", "exclude"].includes(status) ? "danger" : item.reviewStatus ? "warning" : "";
+  const needsReview = item.reviewStatus && item.reviewStatus !== "none";
+  const className = ["suppressed", "exclude"].includes(status) ? "danger" : needsReview ? "warning" : "";
   return `<span class="pill ${className}">${escapeHtml(status)}</span>`;
 }
 

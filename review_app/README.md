@@ -52,12 +52,9 @@ Current standard workflow tags:
 
 ## Cloudflare Pages
 
-Use the private Cloudflare account associated with `shaypal5@gmail.com`, not the Adanim account.
-The token is loaded from the documented personal env file on this laptop:
-
-```bash
-source /Users/shaypalachy/.config/noa/cloudflare_api_token.env
-```
+Use the Cloudflare account that owns the `tfht-review-workbench` Pages project, not the Adanim
+account. Load your personal Cloudflare API token before running wrangler commands — the token file
+path varies per contributor and should be kept outside the repo (e.g. under `~/.config/`).
 
 Expected Pages project name:
 
@@ -81,12 +78,11 @@ Deploy:
 ```bash
 npx wrangler pages deploy review_app/public \
   --project-name tfht-review-workbench \
-  --branch main \
-  --commit-dirty=true
+  --branch main
 ```
 
 From inside `review_app/`, the equivalent command is:
 
 ```bash
-npx wrangler pages deploy public --project-name tfht-review-workbench --branch main --commit-dirty=true
+npx wrangler pages deploy public --project-name tfht-review-workbench --branch main
 ```
