@@ -111,6 +111,12 @@ Planned future datasets:
   objects still use the normal taxonomy validation path and increment
   `double_wrapper_recovery_count`, while pseudo-JSON, unbalanced wrappers, non-object JSON,
   code-fenced malformed JSON, and invalid taxonomy pairs remain rejected
+- Interprets the first post-recovery bounded Phase C evidence pass: four double-wrapper recoveries
+  replaced the prior five-parse-failure pattern with zero parse failures across 100 fallback
+  classifier inputs, invalid taxonomy warnings stayed at one, and no retained fallback row carried
+  an invalid taxonomy pair. One retained low-confidence partial fallback row had only a legacy
+  category and no TFHT taxonomy leaf, so parser-output hardening pauses while the next Phase C
+  classifier item investigates fallback retention without usable taxonomy.
 - Keeps source-suggestion scrape diagnostics evidence-driven by reporting generic partial
   recoveries separately from definite scrape failures, without otherwise changing source-suggestion
   ranking

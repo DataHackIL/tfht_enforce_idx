@@ -746,6 +746,35 @@ behavior, browser/CDP scraper behavior, scrape caps, source-family support, sour
 query fanout, or
 generated-data artifact tracking.
 
+After `CLASSIFIER-PR-POST-RECOVERY-EVIDENCE-CHECK`, the first post-recovery bounded Phase C
+January 1-7 evidence pass used `data/may_26_followup/20260514T231311Z/` with the same tracked
+Brave+Exa/no-Google config and Chrome-CDP scrape shape. The generated artifacts remain untracked.
+The discovery leg persisted 1,878 candidates, all from Brave, because Exa returned
+`402 Payment Required` near the end of discovery; Google CSE stayed disabled by the local config.
+The scrape drain selected 100 fallback classifier inputs, recorded 160 scrape attempts, retained 33
+candidate-fallback operational rows, left 1,431 eligible candidates, and stopped at
+`budget_cap_reached`. Mako browser search attempts repeatedly timed out behind the Chrome-CDP
+challenge path, so this pass should be read as classifier-output evidence with provider and
+browser-source caveats, not as clean source-adapter health evidence.
+
+Both the full scrape debug payload and compact summary recorded
+`double_wrapper_recovery_count=4`, `parse_failure_count=0`, `invalid_taxonomy_pair_count=1`,
+`invalid_legacy_pair_count=0`, and `relevant_without_usable_taxonomy_count=0` under both
+`classifier_summary.warning_counts` and `fallback_classifier_summary.warning_counts`. The
+parse-failure diagnostics were empty. Compared with the prior 5/100 parse-failure structure pass,
+the parser recovery removed the repeated double-wrapper parse failures without increasing invalid
+taxonomy warnings.
+
+The matching post-scrape discovery diagnostic reported
+`invalid_taxonomy_pair_record_count=0`, so no retained fallback row carried an invalid taxonomy
+pair. It also reported `fallback_record_without_taxonomy_count=1` and
+`partial_page_fallback_without_taxonomy_count=1`: a single low-confidence, internal-only Globes
+partial fallback row retained a legacy `trafficking` category with no TFHT taxonomy leaf. That is
+not parser corruption, but it is the next classifier-retention policy question. Further
+classifier-output parser hardening should pause; the next Phase C classifier item should
+investigate whether retained candidate-fallback rows require usable TFHT taxonomy or should be
+reported separately when they are legacy-only.
+
 ## One-Time 90-Day Re-Scan
 
 `C-8` does not add a dedicated workflow. The catch-up run uses the existing backfill jobs with the
