@@ -2386,6 +2386,8 @@ async def run_news_backfill_discover_job(
         persisted_runs: list[PersistedSourceDiscovery] = []
 
         for window in windows:
+            window_run_start = len(persisted_runs)
+
             if source_native_can_run:
                 persisted = await _run_source_native_backfill_discovery(
                     config=config,
@@ -2430,11 +2432,27 @@ async def run_news_backfill_discover_job(
                         )
                     )
 
+            discovered_count += sum(
+                p.run.candidate_count for p in persisted_runs[window_run_start:]
+            )
+            if discovered_count >= config.backfill.max_candidates_per_run:
+                logger.info(
+                    "backfill batch %s: candidate cap %d reached after window %d/%d, stopping early",
+                    batch.batch_id,
+                    config.backfill.max_candidates_per_run,
+                    window.index,
+                    len(windows),
+                )
+                batch_warnings.append(
+                    f"candidate cap {config.backfill.max_candidates_per_run} reached after "
+                    f"window {window.index}/{len(windows)}"
+                )
+                break
+
         total_skipped = 0
         for persisted in persisted_runs:
             query_count += persisted.run.query_count
             total_skipped += persisted.run.skipped_query_count
-            discovered_count += persisted.run.candidate_count
             result.raw_article_count += persisted.run.candidate_count
             result.errors.extend(persisted.run.errors)
             batch_errors.extend(persisted.run.errors)

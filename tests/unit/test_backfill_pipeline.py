@@ -1352,3 +1352,136 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
     assert processed.warnings == ["raw_articles_skipped_outside_backfill_window=1"]
     assert [article.title for article in process.await_args.kwargs["all_articles"]] == ["title"]
     assert processed_store.get_backfill_batch("batch-1") is not None
+
+
+@pytest.mark.asyncio
+async def test_run_news_backfill_discover_job_stops_at_candidate_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When max_candidates_per_run is reached the job stops after that window and warns."""
+    monkeypatch.setenv("DENBUST_BACKFILL_DATE_FROM", "2026-01-01T00:00:00+00:00")
+    monkeypatch.setenv("DENBUST_BACKFILL_DATE_TO", "2026-01-21T00:00:00+00:00")
+
+    store = StateRepoDiscoveryPersistence(
+        resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    )
+    windows_seen: list[int] = []
+
+    async def fake_engine(
+        *,
+        config: Config,
+        run_id: str,
+        batch_id: str,
+        window,
+        engine_name: str,
+    ) -> PersistedSourceDiscovery:
+        del config, run_id, engine_name
+        windows_seen.append(window.index)
+        candidate = build_candidate(batch_id).model_copy(
+            update={"candidate_id": f"c-{window.index}"}
+        )
+        store.upsert_candidates([candidate])
+        return PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id=f"run-{window.index}",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.BACKFILL_DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                query_count=1,
+                candidate_count=3,
+                merged_candidate_count=3,
+            ),
+            candidates=[candidate],
+            provenance=[],
+            warnings=[],
+        )
+
+    monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: store)
+    monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+    monkeypatch.setattr("denbust.pipeline._run_backfill_engine_discovery", fake_engine)
+
+    result = await run_news_backfill_discover_job(
+        Config(
+            job_name=JobName.BACKFILL_DISCOVER,
+            store={"state_root": tmp_path},
+            discovery={
+                "enabled": True,
+                "persist_candidates": True,
+                "engines": {"brave": {"enabled": True}},
+            },
+            backfill={"max_candidates_per_run": 5},
+        )
+    )
+
+    assert result.fatal is False
+    # With cap=5 and 3 candidates per window, cap is hit after window 1 (total 3 < 5)
+    # then after window 2 (total 6 >= 5), so only 2 windows run.
+    assert len(windows_seen) == 2
+    assert any("candidate cap" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_run_news_backfill_discover_job_processes_all_windows_under_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When discovered candidates stay below the cap, all windows are processed."""
+    monkeypatch.setenv("DENBUST_BACKFILL_DATE_FROM", "2026-01-01T00:00:00+00:00")
+    monkeypatch.setenv("DENBUST_BACKFILL_DATE_TO", "2026-01-14T00:00:00+00:00")
+
+    store = StateRepoDiscoveryPersistence(
+        resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    )
+    windows_seen: list[int] = []
+
+    async def fake_engine(
+        *,
+        config: Config,
+        run_id: str,
+        batch_id: str,
+        window,
+        engine_name: str,
+    ) -> PersistedSourceDiscovery:
+        del config, run_id, engine_name
+        windows_seen.append(window.index)
+        candidate = build_candidate(batch_id).model_copy(
+            update={"candidate_id": f"c-{window.index}"}
+        )
+        store.upsert_candidates([candidate])
+        return PersistedSourceDiscovery(
+            run=DiscoveryRun(
+                run_id=f"run-{window.index}",
+                dataset_name=DatasetName.NEWS_ITEMS,
+                job_name=JobName.BACKFILL_DISCOVER,
+                status=DiscoveryRunStatus.SUCCEEDED,
+                query_count=1,
+                candidate_count=1,
+                merged_candidate_count=1,
+            ),
+            candidates=[candidate],
+            provenance=[],
+            warnings=[],
+        )
+
+    monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: store)
+    monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+    monkeypatch.setattr("denbust.pipeline._run_backfill_engine_discovery", fake_engine)
+
+    result = await run_news_backfill_discover_job(
+        Config(
+            job_name=JobName.BACKFILL_DISCOVER,
+            store={"state_root": tmp_path},
+            discovery={
+                "enabled": True,
+                "persist_candidates": True,
+                "engines": {"brave": {"enabled": True}},
+            },
+            backfill={"max_candidates_per_run": 100},
+        )
+    )
+
+    assert result.fatal is False
+    # 2 windows over 14 days, all should run
+    assert len(windows_seen) == 2
+    assert not any("candidate cap" in w for w in result.warnings)

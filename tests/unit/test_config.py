@@ -322,7 +322,7 @@ class TestConfig:
         config = BackfillConfig()
 
         assert config.batch_window_days == 7
-        assert config.max_candidates_per_run == 500
+        assert config.max_candidates_per_run == 5000
         assert config.max_scrape_attempts_per_run == 100
         assert config.max_source_targeted_taxonomy_queries_per_window == 50
 

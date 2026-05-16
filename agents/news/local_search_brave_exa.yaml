@@ -96,7 +96,6 @@ source_discovery:
 backfill:
   enabled: true
   batch_window_days: 7
-  max_candidates_per_run: 500
   max_scrape_attempts_per_run: 100
 
 output:
