@@ -1309,10 +1309,11 @@ def test_build_discovery_diagnostic_report_builds_source_suggestions(tmp_path: P
     assert "Source suggestions" in render_discovery_diagnostic_report(report)
 
 
-def test_source_suggestions_classify_sport1_candidate_only_pressure_without_demoting(
+def test_source_suggestions_still_surface_sport1_domain_from_existing_db_candidates(
     tmp_path: Path,
 ) -> None:
-    """Sport1 candidate-only pressure should be diagnostic, not an eligibility filter."""
+    """sport1 candidates already in DB should surface in source suggestions without a special
+    diagnostic classification (the domain is now globally excluded so no new ones will arrive)."""
     now = datetime.now(UTC)
     config = Config(store={"state_root": tmp_path})
     persistence = StateRepoDiscoveryPersistence(config.discovery_state_paths)
@@ -1373,9 +1374,12 @@ def test_source_suggestions_classify_sport1_candidate_only_pressure_without_demo
     assert suggestion.unsupported_count == 0
     assert suggestion.run_count == 2
     assert suggestion.score == 4.5
-    assert suggestion.diagnostic_classification == "sports_vertical_candidate_only"
-    assert "candidate-only sports-vertical pressure" in (suggestion.diagnostic_note or "")
-    assert "diagnostic=sports_vertical_candidate_only" in render_discovery_diagnostic_report(report)
+    # sport1.maariv.co.il is now globally excluded from search queries and classified as
+    # IRRELEVANT_CONTENT_DOMAIN at the candidate-filter layer.  It no longer appears in
+    # _SOURCE_SUGGESTION_DIAGNOSTIC_DOMAINS and therefore carries no diagnostic label —
+    # existing DB candidates (inserted before the exclusion) still surface in the report.
+    assert suggestion.diagnostic_classification is None
+    assert suggestion.diagnostic_note is None
 
 
 def test_build_discovery_diagnostic_report_ignores_candidates_without_domain(

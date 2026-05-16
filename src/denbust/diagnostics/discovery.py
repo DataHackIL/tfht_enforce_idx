@@ -34,10 +34,9 @@ from denbust.taxonomy import default_taxonomy
 _SEARCH_ENGINE_NAMES: tuple[str, ...] = ("brave", "exa", "google_cse")
 _SOURCE_SUGGESTION_EXCLUDED_DOMAINS: frozenset[str] = frozenset({"facebook.com"})
 _SOURCE_SUGGESTION_DIAGNOSTIC_DOMAINS: dict[str, tuple[str, str]] = {
-    "sport1.maariv.co.il": (
-        "sports_vertical_candidate_only",
-        "candidate-only sports-vertical pressure; keep scrape-eligible until attempted evidence exists",
-    )
+    # sport1.maariv.co.il was here; it is now in candidate_filters._IRRELEVANT_CONTENT_DOMAINS
+    # and excluded from all broad/taxonomy search queries. Remove diagnostic tracking once
+    # existing candidates from this domain have been flushed from the DB.
 }
 _RETRY_BACKLOG_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.QUEUED,

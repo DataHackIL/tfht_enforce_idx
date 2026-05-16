@@ -282,6 +282,58 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
     }
 
 
+def test_build_discovery_queries_broad_queries_carry_excluded_domains() -> None:
+    """Broad queries should include the globally-excluded domain list."""
+    config = Config(
+        keywords=["בית בושת"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["broad"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    broad_queries = [query for query in queries if query.query_kind is DiscoveryQueryKind.BROAD]
+    assert broad_queries
+    for query in broad_queries:
+        assert "sport1.maariv.co.il" in query.excluded_domains
+
+
+def test_build_discovery_queries_taxonomy_queries_carry_excluded_domains() -> None:
+    """Taxonomy-targeted queries should include the globally-excluded domain list."""
+    config = Config(
+        keywords=[],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["taxonomy_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    taxonomy_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.TAXONOMY_TARGETED
+    ]
+    assert taxonomy_queries
+    for query in taxonomy_queries:
+        assert "sport1.maariv.co.il" in query.excluded_domains
+
+
+def test_build_discovery_queries_source_targeted_queries_have_no_excluded_domains() -> None:
+    """Source-targeted queries are already scoped; they must not carry excluded_domains."""
+    config = Config(
+        keywords=["בית בושת"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["source_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    source_queries = [
+        query for query in queries if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED
+    ]
+    assert source_queries
+    for query in source_queries:
+        assert not query.excluded_domains
+
+
 def test_build_discovery_queries_can_disable_social_targeted_generation() -> None:
     """Explicit query-kind configuration should still allow social discovery to be disabled."""
     config = Config(

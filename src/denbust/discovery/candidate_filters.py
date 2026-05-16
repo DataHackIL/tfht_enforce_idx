@@ -34,6 +34,16 @@ _SOCIAL_PROFILE_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
+# Domains that consistently produce off-topic candidates and waste classifier
+# API budget.  All subdomains are matched (e.g. sport1.maariv.co.il matches
+# "sport1.maariv.co.il").  Add new entries here when a domain is confirmed
+# irrelevant via review-workbench bulk-exclusion or diagnostics evidence.
+_IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
+    {
+        "sport1.maariv.co.il",  # sports vertical — consistently off-topic
+    }
+)
+
 _SOCIAL_PROFILE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "linkedin.com": ("/company/", "/in/", "/school/", "/showcase/"),
     "youtube.com": ("/@", "/channel/", "/c/", "/user/"),
@@ -53,6 +63,7 @@ class SearchNoiseReason(StrEnum):
     APP_STORE = "app_store"
     SOCIAL_PROFILE = "social_profile"
     UNSUPPORTED_SEARCH_DOMAIN = "unsupported_search_domain"
+    IRRELEVANT_CONTENT_DOMAIN = "irrelevant_content_domain"
 
 
 @dataclass(frozen=True)
@@ -61,6 +72,16 @@ class SearchNoiseClassification:
 
     reason: SearchNoiseReason
     matched_domain: str
+
+
+def globally_excluded_search_domains() -> frozenset[str]:
+    """Return the set of domains excluded from all broad/taxonomy search queries.
+
+    These are domains that are structurally off-topic (sports verticals, utility
+    sites, etc.) and should never consume search-engine quota.  The list mirrors
+    ``_IRRELEVANT_CONTENT_DOMAINS``; callers should not duplicate it.
+    """
+    return _IRRELEVANT_CONTENT_DOMAINS
 
 
 def normalize_domain(domain: str | None) -> str | None:
@@ -177,6 +198,11 @@ def classify_search_noise(
     if (matched_domain := match_domain(domain, _UTILITY_SEARCH_DOMAINS)) is not None:
         return SearchNoiseClassification(
             reason=SearchNoiseReason.UNSUPPORTED_SEARCH_DOMAIN,
+            matched_domain=matched_domain,
+        )
+    if (matched_domain := match_domain(domain, _IRRELEVANT_CONTENT_DOMAINS)) is not None:
+        return SearchNoiseClassification(
+            reason=SearchNoiseReason.IRRELEVANT_CONTENT_DOMAIN,
             matched_domain=matched_domain,
         )
     if _is_social_profile_candidate(discovered):

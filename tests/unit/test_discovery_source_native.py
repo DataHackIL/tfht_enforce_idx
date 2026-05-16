@@ -6,7 +6,6 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
 from pydantic import HttpUrl
 
 from denbust.data_models import RawArticle
@@ -308,18 +307,11 @@ def test_persist_discovered_candidates_marks_search_noise_unsupported(
     }
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://www.maariv.co.il/news/law/article-1270778",
-        "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884",
-    ],
-)
-def test_persist_discovered_candidates_keeps_maariv_and_sport1_articles_scrapeable(
-    url: str,
+def test_persist_discovered_candidates_keeps_maariv_articles_scrapeable(
     tmp_path: Path,
 ) -> None:
-    """Candidate-only Sport1 evidence should not demote article-like candidates."""
+    """Articles from the main maariv.co.il domain should remain scrapeable candidates."""
+    url = "https://www.maariv.co.il/news/law/article-1270778"
     paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
     persistence = StateRepoDiscoveryPersistence(paths)
     discovery = DiscoveredCandidate(
@@ -344,6 +336,37 @@ def test_persist_discovered_candidates_keeps_maariv_and_sport1_articles_scrapeab
     assert candidate.candidate_status.value == "new"
     assert candidate.needs_review is False
     assert "unsupported_source_filter" not in candidate.metadata
+
+
+def test_persist_discovered_candidates_demotes_sport1_as_irrelevant_content_domain(
+    tmp_path: Path,
+) -> None:
+    """sport1.maariv.co.il is an off-topic vertical: candidates must be marked unsupported."""
+    url = "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884"
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    persistence = StateRepoDiscoveryPersistence(paths)
+    discovery = DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=ProducerKind.SEARCH_ENGINE,
+        query_text="בית בושת",
+        candidate_url=HttpUrl(url),
+        canonical_url=HttpUrl(url),
+        title="ליגת העל",
+        snippet="כדורגל ישראלי",
+        discovered_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+        metadata={"query_kind": "broad"},
+    )
+
+    persisted = persist_discovered_candidates(
+        run=DiscoveryRun(run_id="run-sport1-excluded"),
+        discovered_candidates=[discovery],
+        persistence=persistence,
+    )
+
+    candidate = persisted.candidates[0]
+    assert candidate.candidate_status.value == "unsupported_source"
+    assert candidate.metadata.get("unsupported_source_reason") == "irrelevant_content_domain"
+    assert candidate.metadata.get("unsupported_source_domain") == "sport1.maariv.co.il"
 
 
 def test_persist_discovered_candidates_demotes_existing_unattempted_search_noise(
