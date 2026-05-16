@@ -111,7 +111,6 @@ export async function onRequestPost({ request, env }) {
         manually_reviewed: true,
         manually_overridden: true,
         annotation_source: "ingest_app",
-        relevant: decision === "include",
         content_basis: "candidate_only",
       };
       try {
