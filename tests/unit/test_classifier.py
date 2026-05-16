@@ -879,6 +879,33 @@ class TestClassificationPromptContent:
         """Prompt should explicitly exclude the out-of-scope celebrity/profile class."""
         assert "Celebrity, lifestyle, profile, or entertainment stories" in CLASSIFICATION_PROMPT
 
+    def test_prompt_contains_few_shot_examples(self) -> None:
+        """Prompt must contain at least one verified positive and one negative example."""
+        assert "Examples (verified ground truth" in CLASSIFICATION_PROMPT
+        assert "administrative_closure" in CLASSIFICATION_PROMPT
+        assert "trafficking_sexual_exploitation" in CLASSIFICATION_PROMPT
+        assert "soliciting_prostitution" in CLASSIFICATION_PROMPT
+        assert "nordic_model_law" in CLASSIFICATION_PROMPT
+        assert (
+            '"relevant": false' in CLASSIFICATION_PROMPT
+            or "relevant: false" in CLASSIFICATION_PROMPT
+        )
+
+    def test_prompt_few_shot_examples_survive_render(self) -> None:
+        """Few-shot examples must be present verbatim in the rendered prompt (title/snippet substituted correctly)."""
+        rendered = _render_classification_prompt(
+            CLASSIFICATION_PROMPT,
+            title="TEST_TITLE",
+            snippet="TEST_SNIPPET",
+        )
+        assert "Examples (verified ground truth" in rendered
+        assert "administrative_closure" in rendered
+        assert "trafficking_sexual_exploitation" in rendered
+        assert "TEST_TITLE" in rendered
+        assert "TEST_SNIPPET" in rendered
+        assert "{title}" not in rendered
+        assert "{snippet}" not in rendered
+
 
 class TestClassifyPassesSystemPrompt:
     """Tests that classify() passes the system prompt to the Anthropic API."""

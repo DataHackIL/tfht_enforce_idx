@@ -140,6 +140,28 @@ Rules:
 - Prefer the main topic of the article, not a minor passing mention.
 - confidence: high | medium | low
 
+Examples (verified ground truth — use as classification anchors):
+
+כותרת: דרמה בעיר החרדית: שוטרים פשטו על בית בושת - "משחקים אבא ואמא" | צפו
+תקציר: חקירה סמויה שהתגלגלה מתלונה אחת הובילה את הכוחות אל דירה שקטה בעיר החרדית, שם נחשפה לפי החשד פעילות שנוהלה מאחורי דלת סגורה.
+{{"relevant": true, "enforcement_related": true, "taxonomy_category_id": "brothels", "taxonomy_subcategory_id": "administrative_closure", "confidence": "high"}}
+
+כותרת: פשיטה על בית בושת בבת ים: אותרו 4 קורבנות סחר למטרות מין, חשודה נעצרה
+תקציר: המשטרה פשטה על דירה בבת ים ועצרו אישה בשנות ה-40 לחייה, בחשד לסחר בבני אדם למטרות שירותי מין של כמה נשים.
+{{"relevant": true, "enforcement_related": true, "taxonomy_category_id": "human_trafficking", "taxonomy_subcategory_id": "trafficking_sexual_exploitation", "confidence": "high"}}
+
+כותרת: "שידול לזנות": עו"ד נעצר לאחר שנשים וחיילות התלוננו כי סחט מהן יחסי מין בתמורה לייצוג
+תקציר: בית המשפט התיר לפרסם את זהותו של יוצא הפרקליטות הצבאית, שנעצר לאחר שנשים וביניהן חיילות התלוננו נגדו על שידול לזנות.
+{{"relevant": true, "enforcement_related": true, "taxonomy_category_id": "pimping_prostitution", "taxonomy_subcategory_id": "soliciting_prostitution", "confidence": "high"}}
+
+כותרת: המשטרה לא אוכפת איסור צריכת זנות בפריפריה, ו-98% מהדו"חות ניתנו במרכז
+תקציר: במטה למאבק בסחר בנשים ובזנות טוענים כי המשטרה כמעט אינה מבצעת אכיפה בפריפריה ומתריעים מפני היעדר מדיניות אכיפה ארצית ברורה.
+{{"relevant": true, "enforcement_related": false, "taxonomy_category_id": "pimping_prostitution", "taxonomy_subcategory_id": "nordic_model_law", "confidence": "medium"}}
+
+כותרת: נתניהו ביקר בצפון: "נמשיך לפעול עד שנחזיר את כל החטופים"
+תקציר: ראש הממשלה בנימין נתניהו הגיע לסיור ביטחוני בצפון הארץ ונפגש עם מפקדי היחידות הלוחמות.
+{{"relevant": false, "enforcement_related": false, "taxonomy_category_id": null, "taxonomy_subcategory_id": null, "confidence": "high"}}
+
 Article:
 כותרת: {title}
 תקציר: {snippet}
