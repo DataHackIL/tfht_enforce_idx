@@ -126,6 +126,7 @@ async function boot() {
   }
   state.taxonomy = taxonomy;
   renderTaxonomy();
+  renderWorkflowTags([]);
   setSyncState("syncReady");
 }
 
@@ -482,9 +483,8 @@ function escapeAttr(value) {
 function normalizeTag(value) {
   return String(value || "")
     .trim()
-    .toLowerCase()
     .replaceAll("_", "-")
-    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/[\s]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40);
 }
