@@ -49,8 +49,10 @@ from denbust.discovery.models import (
     BackfillBatch,
     BackfillBatchStatus,
     DiscoveredCandidate,
+    DiscoveryQuery,
     DiscoveryRun,
     DiscoveryRunStatus,
+    ExecutedBackfillQuery,
     PersistentCandidate,
 )
 from denbust.discovery.queries import build_discovery_queries
@@ -982,6 +984,17 @@ async def _run_google_cse_discovery(
         persistence.close()
 
 
+def _backfill_query_execution_key(engine: str, query: DiscoveryQuery) -> tuple[str, ...]:
+    return (
+        engine,
+        query.query_kind.value,
+        query.query_text,
+        query.source_hint or "",
+        query.date_from.isoformat() if query.date_from is not None else "",
+        query.date_to.isoformat() if query.date_to is not None else "",
+    )
+
+
 async def _run_backfill_engine_discovery(
     *,
     config: Config,
@@ -991,7 +1004,12 @@ async def _run_backfill_engine_discovery(
     engine_name: str,
 ) -> PersistedSourceDiscovery:
     """Run one search engine over a historical window and persist tagged candidates."""
-    queries = build_backfill_queries(config, window=window)
+    all_queries = build_backfill_queries(config, window=window)
+    persistence = create_discovery_persistence(config)
+    executed_keys = persistence.load_executed_backfill_query_keys()
+    queries = [
+        q for q in all_queries if _backfill_query_execution_key(engine_name, q) not in executed_keys
+    ]
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
@@ -999,7 +1017,6 @@ async def _run_backfill_engine_discovery(
         status=DiscoveryRunStatus.RUNNING,
         query_count=len(queries),
     )
-    persistence = create_discovery_persistence(config)
     if not queries:
         try:
             return persist_discovered_candidates(
@@ -1090,6 +1107,22 @@ async def _run_backfill_engine_discovery(
                 await engine.discover(queries, context=context),
                 batch_id=batch_id,
                 window=window,
+            )
+            executed_at = datetime.now(UTC)
+            persistence.append_executed_backfill_queries(
+                [
+                    ExecutedBackfillQuery(
+                        engine=engine_name,
+                        query_kind=q.query_kind,
+                        query_text=q.query_text,
+                        source_hint=q.source_hint,
+                        date_from=q.date_from or window.date_from,
+                        date_to=q.date_to or window.date_to,
+                        executed_at=executed_at,
+                        batch_id=batch_id,
+                    )
+                    for q in queries
+                ]
             )
         except Exception as exc:
             discovery_run.errors.append(f"{engine_name}: {type(exc).__name__}: {exc}")

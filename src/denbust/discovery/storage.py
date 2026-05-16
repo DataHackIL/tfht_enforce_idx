@@ -16,6 +16,7 @@ from denbust.discovery.models import (
     CandidateProvenance,
     CandidateStatus,
     DiscoveryRun,
+    ExecutedBackfillQuery,
     PersistentCandidate,
     ScrapeAttempt,
 )
@@ -24,6 +25,7 @@ from denbust.discovery.persistence import (
     BackfillCandidateCounts,
     CandidateStore,
     DiscoveryRunStore,
+    ExecutedQueryStore,
     ProvenanceStore,
     ScrapeAttemptStore,
 )
@@ -47,12 +49,24 @@ def _remove_postgres_unsupported_nuls(value: Any) -> Any:
     return value
 
 
+def _executed_query_key(record: ExecutedBackfillQuery) -> tuple[str, ...]:
+    return (
+        record.engine,
+        record.query_kind.value,
+        record.query_text,
+        record.source_hint or "",
+        record.date_from.isoformat(),
+        record.date_to.isoformat(),
+    )
+
+
 class DiscoveryPersistence(
     DiscoveryRunStore,
     CandidateStore,
     BackfillBatchStore,
     ProvenanceStore,
     ScrapeAttemptStore,
+    ExecutedQueryStore,
 ):
     """Combined discovery persistence boundary."""
 
@@ -150,6 +164,12 @@ class NullDiscoveryPersistence(DiscoveryPersistence):
     ) -> list[ScrapeAttempt]:
         del candidate_id, limit
         return []
+
+    def load_executed_backfill_query_keys(self) -> frozenset[tuple[str, ...]]:
+        return frozenset()
+
+    def append_executed_backfill_queries(self, queries: Sequence[ExecutedBackfillQuery]) -> None:
+        del queries
 
     def close(self) -> None:
         return None
@@ -387,6 +407,13 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         if limit is not None:
             return attempts[:limit]
         return attempts
+
+    def load_executed_backfill_query_keys(self) -> frozenset[tuple[str, ...]]:
+        records = self._read_jsonl(self.paths.backfill_executed_queries_path, ExecutedBackfillQuery)
+        return frozenset(_executed_query_key(r) for r in records)
+
+    def append_executed_backfill_queries(self, queries: Sequence[ExecutedBackfillQuery]) -> None:
+        self._append_jsonl(self.paths.backfill_executed_queries_path, queries)
 
     def close(self) -> None:
         return None
@@ -665,6 +692,12 @@ class SupabaseDiscoveryPersistence(DiscoveryPersistence):
             return [ScrapeAttempt.model_validate(item) for item in payload]
         return []
 
+    def load_executed_backfill_query_keys(self) -> frozenset[tuple[str, ...]]:
+        return frozenset()
+
+    def append_executed_backfill_queries(self, queries: Sequence[ExecutedBackfillQuery]) -> None:
+        del queries
+
     def _request(
         self,
         method: str,
@@ -821,6 +854,14 @@ class CompositeDiscoveryPersistence(DiscoveryPersistence):
         limit: int | None = None,
     ) -> list[ScrapeAttempt]:
         return self.primary.list_attempts(candidate_id, limit=limit)
+
+    def load_executed_backfill_query_keys(self) -> frozenset[tuple[str, ...]]:
+        return self.primary.load_executed_backfill_query_keys()
+
+    def append_executed_backfill_queries(self, queries: Sequence[ExecutedBackfillQuery]) -> None:
+        self.primary.append_executed_backfill_queries(queries)
+        for mirror in self.mirrors:
+            mirror.append_executed_backfill_queries(queries)
 
 
 def create_discovery_persistence(config: Config) -> DiscoveryPersistence:

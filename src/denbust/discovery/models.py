@@ -278,6 +278,19 @@ class DiscoveryRun(BaseModel):
         return self
 
 
+class ExecutedBackfillQuery(BaseModel):
+    """Record of a backfill search-engine query that was successfully issued."""
+
+    engine: str
+    query_kind: DiscoveryQueryKind
+    query_text: str
+    source_hint: str | None = None
+    date_from: datetime
+    date_to: datetime
+    executed_at: datetime = Field(default_factory=_utc_now)
+    batch_id: str
+
+
 class BackfillBatch(BaseModel):
     """Durable metadata for a historical backfill invocation."""
 
