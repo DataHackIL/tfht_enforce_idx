@@ -266,6 +266,7 @@ class DiscoveryRun(BaseModel):
     job_name: JobName = JobName.DISCOVER
     status: DiscoveryRunStatus = DiscoveryRunStatus.PENDING
     query_count: int = Field(default=0, ge=0)
+    skipped_query_count: int = Field(default=0, ge=0)
     candidate_count: int = Field(default=0, ge=0)
     merged_candidate_count: int = Field(default=0, ge=0)
     queued_for_scrape_count: int = Field(default=0, ge=0)
@@ -276,6 +277,19 @@ class DiscoveryRun(BaseModel):
         if self.finished_at is not None and self.finished_at < self.started_at:
             raise ValueError("finished_at must be later than or equal to started_at")
         return self
+
+
+class ExecutedBackfillQuery(BaseModel):
+    """Record of a backfill search-engine query that was successfully issued."""
+
+    engine: str
+    query_kind: DiscoveryQueryKind
+    query_text: str
+    source_hint: str | None = None
+    date_from: datetime
+    date_to: datetime
+    executed_at: datetime = Field(default_factory=_utc_now)
+    batch_id: str
 
 
 class BackfillBatch(BaseModel):

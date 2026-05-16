@@ -12,6 +12,7 @@ from denbust.discovery.models import (
     CandidateProvenance,
     CandidateStatus,
     DiscoveryRun,
+    ExecutedBackfillQuery,
     PersistentCandidate,
     ScrapeAttempt,
 )
@@ -135,3 +136,15 @@ class ScrapeAttemptStore(ABC):
         limit: int | None = None,
     ) -> list[ScrapeAttempt]:
         """Return scrape attempts for a candidate."""
+
+
+class ExecutedQueryStore(ABC):
+    """Persistence interface for cross-run backfill query deduplication."""
+
+    @abstractmethod
+    def load_executed_backfill_query_keys(self) -> frozenset[tuple[str, ...]]:
+        """Return the set of already-executed backfill query keys."""
+
+    @abstractmethod
+    def append_executed_backfill_queries(self, queries: Sequence[ExecutedBackfillQuery]) -> None:
+        """Append records of newly executed backfill queries."""

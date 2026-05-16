@@ -49,8 +49,10 @@ from denbust.discovery.models import (
     BackfillBatch,
     BackfillBatchStatus,
     DiscoveredCandidate,
+    DiscoveryQuery,
     DiscoveryRun,
     DiscoveryRunStatus,
+    ExecutedBackfillQuery,
     PersistentCandidate,
 )
 from denbust.discovery.queries import build_discovery_queries
@@ -982,6 +984,17 @@ async def _run_google_cse_discovery(
         persistence.close()
 
 
+def _backfill_query_execution_key(engine: str, query: DiscoveryQuery) -> tuple[str, ...]:
+    return (
+        engine,
+        query.query_kind.value,
+        query.query_text,
+        query.source_hint or "",
+        query.date_from.isoformat() if query.date_from is not None else "",
+        query.date_to.isoformat() if query.date_to is not None else "",
+    )
+
+
 async def _run_backfill_engine_discovery(
     *,
     config: Config,
@@ -991,15 +1004,30 @@ async def _run_backfill_engine_discovery(
     engine_name: str,
 ) -> PersistedSourceDiscovery:
     """Run one search engine over a historical window and persist tagged candidates."""
-    queries = build_backfill_queries(config, window=window)
+    all_queries = build_backfill_queries(config, window=window)
+    persistence = create_discovery_persistence(config)
+    executed_keys = persistence.load_executed_backfill_query_keys()
+    queries = [
+        q for q in all_queries if _backfill_query_execution_key(engine_name, q) not in executed_keys
+    ]
+    skipped_count = len(all_queries) - len(queries)
+    if skipped_count:
+        logger.info(
+            "backfill engine=%s window=%d: %d/%d queries skipped (already executed), running %d",
+            engine_name,
+            window.index,
+            skipped_count,
+            len(all_queries),
+            len(queries),
+        )
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
         job_name=config.job_name,
         status=DiscoveryRunStatus.RUNNING,
         query_count=len(queries),
+        skipped_query_count=skipped_count,
     )
-    persistence = create_discovery_persistence(config)
     if not queries:
         try:
             return persist_discovered_candidates(
@@ -1090,6 +1118,22 @@ async def _run_backfill_engine_discovery(
                 await engine.discover(queries, context=context),
                 batch_id=batch_id,
                 window=window,
+            )
+            executed_at = datetime.now(UTC)
+            persistence.append_executed_backfill_queries(
+                [
+                    ExecutedBackfillQuery(
+                        engine=engine_name,
+                        query_kind=q.query_kind,
+                        query_text=q.query_text,
+                        source_hint=q.source_hint,
+                        date_from=q.date_from or window.date_from,
+                        date_to=q.date_to or window.date_to,
+                        executed_at=executed_at,
+                        batch_id=batch_id,
+                    )
+                    for q in queries
+                ]
             )
         except Exception as exc:
             discovery_run.errors.append(f"{engine_name}: {type(exc).__name__}: {exc}")
@@ -2301,6 +2345,15 @@ async def run_news_backfill_discover_job(
             result.fatal = True
             result.errors.append(f"Backfill batch {batch_id} already exists")
             return result.finish(f"fatal: backfill batch {batch_id} already exists")
+        enabled_engines = [
+            name
+            for name, engine_cfg in [
+                ("brave", config.discovery.engines.brave),
+                ("exa", config.discovery.engines.exa),
+                ("google_cse", config.discovery.engines.google_cse),
+            ]
+            if engine_cfg.enabled
+        ]
         batch = BackfillBatch(
             batch_id=batch_id,
             created_at=result.run_timestamp,
@@ -2315,6 +2368,13 @@ async def run_news_backfill_discover_job(
             metadata={
                 "requested_date_from_env": BACKFILL_DATE_FROM_ENV,
                 "requested_date_to_env": BACKFILL_DATE_TO_ENV,
+                "keywords": list(config.keywords),
+                "keyword_count": len(config.keywords),
+                "engines": enabled_engines,
+                "query_kinds": [
+                    k.value if hasattr(k, "value") else str(k)
+                    for k in (config.backfill.query_kinds or config.discovery.default_query_kinds)
+                ],
             },
         )
         persistence.upsert_backfill_batches([batch])
@@ -2370,12 +2430,21 @@ async def run_news_backfill_discover_job(
                         )
                     )
 
+        total_skipped = 0
         for persisted in persisted_runs:
             query_count += persisted.run.query_count
+            total_skipped += persisted.run.skipped_query_count
             discovered_count += persisted.run.candidate_count
             result.raw_article_count += persisted.run.candidate_count
             result.errors.extend(persisted.run.errors)
             batch_errors.extend(persisted.run.errors)
+        logger.info(
+            "backfill batch %s: %d queries run, %d skipped (already executed), %d candidates discovered",
+            batch.batch_id,
+            query_count,
+            total_skipped,
+            discovered_count,
+        )
 
         merged_candidate_count, _ = _batch_candidate_counts(persistence, batch_id=batch.batch_id)
         status = BackfillBatchStatus.DISCOVERED

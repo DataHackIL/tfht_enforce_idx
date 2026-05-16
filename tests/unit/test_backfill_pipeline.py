@@ -20,6 +20,8 @@ from denbust.discovery.models import (
     BackfillBatchStatus,
     CandidateStatus,
     DiscoveredCandidate,
+    DiscoveryQuery,
+    DiscoveryQueryKind,
     DiscoveryRun,
     DiscoveryRunStatus,
     PersistentCandidate,
@@ -88,6 +90,18 @@ def build_window(index: int = 0) -> BackfillWindow:
         index=index,
         date_from=datetime(2026, 1, 1 + index, tzinfo=UTC),
         date_to=datetime(2026, 1, 2 + index, tzinfo=UTC),
+    )
+
+
+def build_query() -> DiscoveryQuery:
+    """Create a minimal DiscoveryQuery fixture for backfill engine tests."""
+    w = build_window()
+    return DiscoveryQuery(
+        query_text="test-keyword",
+        query_kind=DiscoveryQueryKind.BROAD,
+        date_from=w.date_from,
+        date_to=w.date_to,
+        language="he",
     )
 
 
@@ -401,7 +415,9 @@ async def test_run_backfill_engine_discovery_handles_empty_queries_and_errors(
     )
     assert empty.run.candidate_count == 0
 
-    monkeypatch.setattr("denbust.pipeline.build_backfill_queries", lambda *_args, **_kwargs: ["q"])
+    monkeypatch.setattr(
+        "denbust.pipeline.build_backfill_queries", lambda *_args, **_kwargs: [build_query()]
+    )
     missing_brave = await pipeline_module._run_backfill_engine_discovery(
         config=build_config(
             tmp_path,
@@ -474,7 +490,9 @@ async def test_run_backfill_engine_discovery_covers_exa_and_google_variants(
     """Backfill engine discovery should build Exa and Google contexts and handle missing Google config."""
     store = build_store(tmp_path)
     monkeypatch.setattr("denbust.pipeline.create_discovery_persistence", lambda _config: store)
-    monkeypatch.setattr("denbust.pipeline.build_backfill_queries", lambda *_args, **_kwargs: ["q"])
+    monkeypatch.setattr(
+        "denbust.pipeline.build_backfill_queries", lambda *_args, **_kwargs: [build_query()]
+    )
     monkeypatch.setattr(
         "denbust.pipeline.persist_discovered_candidates",
         lambda **kwargs: PersistedSourceDiscovery(

@@ -35,6 +35,7 @@ class DiscoveryStatePaths(BaseModel):
     engine_overlap_latest_path: Path
     discovery_diagnostics_latest_path: Path
     source_suggestions_latest_path: Path
+    backfill_executed_queries_path: Path
 
 
 def resolve_discovery_state_paths(
@@ -67,6 +68,7 @@ def resolve_discovery_state_paths(
         engine_overlap_latest_path=metrics_dir / "engine_overlap_latest.json",
         discovery_diagnostics_latest_path=metrics_dir / "discovery_diagnostics_latest.json",
         source_suggestions_latest_path=metrics_dir / "source_suggestions_latest.json",
+        backfill_executed_queries_path=backfill_batches_dir / "executed_queries.jsonl",
     )
 
 
