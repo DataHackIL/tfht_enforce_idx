@@ -25,6 +25,8 @@ from denbust.discovery.scrape_queue import (
     GenericFetchResult,
     _extract_partial_page_metadata,
     _metadata_datetime,
+    _source_scrape_priority,
+    order_scrape_eligible_candidates,
     scrape_candidates,
     select_backfill_candidates_for_scrape,
     select_candidates_for_scrape,
@@ -221,6 +223,51 @@ def test_select_candidates_for_scrape_prioritizes_none_and_earlier_retry_times(
         "earlier_due",
         "later_due",
     ]
+
+
+def test_source_scrape_priority_returns_known_values() -> None:
+    """High-signal sources should have higher priority scores than low-signal ones."""
+    maariv = build_candidate("m", status=CandidateStatus.NEW, source_hint="maariv")
+    walla = build_candidate("w", status=CandidateStatus.NEW, source_hint="walla")
+    themarker = build_candidate("t", status=CandidateStatus.NEW, source_hint="themarker")
+    unknown = build_candidate("u", status=CandidateStatus.NEW, source_hint="someunknown")
+
+    assert _source_scrape_priority(maariv) > _source_scrape_priority(themarker)
+    assert _source_scrape_priority(walla) > _source_scrape_priority(themarker)
+    assert _source_scrape_priority(unknown) == 0
+
+
+def test_order_scrape_eligible_candidates_prefers_high_signal_sources() -> None:
+    """High-signal sources must be ordered before low-signal ones at equal retry_priority."""
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=UTC)
+    candidates = [
+        build_candidate("themarker", status=CandidateStatus.NEW, source_hint="themarker"),
+        build_candidate("globes", status=CandidateStatus.NEW, source_hint="globes"),
+        build_candidate("maariv", status=CandidateStatus.NEW, source_hint="maariv"),
+        build_candidate("ynet", status=CandidateStatus.NEW, source_hint="ynet"),
+        build_candidate("walla", status=CandidateStatus.NEW, source_hint="walla"),
+    ]
+
+    ordered = order_scrape_eligible_candidates(candidates, now=now)
+    ids = [c.candidate_id for c in ordered]
+
+    assert ids.index("maariv") < ids.index("ynet")
+    assert ids.index("walla") < ids.index("themarker")
+    assert ids.index("ynet") < ids.index("globes")
+    assert ids.index("ynet") < ids.index("themarker")
+
+
+def test_order_scrape_eligible_candidates_retry_priority_overrides_source_priority() -> None:
+    """Explicit retry_priority must still beat source-signal priority."""
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=UTC)
+    high_source = build_candidate("maariv", status=CandidateStatus.NEW, source_hint="maariv")
+    low_source_boosted = build_candidate(
+        "themarker_boosted", status=CandidateStatus.NEW, source_hint="themarker"
+    ).model_copy(update={"retry_priority": 5})
+
+    ordered = order_scrape_eligible_candidates([high_source, low_source_boosted], now=now)
+
+    assert ordered[0].candidate_id == "themarker_boosted"
 
 
 def test_select_candidates_for_self_heal_filters_failed_eligible_due_candidates(
