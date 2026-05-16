@@ -266,6 +266,7 @@ class DiscoveryRun(BaseModel):
     job_name: JobName = JobName.DISCOVER
     status: DiscoveryRunStatus = DiscoveryRunStatus.PENDING
     query_count: int = Field(default=0, ge=0)
+    skipped_query_count: int = Field(default=0, ge=0)
     candidate_count: int = Field(default=0, ge=0)
     merged_candidate_count: int = Field(default=0, ge=0)
     queued_for_scrape_count: int = Field(default=0, ge=0)
