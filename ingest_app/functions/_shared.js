@@ -187,16 +187,13 @@ export function parseAllowedEmails(env) {
 export function requireReviewer(request, env) {
   const email = getAccessEmail(request, env).toLowerCase();
   const allowed = parseAllowedEmails(env);
-  // When no allowlist is configured the ingest app operates in open-access mode
-  // (anyone who can reach the Pages URL is allowed).  This lets the app work
-  // without Cloudflare Access being configured on the project.
-  if (allowed.length === 0) {
-    return { ok: true, email: email || "anonymous", response: null };
-  }
+  // When no CF Access email is present the app operates in open-access mode —
+  // the allowlist is an additional restriction applied on top of CF Access,
+  // not a standalone auth gate.
   if (!email) {
-    return { ok: false, email: "", response: errorResponse("Cloudflare Access email is missing.", 401) };
+    return { ok: true, email: "anonymous", response: null };
   }
-  if (!allowed.includes(email)) {
+  if (allowed.length > 0 && !allowed.includes(email)) {
     return { ok: false, email, response: errorResponse("Reviewer email is not allowed.", 403) };
   }
   return { ok: true, email, response: null };
