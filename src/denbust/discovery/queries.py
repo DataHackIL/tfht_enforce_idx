@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
 from denbust.config import Config, SourceConfig, SourceType
+from denbust.discovery.candidate_filters import globally_excluded_search_domains
 from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
 from denbust.discovery.source_families import generic_fetch_source_domains
 from denbust.taxonomy import default_taxonomy
@@ -97,6 +98,11 @@ def build_discovery_queries(
     queries: list[DiscoveryQuery] = []
     seen_keys: set[tuple[object, ...]] = set()
     source_domains = enabled_discovery_domains(config)
+    # Domains that are structurally off-topic — excluded from every broad and
+    # taxonomy query to avoid wasting search-engine quota and classifier credits.
+    # Source-targeted queries are already scoped to a single preferred domain, so
+    # exclusions are not needed there.
+    excluded_domains = sorted(globally_excluded_search_domains())
 
     for keyword in keywords:
         if DiscoveryQueryKind.BROAD in config.discovery.default_query_kinds:
@@ -109,6 +115,7 @@ def build_discovery_queries(
                         date_from=date_from,
                         date_to=date_to,
                         query_kind=DiscoveryQueryKind.BROAD,
+                        excluded_domains=excluded_domains,
                     )
                 )
                 seen_keys.add(broad_key)
@@ -161,6 +168,7 @@ def build_discovery_queries(
                     date_to=date_to,
                     query_kind=DiscoveryQueryKind.TAXONOMY_TARGETED,
                     tags=tags,
+                    excluded_domains=excluded_domains,
                 )
             )
             seen_keys.add(taxonomy_key)

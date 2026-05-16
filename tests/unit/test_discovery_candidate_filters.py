@@ -7,7 +7,10 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import HttpUrl
 
-from denbust.discovery.candidate_filters import classify_search_noise
+from denbust.discovery.candidate_filters import (
+    classify_search_noise,
+    globally_excluded_search_domains,
+)
 from denbust.discovery.models import DiscoveredCandidate, ProducerKind
 
 
@@ -36,6 +39,11 @@ def _search_candidate(url: str) -> DiscoveredCandidate:
             "https://apps.apple.com/il/app/example/id123456789",
             "app_store",
             "apps.apple.com",
+        ),
+        (
+            "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884",
+            "irrelevant_content_domain",
+            "sport1.maariv.co.il",
         ),
         ("https://morfix.co.il/example", "unsupported_search_domain", "morfix.co.il"),
         (
@@ -75,7 +83,6 @@ def test_classify_search_noise_marks_expected_noise_domains(
     [
         "https://www.ynet.co.il/news/article/abc123",
         "https://www.maariv.co.il/news/law/article-1270778",
-        "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884",
         "https://x.com/example/status/123456789",
         "https://mobile.twitter.com/example/status/123456789",
         "https://facebook.com/story.php?story_fbid=5&id=6",
@@ -98,3 +105,33 @@ def test_classify_search_noise_ignores_source_native_candidates() -> None:
     )
 
     assert classify_search_noise(candidate) is None
+
+
+def test_classify_search_noise_irrelevant_content_domain_subdomain_match() -> None:
+    """Subdomain of an irrelevant-content domain should also be classified as noise."""
+    # sport1.maariv.co.il is a sub-domain of maariv.co.il but only the sub-domain
+    # is listed — maariv.co.il articles should still pass through.
+    maariv_candidate = _search_candidate("https://www.maariv.co.il/news/law/article-1")
+    sport1_candidate = _search_candidate(
+        "https://sport1.maariv.co.il/israeli-soccer/ligat-haal/article/1739884"
+    )
+
+    assert classify_search_noise(maariv_candidate) is None
+    classification = classify_search_noise(sport1_candidate)
+    assert classification is not None
+    assert classification.reason == "irrelevant_content_domain"
+    assert classification.matched_domain == "sport1.maariv.co.il"
+
+
+def test_globally_excluded_search_domains_contains_sport1_maariv() -> None:
+    """The globally-excluded domain set should include the sports sub-domain."""
+    excluded = globally_excluded_search_domains()
+
+    assert "sport1.maariv.co.il" in excluded
+
+
+def test_globally_excluded_search_domains_does_not_contain_parent_domain() -> None:
+    """Only the off-topic sub-domain is excluded, not the broader news outlet."""
+    excluded = globally_excluded_search_domains()
+
+    assert "maariv.co.il" not in excluded

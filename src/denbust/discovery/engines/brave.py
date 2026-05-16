@@ -84,10 +84,17 @@ class BraveSearchEngine:
         return candidates
 
     def _render_query(self, query: DiscoveryQuery) -> str:
-        if not query.preferred_domains:
-            return query.query_text
-        site_filters = " OR ".join(f"site:{domain}" for domain in query.preferred_domains)
-        return f"({site_filters}) {query.query_text}"
+        parts: list[str] = []
+        if query.preferred_domains:
+            site_filters = " OR ".join(f"site:{domain}" for domain in query.preferred_domains)
+            parts.append(f"({site_filters})")
+        parts.append(query.query_text)
+        # Brave has no native excludeDomains parameter; use -site: operators
+        # instead.  Only applied when the query is not already scoped to a
+        # preferred domain (source-targeted queries don't need it).
+        if query.excluded_domains and not query.preferred_domains:
+            parts.extend(f"-site:{domain}" for domain in query.excluded_domains)
+        return " ".join(parts)
 
     def _result_to_candidate(
         self,

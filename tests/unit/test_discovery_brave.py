@@ -307,6 +307,67 @@ async def test_brave_search_engine_filters_dated_results_outside_query_window() 
 
 
 @pytest.mark.asyncio
+async def test_brave_search_engine_appends_site_exclusions_for_broad_queries() -> None:
+    """Broad queries with excluded_domains should append -site: operators to the query string."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["query"] = request.url.params["q"]
+        return httpx.Response(200, json={"web": {"results": []}})
+
+    engine = BraveSearchEngine(
+        api_key="brave-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    await engine.discover(
+        [
+            DiscoveryQuery(
+                query_text="זנות",
+                query_kind=DiscoveryQueryKind.BROAD,
+                excluded_domains=["sport1.maariv.co.il"],
+            )
+        ],
+        DiscoveryContext(run_id="run-excl-1"),
+    )
+    await engine.aclose()
+
+    assert "-site:sport1.maariv.co.il" in str(captured["query"])
+    assert str(captured["query"]).startswith("זנות")
+
+
+@pytest.mark.asyncio
+async def test_brave_search_engine_omits_site_exclusions_for_source_targeted_queries() -> None:
+    """Source-targeted queries with preferred_domains must not append -site: exclusions."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["query"] = request.url.params["q"]
+        return httpx.Response(200, json={"web": {"results": []}})
+
+    engine = BraveSearchEngine(
+        api_key="brave-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    await engine.discover(
+        [
+            DiscoveryQuery(
+                query_text="זנות",
+                query_kind=DiscoveryQueryKind.SOURCE_TARGETED,
+                preferred_domains=["www.maariv.co.il"],
+                excluded_domains=["sport1.maariv.co.il"],
+            )
+        ],
+        DiscoveryContext(run_id="run-excl-2"),
+    )
+    await engine.aclose()
+
+    assert "-site:" not in str(captured["query"])
+    assert str(captured["query"]) == "(site:www.maariv.co.il) זנות"
+
+
+@pytest.mark.asyncio
 async def test_brave_search_engine_filters_off_domain_source_targeted_results() -> None:
     """Provider results must still honor preferred-domain contracts locally."""
 
