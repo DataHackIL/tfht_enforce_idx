@@ -56,6 +56,9 @@ const TRANSLATIONS = {
 };
 
 const WORKFLOW_TAGS = [
+  { id: "brothel", label: "Brothel", labelHe: "בית בושת" },
+  { id: "closure-order", label: "Closure order", labelHe: "צו סגירה" },
+  { id: "enforcement", label: "Enforcement", labelHe: "אכיפה" },
   { id: "strong-positive", label: "Strong positive", labelHe: "חיובי חזק" },
   { id: "weak-positive", label: "Weak positive", labelHe: "חיובי חלש" },
   { id: "false-positive", label: "False positive", labelHe: "חיובי שגוי" },
