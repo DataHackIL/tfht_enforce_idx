@@ -88,6 +88,7 @@ export async function onRequestPost({ request, env }) {
         id,
         url,
         canonical_url: url,
+        source_name: domain,
         source_domain: domain,
         title: title || url,
         summary_one_sentence: snippet || "",
