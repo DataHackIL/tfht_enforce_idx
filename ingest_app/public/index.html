@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ממשק קליטה TFHT</title>
+    <script>
+      (() => {
+        const storedTheme = window.localStorage.getItem("tfht-ingest-theme");
+        const theme = storedTheme === "night" ? "night" : "day";
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">DenBust News</p>
+        <h1 data-i18n="appTitle">ממשק קליטה TFHT</h1>
+      </div>
+      <div class="userbox">
+        <button id="themeToggle" class="themeToggle" type="button" aria-pressed="false" data-i18n="nightMode">מצב לילה</button>
+        <button id="langToggle" class="themeToggle" type="button">EN</button>
+        <span id="reviewerEmail" class="reviewerEmail">בודק גישה...</span>
+        <span id="syncState" class="state" data-i18n="syncLoading">טוען</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="urlInputSection">
+        <label>
+          <span data-i18n="urlInputLabel">כתובות URL לקליטה</span>
+          <div class="urlInputRow">
+            <textarea id="urlInput" rows="3" data-i18n-placeholder="urlInputPlaceholder" placeholder="הדבק כתובת URL אחת או מספר כתובות מופרדות בפסיק או נקודה-פסיק..."></textarea>
+            <button id="addToBatchButton" type="button" data-i18n="addToBatch">הוסף לאצווה</button>
+          </div>
+        </label>
+        <p class="hint" data-i18n="urlInputHint">הפרד מספר כתובות באמצעות פסיק (,) או נקודה-פסיק (;)</p>
+      </section>
+
+      <section id="batchSection" class="batchSection" hidden>
+        <div class="batchHeader">
+          <span id="batchCount" data-i18n="batchItems">0 פריטים</span>
+          <button id="clearBatchButton" type="button" class="themeToggle" data-i18n="clearBatch">נקה אצווה</button>
+        </div>
+        <ul id="batchList" class="batchList"></ul>
+      </section>
+
+      <form id="labelingForm" class="labelingForm">
+        <fieldset>
+          <legend data-i18n="decisionLegend">החלטה</legend>
+          <div class="decisionGrid">
+            <label><input type="radio" name="decision" value="include" checked /> <span data-i18n="decisionInclude">כלול</span></label>
+            <label><input type="radio" name="decision" value="needs_review" /> <span data-i18n="decisionNeedsReview">דרוש סקירה</span></label>
+            <label><input type="radio" name="decision" value="exclude" /> <span data-i18n="decisionExclude">החרג</span></label>
+            <label><input type="radio" name="decision" value="internal_only" /> <span data-i18n="decisionInternal">פנימי בלבד</span></label>
+          </div>
+        </fieldset>
+
+        <div class="taxonomyGrid">
+          <label>
+            <span data-i18n="taxonomyCategory">קטגוריה</span>
+            <select id="categorySelect"></select>
+          </label>
+          <label>
+            <span data-i18n="taxonomySubcategory">תת-קטגוריה</span>
+            <select id="subcategorySelect"></select>
+          </label>
+          <label class="checkLabel">
+            <input id="indexRelevantInput" type="checkbox" />
+            <span data-i18n="indexRelevant">רלוונטי למדד</span>
+          </label>
+        </div>
+
+        <div class="fieldGrid">
+          <label>
+            <span data-i18n="eventLabel">תווית אירוע</span>
+            <input id="eventLabelInput" type="text" data-i18n-placeholder="eventLabelPlaceholder" placeholder="שם קצר ייחודי לתיק/אירוע" />
+          </label>
+          <label>
+            <span data-i18n="cityLabel">עיר</span>
+            <input id="cityInput" type="text" data-i18n-placeholder="cityPlaceholder" placeholder="עיר (אופציונלי)" />
+          </label>
+        </div>
+
+        <fieldset class="tagFieldset">
+          <legend data-i18n="workflowTagsLegend">תגיות עבודה</legend>
+          <div id="tagOptions" class="tagOptions"></div>
+          <div class="customTagRow">
+            <input id="customTagInput" type="text" data-i18n-placeholder="customTagPlaceholder" placeholder="הוסף תגית מותאמת לאחר סקירת הרשימה" />
+            <button id="addCustomTagButton" type="button" data-i18n="addCustomTag">הוסף תגית</button>
+          </div>
+          <div id="selectedTags" class="selectedTags" aria-live="polite"></div>
+        </fieldset>
+
+        <label>
+          <span data-i18n="notesLabel">הערות סקירה</span>
+          <textarea id="notesInput" rows="4" data-i18n-placeholder="notesPlaceholder" placeholder="מדוע שייך, מדוע לא, או מה דרוש בדיקה"></textarea>
+        </label>
+
+        <div class="ingestActions">
+          <button id="ingestButton" type="submit" data-i18n="ingestBtn">קלוט</button>
+          <span id="ingestState" class="saveState"></span>
+        </div>
+      </form>
+
+      <section id="resultsSection" class="resultsSection" hidden>
+        <h2 data-i18n="resultsTitle">תוצאות קליטה</h2>
+        <ul id="resultsList" class="resultsList"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
