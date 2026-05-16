@@ -161,10 +161,17 @@ def _candidate_with_title(
         ("חייל צהל נהרג בפיגוע", "צהל"),
         ('דו"ח: צה"ל הפר הסכמים', 'צה"ל'),
         ("הצהרת צהל על הפסקת אש", "צהל"),
+        ("ישראל וטראמפ דנים בהסכם", "טראמפ"),
+        ("נתניהו נפגש עם שגריר אמריקה", "נתניהו"),
+        ("מתיחות עם איראן בשיא", "איראן"),
+        ("חיזבאללה ירה על הצפון", "חיזבאללה"),
+        ("מבצע ספורט לנוער בתל אביב", "ספורט"),
+        ("מניות הבנקים ירדו הבוקר", "מניות"),
+        ("לוחמים בעזה בלילה האחרון", "עזה"),
     ],
 )
 def test_classify_title_noise_matches_idf_terms(title: str, expected_keyword: str) -> None:
-    """Titles containing IDF terms should be classified as title keyword noise."""
+    """Titles containing excluded terms should be classified as title keyword noise."""
     classification = classify_title_noise(_candidate_with_title(title))
 
     assert classification is not None
@@ -201,10 +208,17 @@ def test_classify_title_noise_applies_to_source_native_candidates() -> None:
     assert classification.reason == "title_keyword_match"
 
 
-def test_globally_excluded_title_terms_contains_idf_forms() -> None:
-    """The IDF term set should include the gershayim, ASCII-quote, and bare forms."""
+def test_globally_excluded_title_terms_contains_expected_terms() -> None:
+    """The excluded-terms set should include IDF forms and all configured off-topic terms."""
     terms = globally_excluded_title_terms()
 
     assert 'צה"ל' in terms
     assert "צה״ל" in terms
     assert "צהל" in terms
+    assert "איראן" in terms
+    assert "נתניהו" in terms
+    assert "טראמפ" in terms
+    assert "חיזבאללה" in terms
+    assert "ספורט" in terms
+    assert "מניות" in terms
+    assert "עזה" in terms

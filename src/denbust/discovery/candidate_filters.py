@@ -62,6 +62,13 @@ _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
         'צה"ל',  # IDF — ASCII double-quote form
         "צה״ל",  # IDF — Hebrew gershayim form
         "צהל",  # IDF — no punctuation form
+        "איראן",  # Iran — geopolitical
+        "נתניהו",  # Netanyahu — political
+        "טראמפ",  # Trump — political
+        "חיזבאללה",  # Hezbollah — military
+        "ספורט",  # sports
+        "מניות",  # stocks / financial markets
+        "עזה",  # Gaza — military/geopolitical
     }
 )
 
