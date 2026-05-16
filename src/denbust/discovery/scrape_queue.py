@@ -37,6 +37,31 @@ SCRAPEABLE_CANDIDATE_STATUSES: tuple[CandidateStatus, ...] = (
 
 SELF_HEAL_CANDIDATE_STATUSES: tuple[CandidateStatus, ...] = (CandidateStatus.SCRAPE_FAILED,)
 
+# Per-source scrape priority derived from true-positive signal density.
+# Higher values are processed first when the run limit is binding.
+# Default priority (0) applies to unknown sources; they are scraped last.
+_SOURCE_SCRAPE_PRIORITY: dict[str, int] = {
+    "maariv": 10,  # 5.8 % true-positive density
+    "walla": 9,  # 5.6 %
+    "haaretz": 8,  # 3.5 %
+    "ice": 7,  # 2.9 %
+    "mako": 6,  # 2.0 %
+    "ynet": 5,  # 1.4 %
+    "israelhayom": 4,
+    "kan": 4,
+    "news1": 3,
+    "globes": 2,  # financial news — low relevance density
+    "themarker": 2,  # 0.5 %
+}
+
+
+def _source_scrape_priority(candidate: PersistentCandidate) -> int:
+    """Return the highest known scrape priority among the candidate's source hints."""
+    return max(
+        (_SOURCE_SCRAPE_PRIORITY.get(hint, 0) for hint in candidate.source_hints),
+        default=0,
+    )
+
 
 @dataclass
 class CandidateScrapeBatch:
@@ -94,6 +119,7 @@ def order_scrape_eligible_candidates(
         eligible,
         key=lambda candidate: (
             -candidate.retry_priority,
+            -_source_scrape_priority(candidate),
             0 if candidate.next_scrape_attempt_at is None else 1,
             candidate.next_scrape_attempt_at or max_datetime,
             -candidate.last_seen_at.timestamp(),
@@ -126,6 +152,7 @@ def select_candidates_for_self_heal(
         eligible,
         key=lambda candidate: (
             -candidate.retry_priority,
+            -_source_scrape_priority(candidate),
             0 if candidate.next_scrape_attempt_at is None else 1,
             candidate.next_scrape_attempt_at or max_datetime,
             -candidate.last_scrape_attempt_at.timestamp()
@@ -215,6 +242,7 @@ def select_backfill_candidates_for_scrape(
             _backfill_publication_datetime(candidate) or candidate.first_seen_at,
             candidate.first_seen_at,
             -candidate.retry_priority,
+            -_source_scrape_priority(candidate),
             0 if candidate.next_scrape_attempt_at is None else 1,
             candidate.next_scrape_attempt_at or max_datetime,
             candidate.candidate_id,

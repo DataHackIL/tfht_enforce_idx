@@ -9,7 +9,9 @@ from pydantic import HttpUrl
 
 from denbust.discovery.candidate_filters import (
     classify_search_noise,
+    classify_title_noise,
     globally_excluded_search_domains,
+    globally_excluded_title_terms,
 )
 from denbust.discovery.models import DiscoveredCandidate, ProducerKind
 
@@ -135,3 +137,88 @@ def test_globally_excluded_search_domains_does_not_contain_parent_domain() -> No
     excluded = globally_excluded_search_domains()
 
     assert "maariv.co.il" not in excluded
+
+
+def _candidate_with_title(
+    title: str, producer_kind: ProducerKind = ProducerKind.SEARCH_ENGINE
+) -> DiscoveredCandidate:
+    return DiscoveredCandidate(
+        producer_name="brave",
+        producer_kind=producer_kind,
+        query_text="בית בושת",
+        candidate_url=HttpUrl("https://www.ynet.co.il/news/article/abc123"),
+        canonical_url=HttpUrl("https://www.ynet.co.il/news/article/abc123"),
+        title=title,
+        discovered_at=datetime(2026, 4, 11, 9, 0, tzinfo=UTC),
+    )
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_keyword"),
+    [
+        ('כוחות צה"ל פשטו על המקום', 'צה"ל'),
+        ("פעולות צה״ל בעזה", "צה״ל"),
+        ("חייל צהל נהרג בפיגוע", "צהל"),
+        ('דו"ח: צה"ל הפר הסכמים', 'צה"ל'),
+        ("הצהרת צהל על הפסקת אש", "צהל"),
+        ("ישראל וטראמפ דנים בהסכם", "טראמפ"),
+        ("נתניהו נפגש עם שגריר אמריקה", "נתניהו"),
+        ("מתיחות עם איראן בשיא", "איראן"),
+        ("חיזבאללה ירה על הצפון", "חיזבאללה"),
+        ("מבצע ספורט לנוער בתל אביב", "ספורט"),
+        ("מניות הבנקים ירדו הבוקר", "מניות"),
+        ("לוחמים בעזה בלילה האחרון", "עזה"),
+    ],
+)
+def test_classify_title_noise_matches_idf_terms(title: str, expected_keyword: str) -> None:
+    """Titles containing excluded terms should be classified as title keyword noise."""
+    classification = classify_title_noise(_candidate_with_title(title))
+
+    assert classification is not None
+    assert classification.reason == "title_keyword_match"
+    assert classification.matched_keyword == expected_keyword
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "עשרות נשים נסחרו לזנות בתל אביב",
+        "בית בושת נסגר בצו שיפוטי",
+        "סוחרי סמים נעצרו ליד בית בושת",
+        "נשים קורבנות סחר מינפגישות עם מטפלים",
+    ],
+)
+def test_classify_title_noise_ignores_unrelated_titles(title: str) -> None:
+    """Titles without excluded keywords should not be filtered."""
+    assert classify_title_noise(_candidate_with_title(title)) is None
+
+
+def test_classify_title_noise_ignores_candidate_without_title() -> None:
+    """Candidates with no title should pass through the title noise filter."""
+    candidate = _candidate_with_title("").model_copy(update={"title": None})
+    assert classify_title_noise(candidate) is None
+
+
+def test_classify_title_noise_applies_to_source_native_candidates() -> None:
+    """Title noise filter applies regardless of producer kind — it is a cost filter."""
+    candidate = _candidate_with_title('כוחות צה"ל', producer_kind=ProducerKind.SOURCE_NATIVE)
+    classification = classify_title_noise(candidate)
+
+    assert classification is not None
+    assert classification.reason == "title_keyword_match"
+
+
+def test_globally_excluded_title_terms_contains_expected_terms() -> None:
+    """The excluded-terms set should include IDF forms and all configured off-topic terms."""
+    terms = globally_excluded_title_terms()
+
+    assert 'צה"ל' in terms
+    assert "צה״ל" in terms
+    assert "צהל" in terms
+    assert "איראן" in terms
+    assert "נתניהו" in terms
+    assert "טראמפ" in terms
+    assert "חיזבאללה" in terms
+    assert "ספורט" in terms
+    assert "מניות" in terms
+    assert "עזה" in terms

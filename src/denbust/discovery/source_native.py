@@ -14,6 +14,7 @@ from denbust.discovery.base import SourceCandidateProducer, SourceDiscoveryConte
 from denbust.discovery.candidate_filters import (
     candidate_domain,
     classify_search_noise,
+    classify_title_noise,
     normalize_domain,
 )
 from denbust.discovery.models import (
@@ -166,23 +167,32 @@ def merge_discovered_candidate(
         existing_metadata["latest_discovery_metadata"] = discovered.metadata
     is_social = _is_social_candidate(discovered)
     search_noise_classification = classify_search_noise(discovered)
-    is_search_noise = search_noise_classification is not None
+    title_noise_classification = classify_title_noise(discovered)
+    is_any_noise = search_noise_classification is not None or title_noise_classification is not None
     candidate_status = existing.candidate_status if existing else CandidateStatus.NEW
-    if (is_social or is_search_noise) and existing is None:
+    if (is_social or is_any_noise) and existing is None:
         candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
     if (
-        (is_social or is_search_noise)
+        (is_social or is_any_noise)
         and existing is not None
         and _can_demote_existing_noise_candidate(existing)
     ):
         candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
-    if (
-        candidate_status is CandidateStatus.UNSUPPORTED_SOURCE
-        and search_noise_classification is not None
-    ):
-        existing_metadata["unsupported_source_filter"] = "search_noise"
-        existing_metadata["unsupported_source_reason"] = search_noise_classification.reason.value
-        existing_metadata["unsupported_source_domain"] = search_noise_classification.matched_domain
+    if candidate_status is CandidateStatus.UNSUPPORTED_SOURCE:
+        if search_noise_classification is not None:
+            existing_metadata["unsupported_source_filter"] = "search_noise"
+            existing_metadata["unsupported_source_reason"] = (
+                search_noise_classification.reason.value
+            )
+            existing_metadata["unsupported_source_domain"] = (
+                search_noise_classification.matched_domain
+            )
+        elif title_noise_classification is not None:
+            existing_metadata["unsupported_source_filter"] = "title_noise"
+            existing_metadata["unsupported_source_reason"] = title_noise_classification.reason.value
+            existing_metadata["unsupported_source_keyword"] = (
+                title_noise_classification.matched_keyword
+            )
 
     return PersistentCandidate(
         candidate_id=existing.candidate_id
@@ -275,6 +285,16 @@ def persist_discovered_candidates(
                         **discovered.metadata,
                         "search_noise_filter_reason": classification.reason.value,
                         "search_noise_filter_domain": classification.matched_domain,
+                    }
+                }
+            )
+        elif (classification := classify_title_noise(discovered)) is not None:
+            discovered = discovered.model_copy(
+                update={
+                    "metadata": {
+                        **discovered.metadata,
+                        "title_noise_filter_reason": classification.reason.value,
+                        "title_noise_filter_keyword": classification.matched_keyword,
                     }
                 }
             )

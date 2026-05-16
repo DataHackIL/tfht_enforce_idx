@@ -788,7 +788,7 @@ def test_build_discovery_diagnostic_report_explains_queue_drain_budget_cap(
     ] == ["selected-ice-1", "selected-ice-2"]
     assert [
         item.candidate_id for item in report.queue_drain.remaining_eligible_candidate_order
-    ] == ["pending-mako", "pending-haaretz"]
+    ] == ["pending-haaretz", "pending-mako"]
     assert [item.model_dump(mode="json") for item in report.queue_drain.attempted_source_mix] == [
         {"source": "ice", "candidate_count": 2}
     ]

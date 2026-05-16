@@ -57,11 +57,33 @@ _SOCIAL_POST_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 
 
+_EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
+    {
+        'צה"ל',  # IDF — ASCII double-quote form
+        "צה״ל",  # IDF — Hebrew gershayim form
+        "צהל",  # IDF — no punctuation form
+        "איראן",  # Iran — geopolitical
+        "נתניהו",  # Netanyahu — political
+        "טראמפ",  # Trump — political
+        "חיזבאללה",  # Hezbollah — military
+        "ספורט",  # sports
+        "מניות",  # stocks / financial markets
+        "עזה",  # Gaza — military/geopolitical
+    }
+)
+
+
+def globally_excluded_title_terms() -> frozenset[str]:
+    """Return the current set of title terms that short-circuit candidate processing."""
+    return _EXCLUDED_TITLE_TERMS
+
+
 class SearchNoiseReason(StrEnum):
     """Stable reason values for search-result noise classification."""
 
     APP_STORE = "app_store"
     SOCIAL_PROFILE = "social_profile"
+    TITLE_KEYWORD_MATCH = "title_keyword_match"
     UNSUPPORTED_SEARCH_DOMAIN = "unsupported_search_domain"
     IRRELEVANT_CONTENT_DOMAIN = "irrelevant_content_domain"
 
@@ -71,7 +93,8 @@ class SearchNoiseClassification:
     """Classification for a retained but non-scrapeable search-result surface."""
 
     reason: SearchNoiseReason
-    matched_domain: str
+    matched_domain: str = ""
+    matched_keyword: str = ""
 
 
 def globally_excluded_search_domains() -> frozenset[str]:
@@ -211,5 +234,25 @@ def classify_search_noise(
             return SearchNoiseClassification(
                 reason=SearchNoiseReason.SOCIAL_PROFILE,
                 matched_domain=matched_domain,
+            )
+    return None
+
+
+def classify_title_noise(
+    discovered: DiscoveredCandidate,
+) -> SearchNoiseClassification | None:
+    """Classify candidates whose title contains an excluded keyword.
+
+    Applies to all producer kinds — this is a pre-scrape cost filter, not
+    a search-result surface filter.  Returns the first matching term.
+    """
+    title = (discovered.title or "").casefold()
+    if not title:
+        return None
+    for term in sorted(_EXCLUDED_TITLE_TERMS, key=len, reverse=True):
+        if term.casefold() in title:
+            return SearchNoiseClassification(
+                reason=SearchNoiseReason.TITLE_KEYWORD_MATCH,
+                matched_keyword=term,
             )
     return None

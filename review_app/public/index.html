@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="he" dir="rtl">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TFHT Review Workbench</title>
+    <title>ממשק סקירת TFHT</title>
     <script>
       (() => {
         const storedTheme = window.localStorage.getItem("tfht-review-theme");
@@ -17,56 +17,69 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">DenBust News</p>
-        <h1>TFHT Review Workbench</h1>
+        <h1 data-i18n="appTitle">ממשק סקירת TFHT</h1>
       </div>
       <div class="userbox">
-        <button id="themeToggle" class="themeToggle" type="button" aria-pressed="false">Night mode</button>
-        <span id="reviewerEmail">Checking access...</span>
-        <span id="syncState" class="state">Loading</span>
+        <button id="themeToggle" class="themeToggle" type="button" aria-pressed="false" data-i18n="nightMode">מצב לילה</button>
+        <button id="langToggle" class="themeToggle" type="button">EN</button>
+        <span id="reviewerEmail" data-i18n="checkingAccess">בודק גישה...</span>
+        <span id="syncState" class="state" data-i18n="syncLoading">טוען</span>
       </div>
     </header>
 
     <main class="shell">
       <section class="filters" aria-label="Candidate filters">
         <label>
-          Search
-          <input id="searchInput" type="search" placeholder="Title, URL, source, taxonomy..." />
+          <span data-i18n="filterSearch">חיפוש</span>
+          <input id="searchInput" type="search" data-i18n-placeholder="filterSearchPlaceholder" placeholder="כותרת, כתובת URL, מקור, טקסונומיה..." />
         </label>
         <label>
-          Status
+          <span data-i18n="filterStatus">סטטוס</span>
           <select id="statusFilter">
-            <option value="pending">Pending review</option>
-            <option value="all">All fetched</option>
-            <option value="candidate_only">Discovery candidates</option>
-            <option value="news_items">Materialized news items</option>
-            <option value="approved">Approved</option>
-            <option value="suppressed">Suppressed</option>
+            <option value="pending" data-i18n="statusPending">ממתין לסקירה</option>
+            <option value="all" data-i18n="statusAll">כל הפריטים</option>
+            <option value="candidate_only" data-i18n="statusCandidates">מועמדי גילוי</option>
+            <option value="news_items" data-i18n="statusNews">פריטי חדשות</option>
+            <option value="approved" data-i18n="statusApproved">מאושר</option>
+            <option value="suppressed" data-i18n="statusSuppressed">מוחסם</option>
           </select>
         </label>
         <label>
-          Domain
+          <span data-i18n="filterDomain">דומיין</span>
           <input id="domainFilter" type="search" placeholder="mako.co.il" />
         </label>
-        <button id="refreshButton" type="button">Refresh</button>
+        <label>
+          <span data-i18n="filterSort">מיון</span>
+          <select id="sortOrder">
+            <option value="desc" data-i18n="sortDesc">ציון גבוה ראשון</option>
+            <option value="asc" data-i18n="sortAsc">ציון נמוך ראשון</option>
+          </select>
+        </label>
+        <button id="refreshButton" type="button" data-i18n="refreshBtn">רענון</button>
       </section>
 
       <section class="summary" aria-label="Review summary">
-        <div><strong id="visibleCount">0</strong><span>shown</span></div>
-        <div><strong id="filteredCount">0</strong><span>matching</span></div>
-        <div><strong id="candidateCount">0</strong><span>candidates fetched</span></div>
-        <div><strong id="newsCount">0</strong><span>news rows fetched</span></div>
+        <div><strong id="visibleCount">0</strong><span data-i18n="summaryShown">מוצגים</span></div>
+        <div><strong id="filteredCount">0</strong><span data-i18n="summaryMatching">תואמים</span></div>
+        <div><strong id="candidateCount">0</strong><span data-i18n="summaryCandidates">מועמדים נטענו</span></div>
+        <div><strong id="newsCount">0</strong><span data-i18n="summaryNews">חדשות נטענו</span></div>
       </section>
 
       <section class="workspace">
         <aside class="listPane" aria-label="Candidate list">
+          <div id="bulkBar" class="bulkBar" hidden>
+            <span id="bulkCount" class="bulkCount">0 selected</span>
+            <button id="bulkExcludeButton" type="button" class="bulkExcludeButton" data-i18n="bulkExclude">החרג — תוצאות שגויות</button>
+            <button id="bulkClearButton" type="button" class="bulkClearButton" data-i18n="bulkClear">נקה</button>
+          </div>
           <div id="candidateList" class="candidateList"></div>
-          <button id="loadMoreButton" class="loadMore" type="button" hidden>Load more</button>
+          <button id="loadMoreButton" class="loadMore" type="button" hidden data-i18n="loadMore">טען עוד</button>
         </aside>
 
         <section class="detailPane" aria-label="Review details">
           <div id="emptyState" class="emptyState">
-            <h2>Select a candidate</h2>
-            <p>Rows are sorted by the app's current likelihood score, strongest review candidates first.</p>
+            <h2 data-i18n="emptyTitle">בחר פריט לסקירה</h2>
+            <p data-i18n="emptyBody">הפריטים ממוינים לפי ציון הדמיון של האפליקציה, המועמדים החזקים ביותר ראשון.</p>
           </div>
 
           <article id="detailView" class="detailView" hidden>
@@ -75,7 +88,7 @@
                 <p id="detailKind" class="eyebrow"></p>
                 <h2 id="detailTitle"></h2>
               </div>
-              <a id="detailLink" class="sourceLink" href="#" target="_blank" rel="noreferrer">Open source</a>
+              <a id="detailLink" class="sourceLink" href="#" target="_blank" rel="noreferrer" data-i18n="openSource">פתח מקור</a>
             </div>
 
             <p id="detailSnippet" class="snippet"></p>
@@ -84,58 +97,58 @@
 
             <form id="reviewForm" class="reviewForm">
               <fieldset>
-                <legend>Decision</legend>
+                <legend data-i18n="decisionLegend">החלטה</legend>
                 <div class="decisionGrid">
-                  <label><input type="radio" name="decision" value="include" checked /> Include</label>
-                  <label><input type="radio" name="decision" value="needs_review" /> Needs review</label>
-                  <label><input type="radio" name="decision" value="exclude" /> Exclude</label>
-                  <label><input type="radio" name="decision" value="internal_only" /> Internal only</label>
+                  <label><input type="radio" name="decision" value="include" checked /> <span data-i18n="decisionInclude">כלול</span></label>
+                  <label><input type="radio" name="decision" value="needs_review" /> <span data-i18n="decisionNeedsReview">דרוש סקירה</span></label>
+                  <label><input type="radio" name="decision" value="exclude" /> <span data-i18n="decisionExclude">החרג</span></label>
+                  <label><input type="radio" name="decision" value="internal_only" /> <span data-i18n="decisionInternal">פנימי בלבד</span></label>
                 </div>
               </fieldset>
 
               <div class="taxonomyGrid">
                 <label>
-                  Category
+                  <span data-i18n="taxonomyCategory">קטגוריה</span>
                   <select id="categorySelect"></select>
                 </label>
                 <label>
-                  Subcategory
+                  <span data-i18n="taxonomySubcategory">תת-קטגוריה</span>
                   <select id="subcategorySelect"></select>
                 </label>
                 <label class="checkLabel">
                   <input id="indexRelevantInput" type="checkbox" />
-                  Index relevant
+                  <span data-i18n="indexRelevant">רלוונטי למדד</span>
                 </label>
               </div>
 
               <div class="fieldGrid">
                 <label>
-                  Case / event label
-                  <input id="eventLabelInput" type="text" placeholder="Short unique case name" />
+                  <span data-i18n="eventLabel">תווית אירוע</span>
+                  <input id="eventLabelInput" type="text" data-i18n-placeholder="eventLabelPlaceholder" placeholder="שם קצר ייחודי לתיק/אירוע" />
                 </label>
                 <label>
-                  City
-                  <input id="cityInput" type="text" placeholder="Optional city" />
+                  <span data-i18n="cityLabel">עיר</span>
+                  <input id="cityInput" type="text" data-i18n-placeholder="cityPlaceholder" placeholder="עיר (אופציונלי)" />
                 </label>
               </div>
 
               <fieldset class="tagFieldset">
-                <legend>Workflow tags</legend>
+                <legend data-i18n="workflowTagsLegend">תגיות עבודה</legend>
                 <div id="tagOptions" class="tagOptions"></div>
                 <div class="customTagRow">
-                  <input id="customTagInput" type="text" placeholder="Add custom tag after reviewing the list" />
-                  <button id="addCustomTagButton" type="button">Add tag</button>
+                  <input id="customTagInput" type="text" data-i18n-placeholder="customTagPlaceholder" placeholder="הוסף תגית מותאמת לאחר סקירת הרשימה" />
+                  <button id="addCustomTagButton" type="button" data-i18n="addCustomTag">הוסף תגית</button>
                 </div>
                 <div id="selectedTags" class="selectedTags" aria-live="polite"></div>
               </fieldset>
 
               <label>
-                Review notes
-                <textarea id="notesInput" rows="4" placeholder="Why this belongs, why it does not, or what needs checking"></textarea>
+                <span data-i18n="notesLabel">הערות סקירה</span>
+                <textarea id="notesInput" rows="4" data-i18n-placeholder="notesPlaceholder" placeholder="מדוע שייך, מדוע לא, או מה דרוש בדיקה"></textarea>
               </label>
 
               <div class="actions">
-                <button id="saveButton" type="submit">Save review</button>
+                <button id="saveButton" type="submit" data-i18n="saveReview">שמור סקירה</button>
                 <span id="saveState" class="saveState"></span>
               </div>
             </form>
