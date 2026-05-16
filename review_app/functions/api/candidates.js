@@ -103,7 +103,8 @@ export async function onRequestGet({ request, env }) {
       .filter((row) => !linkedCandidateIds.has(row.candidate_id))
       .map(normalizeCandidate);
 
-    const allItems = sortItems(applyFilters([...newsItems, ...candidates], url.searchParams));
+    const sorted = sortItems(applyFilters([...newsItems, ...candidates], url.searchParams));
+    const allItems = url.searchParams.get("sort") === "asc" ? sorted.reverse() : sorted;
     const pageItems = allItems.slice(offset, offset + limit);
 
     return jsonResponse({

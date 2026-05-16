@@ -246,22 +246,105 @@ button:disabled {
   gap: 10px;
 }
 
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--panel-strong);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.bulkCount {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bulkExcludeButton {
+  padding: 7px 14px;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+:root[data-theme="night"] .bulkExcludeButton {
+  color: #1a0a09;
+}
+
+.bulkExcludeButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bulkClearButton {
+  padding: 7px 11px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
 .candidateCard {
-  width: 100%;
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: stretch;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  padding: 13px;
-  box-shadow: none;
-  text-align: left;
-  color: var(--text);
+  overflow: hidden;
 }
 
 .candidateCard:hover,
 .candidateCard.active {
   border-color: var(--accent);
+}
+
+.candidateCard.bulkSelected {
+  border-color: var(--accent);
+  background: var(--panel-strong);
+}
+
+.cardSelectWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line);
+}
+
+.cardSelectInput {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.cardBody {
+  flex: 1;
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+}
+
+.cardBody:hover,
+.candidateCard.active .cardBody {
   background: var(--panel-hover);
 }
 

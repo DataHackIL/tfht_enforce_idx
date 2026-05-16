@@ -528,6 +528,9 @@ function resolveConfidence(confidence) {
 }
 
 function isCompleted(item) {
+  // A candidate whose pipeline already decided it is off-topic (unsupported_source)
+  // is treated as complete even without an explicit review annotation.
+  if (item.candidateStatus === "unsupported_source") return true;
   return ["approved", "suppressed", "include", "exclude", "internal_only"].includes(item.publicationStatus);
 }
 
