@@ -41,6 +41,13 @@ _SOCIAL_PROFILE_DOMAINS: frozenset[str] = frozenset(
 _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
     {
         "sport1.maariv.co.il",  # sports vertical — consistently off-topic
+        "he.wikipedia.org",  # encyclopedia — never enforcement news
+        "srugim.co.il",  # Orthodox community site — off-topic
+        "themarker.com",  # financial/business news — off-topic
+        "collab.mako.co.il",  # Mako user-generated content subdomain
+        "kikar.co.il",  # ultra-Orthodox news — off-topic
+        "atzat-nefesh.org",  # mental health org — off-topic
+        "il.bongogirls.ru",  # noise
     }
 )
 
@@ -59,16 +66,42 @@ _SOCIAL_POST_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
 
 _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
     {
+        # ── military / geopolitical ──────────────────────────────────────────
         'צה"ל',  # IDF — ASCII double-quote form
         "צה״ל",  # IDF — Hebrew gershayim form
         "צהל",  # IDF — no punctuation form
-        "איראן",  # Iran — geopolitical
-        "נתניהו",  # Netanyahu — political
-        "טראמפ",  # Trump — political
-        "חיזבאללה",  # Hezbollah — military
-        "ספורט",  # sports
+        "איראן",  # Iran
+        "חיזבאללה",  # Hezbollah
+        "עזה",  # Gaza
+        "קטאר",  # Qatar — geopolitical/sports noise
+        "ונצואלה",  # Venezuela
+        "מדורו",  # Maduro — Venezuelan politics
+        "ממדאני",  # Madani — UN SG noise
+        # ── politics ─────────────────────────────────────────────────────────
+        "נתניהו",  # Netanyahu
+        "טראמפ",  # Trump
+        "בלפור",  # Balfour St protests — covers בלפור and בבלפור
+        "פוליטי",  # generic political commentary
+        # ── finance / business ───────────────────────────────────────────────
         "מניות",  # stocks / financial markets
-        "עזה",  # Gaza — military/geopolitical
+        "שוק ההון",  # capital markets
+        "גלובס",  # Globes financial news brand
+        "themarker",  # TheMarker financial news brand (case-insensitive match)
+        # ── supermarkets / retail noise ──────────────────────────────────────
+        "שופרסל",  # Shufersal supermarket chain
+        "ויקטורי",  # Victory supermarket chain
+        "רמי לוי",  # Rami Levy supermarket chain
+        "ksp",  # KSP electronics chain (case-insensitive)
+        # ── sports ───────────────────────────────────────────────────────────
+        "ספורט",  # sports
+        "מכבי",  # Maccabi sports teams (Maccabi Haifa, Tel Aviv, etc.)
+        # ── media brand names appearing as title suffixes ────────────────────
+        "ויקיפדיה",  # Wikipedia entries
+        "סרוגים",  # Srugim site brand name
+        "כיכר השבת",  # Kikar HaShabbat ultra-Orthodox site brand
+        "וואלה חדשות",  # Walla News brand in title (topic/nav pages)
+        # ── celebrity / entertainment ────────────────────────────────────────
+        "אייל גולן",  # Israeli singer — consistently off-topic
     }
 )
 
