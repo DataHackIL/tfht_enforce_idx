@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Triage Workbench</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2e3146;
+      --text: #e2e4f0;
+      --muted: #8b8fa8;
+      --accent: #6c75f0;
+      --red: #e05c6a;
+      --green: #4caf82;
+      --orange: #e09a4c;
+      --row-hover: #22263a;
+      --row-selected: #1e2540;
+      --radius: 6px;
+    }
+
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; font-size: 14px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── top bar ── */
+    #topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    #topbar h1 { font-size: 15px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+    .stat { display: flex; flex-direction: column; align-items: center; min-width: 56px; }
+    .stat-val { font-size: 18px; font-weight: 700; line-height: 1; }
+    .stat-lbl { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .stat-val.unreviewed { color: var(--text); }
+    .stat-val.excluded { color: var(--red); }
+    .stat-val.prioritized { color: var(--green); }
+    #topbar .spacer { flex: 1; }
+    #kbd-hint { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+    /* ── filter bar ── */
+    #filterbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; }
+    select, input[type=text] { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 5px 8px; font-size: 13px; outline: none; }
+    select:focus, input[type=text]:focus { border-color: var(--accent); }
+    .tabs { display: flex; gap: 4px; }
+    .tab { padding: 5px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; transition: all .15s; }
+    .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    #filterbar .spacer { flex: 1; }
+    #search { width: 220px; direction: ltr; }
+    #result-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+    /* ── table area ── */
+    #table-wrap { flex: 1; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { position: sticky; top: 0; background: var(--surface); z-index: 10; }
+    th { padding: 8px 12px; text-align: right; font-weight: 600; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th:last-child { text-align: left; }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr.candidate { cursor: pointer; transition: background .1s; }
+    tr.candidate:hover { background: var(--row-hover); }
+    tr.candidate.selected { outline: 1px solid var(--accent) inset; }
+    tr.candidate.excluded  { background: rgba(224, 92, 106, 0.07); }
+    tr.candidate.excluded:hover  { background: rgba(224, 92, 106, 0.13); }
+    tr.candidate.excluded td { opacity: .6; }
+    tr.candidate.prioritized { background: rgba(76, 175, 130, 0.08); }
+    tr.candidate.prioritized:hover { background: rgba(76, 175, 130, 0.14); }
+
+    .domain { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .title { font-size: 13px; font-weight: 500; direction: rtl; }
+    .snippet { font-size: 12px; color: var(--muted); direction: rtl; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 480px; }
+    .date { font-size: 11px; color: var(--muted); white-space: nowrap; direction: ltr; }
+    .url-link { font-size: 11px; color: var(--accent); word-break: break-all; direction: ltr; }
+    .triage-badge { display: inline-block; padding: 3px 9px; border-radius: 99px; font-size: 12px; font-weight: 700; letter-spacing: .01em; }
+    .triage-badge.unreviewed  { background: #1e2030; color: var(--muted); }
+    .triage-badge.excluded    { background: #3a1820; color: var(--red); }
+    .triage-badge.prioritized { background: #182e24; color: var(--green); }
+
+    .actions { display: flex; gap: 6px; align-items: center; }
+    .btn { border: none; border-radius: var(--radius); padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity .1s; white-space: nowrap; }
+    .btn:hover { opacity: .85; }
+    .btn-exclude { background: #3a1820; color: var(--red); }
+    .btn-prioritize { background: #182e24; color: var(--green); }
+    .btn-reset { background: #22263a; color: var(--muted); }
+
+    /* ── pagination ── */
+    #pagination { background: var(--surface); border-top: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .pg-btn { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 4px 10px; cursor: pointer; font-size: 12px; }
+    .pg-btn:disabled { opacity: .35; cursor: default; }
+    #pg-info { font-size: 12px; color: var(--muted); }
+    #pagination .spacer { flex: 1; }
+
+    /* ── toast ── */
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); padding: 8px 18px; border-radius: 99px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 100; }
+    #toast.show { opacity: 1; }
+
+    #empty { padding: 48px; text-align: center; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>Triage Workbench</h1>
+  <div class="stat"><span class="stat-val" id="stat-total">–</span><span class="stat-lbl">סה"כ</span></div>
+  <div class="stat"><span class="stat-val unreviewed" id="stat-unreviewed">–</span><span class="stat-lbl">לסקירה</span></div>
+  <div class="stat"><span class="stat-val prioritized" id="stat-prioritized">–</span><span class="stat-lbl">עדיפות</span></div>
+  <div class="stat"><span class="stat-val excluded" id="stat-excluded">–</span><span class="stat-lbl">הוחרגו</span></div>
+  <div class="spacer"></div>
+  <span id="kbd-hint">e=החרג &nbsp; p=עדיפות &nbsp; r=אפס &nbsp; j/k=ניווט &nbsp; /=חיפוש</span>
+</div>
+
+<div id="filterbar">
+  <select id="batch-select">
+    <option value="">כל ה-batches</option>
+  </select>
+  <div class="tabs">
+    <button class="tab active" data-status="all">הכל</button>
+    <button class="tab" data-status="unreviewed">לא סוקר</button>
+    <button class="tab" data-status="prioritized">עדיפות</button>
+    <button class="tab" data-status="excluded">הוחרגו</button>
+  </div>
+  <div class="spacer"></div>
+  <input type="text" id="search" placeholder="חפש…" dir="rtl">
+  <span id="result-count"></span>
+</div>
+
+<div id="table-wrap">
+  <table id="tbl">
+    <thead>
+      <tr>
+        <th>מקור</th>
+        <th>כותרת</th>
+        <th>תקציר</th>
+        <th>תאריך</th>
+        <th style="text-align:left">סטטוס / פעולה</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" style="display:none">אין תוצאות</div>
+</div>
+
+<div id="pagination">
+  <button class="pg-btn" id="pg-prev">‹ הקודם</button>
+  <span id="pg-info"></span>
+  <div class="spacer"></div>
+  <button class="pg-btn" id="pg-next">הבא ›</button>
+</div>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
