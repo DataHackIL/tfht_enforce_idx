@@ -53,6 +53,7 @@ async function postTriage(candidateId, action) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ candidate_id: candidateId, action }),
   });
+  if (!res.ok) throw new Error(`triage failed: ${res.status}`);
   return res.json();
 }
 
@@ -162,10 +163,16 @@ async function load(resetPage = false) {
 
 // ── triage action ─────────────────────────────────────────────────────────
 async function triage(candidateId, action) {
-  const result = await postTriage(candidateId, action);
+  let result;
+  try {
+    result = await postTriage(candidateId, action);
+  } catch (err) {
+    showToast(`שגיאה: ${err.message}`);
+    return;
+  }
   if (result.stats) renderStats(result.stats);
 
-  // optimistically update the local item so the row re-renders immediately
+  // update local item only after server confirmed the decision
   const item = state.items.find(c => c.candidate_id === candidateId);
   if (item) {
     if (action === 'exclude')    { item.triage = 'excluded';    item.candidate_status = 'suppressed'; }

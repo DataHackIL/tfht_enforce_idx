@@ -37,13 +37,14 @@ DEFAULT_PORT = 7070
 
 _candidates: dict[str, dict[str, Any]] = {}
 _batch_ids: list[str] = []
+_origin: str = f"http://localhost:{DEFAULT_PORT}"
 
 
 def _load_candidates() -> None:
     if not CANDIDATES_FILE.exists():
         print(f"ERROR: candidates file not found: {CANDIDATES_FILE}", file=sys.stderr)
         sys.exit(1)
-    with CANDIDATES_FILE.open() as fh:
+    with CANDIDATES_FILE.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -62,7 +63,7 @@ def _load_candidates() -> None:
 def _load_decisions() -> None:
     if not DECISIONS_FILE.exists():
         return
-    with DECISIONS_FILE.open() as fh:
+    with DECISIONS_FILE.open(encoding="utf-8") as fh:
         latest: dict[str, dict[str, Any]] = {}
         for line in fh:
             line = line.strip()
@@ -73,7 +74,11 @@ def _load_decisions() -> None:
     for d in latest.values():
         cid = d["candidate_id"]
         if cid in _candidates:
-            _apply(_candidates[cid], d["action"])
+            c = _candidates[cid]
+            # Snapshot original priority before any decision so reset is idempotent
+            if "_orig_priority" not in c:
+                c["_orig_priority"] = c.get("retry_priority", 0)
+            _apply(c, d["action"])
 
 
 def _apply(candidate: dict[str, Any], action: str) -> None:
@@ -103,7 +108,7 @@ def _record_decision(candidate_id: str, action: str) -> bool:
         "decided_at": datetime.now(UTC).isoformat(),
         "batch_id": c.get("backfill_batch_id"),
     }
-    with DECISIONS_FILE.open("a") as fh:
+    with DECISIONS_FILE.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(d, ensure_ascii=False) + "\n")
     return True
 
@@ -192,13 +197,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", _origin)
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", _origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
@@ -208,21 +213,31 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if parsed.path == "/api/candidates":
+            try:
+                page = max(1, int(qs.get("page", ["1"])[0]))
+                limit = max(1, min(200, int(qs.get("limit", ["50"])[0])))
+            except ValueError:
+                self._json({"error": "invalid page or limit"}, 400)
+                return
             self._json(
                 _query_candidates(
                     batch_id=qs.get("batch_id", [None])[0],
                     status=qs.get("status", ["all"])[0],
                     q=qs.get("q", [""])[0],
-                    page=int(qs.get("page", ["1"])[0]),
-                    limit=int(qs.get("limit", ["50"])[0]),
+                    page=page,
+                    limit=limit,
                 )
             )
         elif parsed.path == "/api/stats":
             self._json(_stats())
         else:
-            # Static files
+            # Static files — resolve and confine to PUBLIC_DIR
             rel = parsed.path.lstrip("/") or "index.html"
-            filepath = PUBLIC_DIR / rel
+            filepath = (PUBLIC_DIR / rel).resolve()
+            if not filepath.is_relative_to(PUBLIC_DIR.resolve()):
+                self.send_response(403)
+                self.end_headers()
+                return
             if not filepath.exists() or not filepath.is_file():
                 self.send_response(404)
                 self.end_headers()
@@ -262,6 +277,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Local pre-scrape triage server")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
+
+    global _origin
+    _origin = f"http://localhost:{args.port}"
 
     print(f"Loading candidates from {CANDIDATES_FILE} …")
     _load_candidates()

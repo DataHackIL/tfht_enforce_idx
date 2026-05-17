@@ -44,7 +44,7 @@ def load_decisions() -> dict[str, dict[str, str]]:
         print("No triage_decisions.jsonl found — nothing to sync.")
         sys.exit(0)
     latest: dict[str, dict[str, str]] = {}
-    with DECISIONS_FILE.open() as fh:
+    with DECISIONS_FILE.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if line:
@@ -57,7 +57,7 @@ def load_candidate_index() -> dict[str, dict[str, object]]:
     index: dict[str, dict[str, object]] = {}
     if not CANDIDATES_FILE.exists():
         return index
-    with CANDIDATES_FILE.open() as fh:
+    with CANDIDATES_FILE.open(encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if line:
