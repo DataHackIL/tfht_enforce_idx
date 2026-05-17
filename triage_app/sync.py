@@ -23,9 +23,17 @@ from pathlib import Path
 
 import httpx
 
+from denbust.discovery.state_paths import resolve_discovery_state_paths
+from denbust.models.common import DatasetName, JobName
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CANDIDATES_FILE = REPO_ROOT / "data/news_items/discover/candidates/latest_candidates.jsonl"
-DECISIONS_FILE = REPO_ROOT / "data/news_items/discover/candidates/triage_decisions.jsonl"
+_STATE = resolve_discovery_state_paths(
+    state_root=REPO_ROOT / "data",
+    dataset_name=DatasetName.NEWS_ITEMS,
+    job_name=JobName.DISCOVER,
+)
+CANDIDATES_FILE = _STATE.latest_candidates_path
+DECISIONS_FILE = _STATE.candidates_dir / "triage_decisions.jsonl"
 
 TABLE = "persistent_candidates"
 
