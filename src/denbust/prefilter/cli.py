@@ -116,6 +116,7 @@ def assemble_labels_cmd(
         raise typer.Exit(1)
 
     from denbust.config import load_config
+    from denbust.ops.factory import create_operational_store
     from denbust.prefilter.labels import assemble_labels, write_labels_parquet
     from denbust.prefilter.state_paths import resolve_prefilter_state_paths
 
@@ -127,7 +128,12 @@ def assemble_labels_cmd(
     )
     out_path = out if out is not None else prefilter_paths.labels_path
 
-    rows = assemble_labels(discovery_paths)
+    try:
+        operational_store = create_operational_store(loaded)
+    except Exception:  # noqa: BLE001
+        operational_store = None
+
+    rows = assemble_labels(discovery_paths, operational_store=operational_store)
     if not rows:
         typer.echo("No labeled candidates found — labels.parquet not written.", err=True)
         raise typer.Exit(1)
@@ -136,9 +142,8 @@ def assemble_labels_cmd(
 
     # Summary stats
     by_split_label: Counter[tuple[str, str]] = Counter((r.split, r.label) for r in rows)
-    by_split_source: Counter[tuple[str, str]] = Counter((r.split, r.label_source) for r in rows)
     total = len(rows)
-    typer.echo(f"Wrote {total} rows → {out_path}")
+    typer.echo(f"Wrote {total} rows -> {out_path}")
     typer.echo("")
     for split_name in ("train", "val", "test"):
         pos = by_split_label[(split_name, "positive")]
@@ -149,8 +154,6 @@ def assemble_labels_cmd(
         typer.echo(f"  {split_name:5s}: {n:6d} rows  (pos={pos}, neg={neg})")
     typer.echo("")
     typer.echo("By source:")
-    source_totals: Counter[str] = Counter()
-    for (_, src), cnt in by_split_source.items():
-        source_totals[src] += cnt
+    source_totals: Counter[str] = Counter(r.label_source for r in rows)
     for src, cnt in sorted(source_totals.items()):
         typer.echo(f"  {src}: {cnt}")

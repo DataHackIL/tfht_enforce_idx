@@ -99,7 +99,7 @@ class LabeledCandidate:
 # ---------------------------------------------------------------------------
 
 
-def _parquet_schema() -> object:
+def _parquet_schema() -> Any:
     import pyarrow as pa
 
     return pa.schema(
@@ -175,8 +175,15 @@ def _row_hash(row: dict[str, object]) -> str:
 
 
 def _latest_triage_decisions(decisions_path: Path) -> dict[str, dict[str, object]]:
-    """Return the latest triage decision per ``candidate_id`` (file order wins)."""
+    """Return the latest triage decision per ``candidate_id`` by ``decided_at`` timestamp.
+
+    When two decisions share the same ``decided_at`` (or timestamps are missing /
+    unparseable), the later entry in the file wins as a tie-breaker.
+    """
+    from datetime import datetime
+
     latest: dict[str, dict[str, object]] = {}
+    latest_dt: dict[str, datetime | None] = {}
     if not decisions_path.exists():
         return latest
     with decisions_path.open(encoding="utf-8") as fh:
@@ -189,8 +196,23 @@ def _latest_triage_decisions(decisions_path: Path) -> dict[str, dict[str, object
             except json.JSONDecodeError:
                 continue
             cid = row.get("candidate_id")
-            if cid:
-                latest[str(cid)] = row
+            if not cid:
+                continue
+            cid = str(cid)
+            # Parse the decided_at timestamp; fall back to None if missing/invalid.
+            new_dt: datetime | None = None
+            try:
+                raw_dt = str(row.get("decided_at", ""))
+                if raw_dt:
+                    new_dt = datetime.fromisoformat(raw_dt.rstrip("Z").replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+            existing_dt = latest_dt.get(cid)
+            # Keep the new row if: no existing entry, or new timestamp is strictly
+            # later, or timestamps are equal/unparseable (file order tie-break).
+            if existing_dt is None or new_dt is None or new_dt >= existing_dt:
+                latest[cid] = row
+                latest_dt[cid] = new_dt
     return latest
 
 
@@ -200,7 +222,11 @@ def _triage_label(
     """Map one triage decision to ``(label, source)``.
 
     Returns ``None`` for ``reset`` decisions (candidate dropped from label set).
+    Emits a :class:`UserWarning` for unrecognised actions so callers see the
+    problem without crashing.
     """
+    import warnings
+
     action = decision.get("action")
     is_auto = bool(decision.get("auto", False))
     if action == "prioritize":
@@ -209,6 +235,13 @@ def _triage_label(
         if is_auto:
             return "negative", "triage_auto"
         return "negative", "triage_manual"
+    if action != "reset" and action is not None:
+        warnings.warn(
+            f"Unknown triage action {action!r} for candidate "
+            f"{decision.get('candidate_id')!r}; dropping from labeled set.",
+            UserWarning,
+            stacklevel=2,
+        )
     return None  # reset or unknown: drop
 
 
@@ -235,12 +268,13 @@ def _load_candidates(candidates_path: Path) -> dict[str, dict[str, object]]:
 def _operational_labels(
     store: OperationalStore,
     dataset_name: str,
-) -> dict[str, tuple[Label, str]]:
-    """Return ``{canonical_url: (label, labeled_at)}`` from the operational store.
+) -> dict[str, tuple[Label, str, dict[str, object]]]:
+    """Return ``{canonical_url: (label, labeled_at, raw_record)}`` from the operational store.
 
-    Failures are silenced — the store is optional infrastructure.
+    The raw record is kept so the caller can hash the actual source row rather
+    than a synthetic projection.  Failures are silenced — the store is optional.
     """
-    result: dict[str, tuple[Label, str]] = {}
+    result: dict[str, tuple[Label, str, dict[str, object]]] = {}
     try:
         records = store.fetch_records(dataset_name)
     except Exception:  # noqa: BLE001
@@ -254,7 +288,7 @@ def _operational_labels(
             continue
         lbl: Label = "positive" if index_relevant else "negative"
         labeled_at = str(rec.get("updated_at") or rec.get("created_at") or "")
-        result[str(url)] = (lbl, labeled_at)
+        result[str(url)] = (lbl, labeled_at, dict(rec))
     return result
 
 
@@ -296,22 +330,7 @@ def _assign_splits(
         for i in indices[n_train + n_val :]:
             split_by_idx[i] = "test"
 
-    return [
-        LabeledCandidate(
-            candidate_id=row.candidate_id,
-            domain=row.domain,
-            url=row.url,
-            title=row.title,
-            snippet=row.snippet,
-            article_body=row.article_body,
-            label=row.label,
-            label_source=row.label_source,
-            split=split_by_idx[i],
-            labeled_at=row.labeled_at,
-            decision_hash=row.decision_hash,
-        )
-        for i, row in enumerate(rows)
-    ]
+    return [dataclasses.replace(row, split=split_by_idx[i]) for i, row in enumerate(rows)]
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +367,22 @@ def assemble_labels(
     -------
     list[LabeledCandidate]
         Rows with split assignments, sorted by ``candidate_id``.
+
+    Raises
+    ------
+    ValueError
+        If *val_fraction* or *test_fraction* are out of ``[0, 1)`` or their
+        sum is ``≥ 1``.
     """
+    if not 0.0 <= val_fraction < 1.0:
+        raise ValueError(f"val_fraction must be in [0, 1), got {val_fraction}")
+    if not 0.0 <= test_fraction < 1.0:
+        raise ValueError(f"test_fraction must be in [0, 1), got {test_fraction}")
+    if val_fraction + test_fraction >= 1.0:
+        raise ValueError(
+            f"val_fraction + test_fraction must be < 1.0, got {val_fraction + test_fraction:.3f}"
+        )
+
     decisions_path = discovery_paths.candidates_dir / "triage_decisions.jsonl"
     triage = _latest_triage_decisions(decisions_path)
     candidates = _load_candidates(discovery_paths.latest_candidates_path)
@@ -366,11 +400,11 @@ def assemble_labels(
     # 1. Seed with claude_classifier labels (lowest priority above triage_auto)
     if operational_store is not None:
         op_labels = _operational_labels(operational_store, str(discovery_paths.dataset_name))
-        for url, (lbl, labeled_at) in op_labels.items():
+        for url, (lbl, labeled_at, raw_rec) in op_labels.items():
             maybe_cid = url_to_cid.get(url)
             if maybe_cid is None:
                 continue
-            dhash = _row_hash({"source": "claude_classifier", "canonical_url": url, "label": lbl})
+            dhash = _row_hash(raw_rec)
             label_map[maybe_cid] = (lbl, "claude_classifier", labeled_at, dhash)
 
     # 2. Process triage decisions: override by priority or drop for reset

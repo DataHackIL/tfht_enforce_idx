@@ -89,8 +89,12 @@ class TestAssembleLabelsCommand:
         runner.invoke(prefilter_app, ["assemble-labels", "--config", str(config_path)])
         path = state_root / "news_items" / "discover" / "prefilter" / "labels.parquet"
         rows = read_labels_parquet(path)
-        # 15 candidates: reset rows are excluded (none in fixture), so ≤ 15
-        assert len(rows) > 0
+        # Fixture: 15 candidates, all with a non-reset decision, no operational store.
+        # i%3==0 → prioritize (i=0,3,6,9,12 → 5 manual-positive)
+        # i%5==0 and i%3!=0 → auto exclude (i=5,10 → 2 triage_auto)
+        # remaining → manual exclude (i=1,2,4,7,8,11,13,14 → 8 triage_manual negative)
+        # Total: 5 + 2 + 8 = 15
+        assert len(rows) == 15
 
     def test_custom_out_path(self, tmp_path: Path) -> None:
         config_path, state_root = _make_fixture_state(tmp_path)
