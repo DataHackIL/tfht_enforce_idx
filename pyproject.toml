@@ -29,6 +29,8 @@ dependencies = [
     "google-api-python-client>=2.154.0",
     "google-auth>=2.36.0",
     "boto3>=1.36.0",
+    "scikit-learn>=1.5",
+    "joblib>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -100,9 +102,11 @@ module = [
     "google.*",
     "googleapiclient.*",
     "huggingface_hub.*",
+    "joblib.*",
     "kaggle.*",
     "pyarrow.*",
     "playwright.*",
+    "sklearn.*",
 ]
 ignore_missing_imports = true
 

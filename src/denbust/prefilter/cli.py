@@ -92,39 +92,40 @@ def summary(
 def retrain_cmd(
     stage: Annotated[
         str,
-        typer.Option("--stage", "-s", help="Stage to retrain: a"),
+        typer.Option("--stage", "-s", help="Stage to retrain: a, b"),
     ],
     config: Annotated[
         Path | None,
         typer.Option("--config", "-c", help="Path to YAML config file"),
     ] = None,
 ) -> None:
-    """Rebuild Stage-A artifacts (lexicon + domain reputation) from labels.parquet.
+    """Rebuild stage artifacts from labels.parquet.
 
-    Reads the labeled-candidates parquet from the prefilter state path and writes
-    updated Stage-A artifacts to ``models/stage_a/`` under the same state root.
+    Reads the labeled-candidates parquet from the prefilter state path and
+    writes updated artifacts under ``models/<stage>/`` in the same state root.
 
-    Only ``--stage a`` is supported in this release; other stages are planned
-    for future PRs.
+    Supported stages
+    ----------------
+    a   Lexicon (chi-squared weighted terms) + domain reputation parquet.
+    b   Calibrated ComplementNB thin and thick models (scikit-learn joblib).
     """
     if config is None:
         typer.echo(
             "Error: --config is required.  Pass the path to your YAML config file.\n"
-            "Example: denbust prefilter retrain --stage a --config agents/news/local.yaml",
+            "Example: denbust prefilter retrain --stage b --config agents/news/local.yaml",
             err=True,
         )
         raise typer.Exit(1)
 
     stage = stage.lower().strip()
-    if stage != "a":
+    if stage not in {"a", "b"}:
         typer.echo(
-            f"Error: --stage {stage!r} is not yet supported.  Only 'a' is available.",
+            f"Error: --stage {stage!r} is not supported.  Choose 'a' or 'b'.",
             err=True,
         )
         raise typer.Exit(1)
 
     from denbust.config import load_config
-    from denbust.prefilter.stage_a import build_stage_a_artifacts
     from denbust.prefilter.state_paths import resolve_prefilter_state_paths
 
     loaded = load_config(config)
@@ -141,14 +142,31 @@ def retrain_cmd(
         )
         raise typer.Exit(1)
 
-    typer.echo(f"Retraining Stage A from {prefilter_paths.labels_path} ...")
-    lex_path, dom_path = build_stage_a_artifacts(
-        labels_path=prefilter_paths.labels_path,
-        out_dir=prefilter_paths.models_dir,
-    )
-    typer.echo(f"  lexicon          -> {lex_path}")
-    typer.echo(f"  domain_reputation -> {dom_path}")
-    typer.echo("Stage A retrain complete.")
+    if stage == "a":
+        from denbust.prefilter.stage_a import build_stage_a_artifacts
+
+        typer.echo(f"Retraining Stage A from {prefilter_paths.labels_path} ...")
+        lex_path, dom_path = build_stage_a_artifacts(
+            labels_path=prefilter_paths.labels_path,
+            out_dir=prefilter_paths.models_dir,
+        )
+        typer.echo(f"  lexicon           -> {lex_path}")
+        typer.echo(f"  domain_reputation -> {dom_path}")
+        typer.echo("Stage A retrain complete.")
+
+    else:  # stage == "b"
+        from denbust.prefilter.stage_b import train_naive_bayes
+
+        typer.echo(f"Retraining Stage B from {prefilter_paths.labels_path} ...")
+        meta = train_naive_bayes(
+            labels_path=prefilter_paths.labels_path,
+            out_dir=prefilter_paths.models_dir,
+        )
+        stage_dir = prefilter_paths.models_dir / "stage_b"
+        typer.echo(f"  thin_model        -> {stage_dir / 'thin_model.joblib'}")
+        typer.echo(f"  thick_model       -> {stage_dir / 'thick_model.joblib'}")
+        typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
+        typer.echo(f"Stage B retrain complete.  model_version={meta.model_version}")
 
 
 @prefilter_app.command("assemble-labels")
