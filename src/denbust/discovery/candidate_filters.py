@@ -48,6 +48,21 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "kikar.co.il",  # ultra-Orthodox news — off-topic
         "atzat-nefesh.org",  # mental health org — off-topic
         "il.bongogirls.ru",  # noise
+        "he.wikiquote.org",  # Hebrew Wikiquote — never enforcement news
+        "parks.org.il",  # Israel Nature and Parks Authority — off-topic
+        "vietnam.vn",  # Vietnamese government portal — off-topic
+        "dok.co.il",  # Israeli job listings site — off-topic
+        "ealaw.co.il",  # Israeli law reference site — off-topic
+        "calcalist.co.il",  # financial/business newspaper — off-topic
+        "globes.co.il",  # Globes financial newspaper — off-topic
+        "nevo.co.il",  # Israeli legal database — off-topic
+        "lawbuzz.co.il",  # Israeli law reference — off-topic
+        "bizportal.co.il",  # business/finance portal — off-topic
+        "kolzchut.org.il",  # social-rights info site — off-topic
+        "itim.org.il",  # Jewish civil status NGO — off-topic
+        "din.org.il",  # legal info NGO — off-topic
+        "todojustice.co.il",  # legal info site — off-topic
+        "tomoko.co.il",  # unrelated e-commerce — off-topic
     }
 )
 
@@ -102,6 +117,109 @@ _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
         "וואלה חדשות",  # Walla News brand in title (topic/nav pages)
         # ── celebrity / entertainment ────────────────────────────────────────
         "אייל גולן",  # Israeli singer — consistently off-topic
+        # ── food / hospitality ───────────────────────────────────────────────
+        "בית קפה",  # coffee shop — covers "בית קפה", "לבית קפה"
+        "בית הקפה",  # the coffee shop — covers "בית הקפה", "לבית הקפה"
+        "מסעדה",  # restaurant — covers "המסעדה", "למסעדה"
+        "אולם אירועים",  # event hall
+        "אולם האירועים",  # the event hall
+        "מתחם אירועים",  # event complex
+        "מתחם האירועים",  # the event complex
+        "האירועים",  # events (residual event-venue noise)
+        "המבורגר",  # hamburger — covers "המבורגרים", "ההמבורגרים"
+        "ארומה",  # Aroma coffee chain
+        "עסק מזון",  # food business
+        "עסקי מזון",  # food businesses (plural construct)
+        # ── construction / real-estate noise ─────────────────────────────────
+        "אתר בנייה",  # construction site
+        "אתר הבנייה",  # the construction site
+        "דירה למכירה",  # apartment for sale
+        "דירות למכירה",  # apartments for sale
+        "משופצת",  # renovated (real-estate listing noise)
+        # ── publication-ban / non-enforcement closure orders ──────────────────
+        "איסור פרסום",  # publication gag order (non-enforcement context)
+        "איסור הפרסום",  # the publication gag order
+        "איסור פירסום",  # alt spelling
+        "איסור הפירסום",  # alt spelling with def. article
+        "צו פתיחת הליכים",  # bankruptcy opening-of-proceedings order
+        "צו ביניים",  # interim injunction (non-prostitution court context)
+        "צו ראשון",  # first order (non-enforcement court context)
+        "צו סגירה למפעל",  # factory closure order
+        "צו סגירה לסניף",  # branch closure order
+        "צו סגירה למאפיה",  # bakery closure order (מאפיה = bakery in Hebrew)
+        # ── retail / brand noise ─────────────────────────────────────────────
+        "המשביר",  # HaMashbir department-store chain
+        "איקאה",  # IKEA
+        # ── finance / trading ────────────────────────────────────────────────
+        "מסחר בבורסה",  # stock-market trading
+        "מסחר עצמאי",  # independent trading / freelance commerce
+        # ── AI / tech noise ──────────────────────────────────────────────────
+        "גרוק",  # Grok AI
+        "ג'מיני",  # Gemini AI
+        "chatgpt",  # ChatGPT (case-insensitive)
+        "מודל שפה",  # language model
+        # ── unrelated legal / civic ───────────────────────────────────────────
+        "בגצ",  # HCJ (no punctuation)
+        'בג"צ',  # HCJ (ASCII double-quote)
+        "בגץ",  # HCJ (final tsadi form, no punctuation)
+        'בג"ץ',  # HCJ (final tsadi + ASCII double-quote)
+        "יציאה מהארץ",  # leaving the country (travel/immigration noise)
+        "גיוס",  # military/job recruitment noise
+        # ── industrial / factory noise ────────────────────────────────────────
+        "מפעל",  # factory
+        "מאפיה",  # bakery (Hebrew; "mafia" is a false cognate)
+        "מוסך",  # garage / auto-repair shop
+        # ── adult-content / unrelated noise ──────────────────────────────────
+        "פורנהאב",  # Pornhub (site name, not enforcement news)
+        "קלפים",  # playing/tarot cards
+        "טארוט",  # tarot
+        "מצלמות",  # cameras (cam-site noise)
+        "cams",  # cam-site noise (case-insensitive)
+        "מעשים מגונים",  # indecent acts (non-trafficking legal noise)
+        # ── politics / government (second batch) ─────────────────────────────
+        "ביבי",  # Netanyahu nickname
+        "בנט",  # Naftali Bennett — political noise
+        "בן גביר",  # Itamar Ben Gvir
+        "בן-גביר",  # Ben Gvir with hyphen
+        # ── economy / tax / budget noise ─────────────────────────────────────
+        "כלכלה",  # economy
+        "רשות המסים",  # Tax Authority
+        "מסים",  # taxes — covers "המסים" substring too
+        "המס",  # the tax (shorter form; avoids over-blocking "מסים" in other contexts)
+        "תקציב",  # budget — covers "התקציב"
+        "קנס",  # fine — covers "קנסות"
+        "עסקה",  # deal/transaction
+        "עסקת",  # deal-of (construct form)
+        "זכיינות",  # franchising
+        # ── fuel / telecom brand noise ────────────────────────────────────────
+        "פז",  # Paz fuel chain
+        "דלק",  # Delek fuel company
+        "סונול",  # Sonol fuel chain
+        "בזק",  # Bezeq telecom
+        "הוט",  # HOT cable/telecom
+        "קרפור",  # Carrefour supermarket
+        "שטראוס",  # Strauss food company
+        "אבו לטיף",  # Abu Latif — recurring off-topic news subject
+        # ── divorce / family-law noise ────────────────────────────────────────
+        "גירושין",  # divorce (legal term) — covers "גירושים" substring
+        "להתגרש",  # to divorce
+        # ── sexual harassment (distinct from trafficking) ─────────────────────
+        "הטרדה מינית",  # sexual harassment — covers "להטרדה מינית", "הוטרדה מינית"
+        # ── AI / tech (second batch) ─────────────────────────────────────────
+        "בינה מלאכותית",  # artificial intelligence
+        # ── civic / protest noise ────────────────────────────────────────────
+        "מפגינים",  # protesters
+        # ── license revocation (driving/professional, non-enforcement) ────────
+        "שלילת רישיון",  # license revocation — covers "ושלילת רישיון"
+        # ── content offensiveness flags (non-enforcement context) ─────────────
+        "פוגעני",  # offensive/harmful — covers "פוגעניים"
+        "סם אונס",  # rape drug (news about the drug itself, not trafficking)
+        # ── insolvency / social-security / civil-defense noise ────────────────
+        "חדלות פירעון",  # insolvency — legal/financial, not enforcement
+        "ביטוח לאומי",  # National Insurance Institute — social-security noise
+        "פיקוד העורף",  # Home Front Command — civil-defense / military noise
+        # ── named individuals (off-topic recurring subjects) ──────────────────
+        "אסף דוק",  # Assaf Dok — consistently off-topic news subject
     }
 )
 
