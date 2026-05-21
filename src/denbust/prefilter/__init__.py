@@ -17,12 +17,28 @@ PrefilterStatePaths       — resolved artifact-directory layout for a dataset/j
 resolve_prefilter_state_paths — factory for :class:`PrefilterStatePaths`.
 PassKind                  — ``Literal["thin", "thick"]``.
 Verdict                   — ``Literal["pass", "drop"]``.
+LabeledCandidate          — one labeled row in the training dataset.
+Label                     — ``Literal["positive", "negative"]``.
+LabelSourceName           — ``Literal["triage_manual", "triage_auto", "claude_classifier"]``.
+Split                     — ``Literal["train", "val", "test"]``.
+assemble_labels           — assemble the labeled dataset from state-repo signals.
+write_labels_parquet      — serialise rows to Parquet.
+read_labels_parquet       — deserialise rows from Parquet.
 """
 
 from __future__ import annotations
 
 from denbust.prefilter.cascade import CascadeOrchestrator
 from denbust.prefilter.config import PrefilterConfig, PrefilterMode
+from denbust.prefilter.labels import (
+    Label,
+    LabeledCandidate,
+    LabelSourceName,
+    Split,
+    assemble_labels,
+    read_labels_parquet,
+    write_labels_parquet,
+)
 from denbust.prefilter.models import (
     CandidateView,
     PassKind,
@@ -36,13 +52,20 @@ from denbust.prefilter.state_paths import PrefilterStatePaths, resolve_prefilter
 __all__ = [
     "CandidateView",
     "CascadeOrchestrator",
+    "Label",
+    "LabeledCandidate",
+    "LabelSourceName",
     "PassKind",
     "PrefilterConfig",
     "PrefilterDecision",
     "PrefilterMode",
     "PrefilterStatePaths",
+    "Split",
     "StageEvaluator",
     "StageScore",
     "Verdict",
+    "assemble_labels",
+    "read_labels_parquet",
     "resolve_prefilter_state_paths",
+    "write_labels_parquet",
 ]
