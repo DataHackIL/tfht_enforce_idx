@@ -470,6 +470,30 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   failure-stage diagnostics, and code can select eligible failed candidates for a later
   `self_heal_retry` orchestration pass without implementing AI repair.
 
+### Planned: local pre-classification filter cascade (LPF-PR-XX)
+
+A four-stage, fully-local, non-LLM-API-based filter cascade is planned for insertion between the
+discovery/triage layer and the Claude Sonnet relevance classifier, to drop high-confidence true
+negatives before they consume paid LLM budget. The cascade composes:
+
+- Stage A: scored lexicon + Beta-Binomial domain reputation + URL heuristics (microseconds per
+  candidate);
+- Stage B: trained text classifier (Naive Bayes on character n-grams, with a SetFit option)
+  (~5 ms per candidate);
+- Stage C: multilingual sentence-embedding similarity using `intfloat/multilingual-e5-large`
+  with centroid-cosine and FAISS-HNSW kNN-max-cosine signals (~30 ms per candidate);
+- Stage D: local SLM (`dicta-il/dictalm2.0-instruct` via MLX) scored by token logprobs of
+  `כן` / `לא` at the answer slot (~800 ms per candidate).
+
+Each stage is calibrated to ≥ 99% per-stage recall on a held-out validation set; the cascade
+ships in `mode: off` by default, is promoted to `mode: shadow` in `LPF-PR-09`, and only flips to
+`mode: enforce` after a documented 7-day shadow window meets the configured recall floor.
+
+See [docs/local_prefilter_cascade_design.md](docs/local_prefilter_cascade_design.md) for the
+design and [docs/local_prefilter_cascade_implementation_plan.md](docs/local_prefilter_cascade_implementation_plan.md)
+for the per-PR rollout plan (`LPF-PR-01` through `LPF-PR-10` for the core cascade plus optional
+`LPF-PR-11` Claude distillation and `LPF-PR-12` active-learning / cluster-filter follow-ups).
+
 ## Config Layout
 
 Preferred checked-in config layout:

@@ -276,3 +276,40 @@ After Phase 1 is stable:
 - SQLite database for history
 - Location extraction
 - Web dashboard
+
+---
+
+## Phase 3 — Local Pre-Classification Filter Cascade (LPF-PR-XX)
+
+**Detailed design:** [docs/local_prefilter_cascade_design.md](./local_prefilter_cascade_design.md)
+**Implementation plan:** [docs/local_prefilter_cascade_implementation_plan.md](./local_prefilter_cascade_implementation_plan.md)
+
+**Goal:** Insert a local, non-LLM-API-based filtering cascade between the discovery/triage layer and the Claude-Sonnet relevance classifier, to drop high-confidence true negatives before they consume paid LLM budget. Target ≥ 50% Claude-call reduction at recall ≥ 0.98.
+
+**Architecture:** four cascade stages, each calibrated to ≥ 99% per-stage recall:
+
+- **Stage A** — scored lexicon + domain reputation posterior + URL heuristics (< 100 µs / candidate).
+- **Stage B** — trained text classifier (Naive Bayes on char n-grams; SetFit option) (~ 5 ms / candidate).
+- **Stage C** — multilingual sentence-embedding similarity (centroid + FAISS kNN) over `intfloat/multilingual-e5-large` (~ 30 ms / candidate).
+- **Stage D** — local SLM (DictaLM-2.0-Instruct via MLX) scored by token logprobs of `כן` / `לא` (~ 800 ms / candidate).
+
+Both a thin (pre-scrape, A+B) and a thick (post-scrape, A–D) pass run; both write structured `PrefilterDecision` telemetry. Runtime modes: `off | shadow | enforce`. Default ships `off`; promoted to `shadow` in `LPF-PR-09`; operator action required to flip to `enforce` after a 7-day shadow window meets the recall floor.
+
+### Task summary
+
+| PR | Goal | Status |
+|----|------|--------|
+| LPF-PR-01 | Foundation: package, models, config, telemetry stubs | planned |
+| LPF-PR-02 | Labeled-candidates dataset assembly | planned |
+| LPF-PR-03 | Stage A: lexicon + domain reputation + URL heuristics | planned |
+| LPF-PR-04 | Stage B: Naive Bayes default | planned |
+| LPF-PR-05 | Stage B: SetFit alternative | planned |
+| LPF-PR-06 | Stage C: embedding similarity (centroid + FAISS kNN) | planned |
+| LPF-PR-07 | Stage D: local SLM judge via MLX | planned |
+| LPF-PR-08 | Cascade orchestrator + pipeline integration | planned |
+| LPF-PR-09 | Shadow-mode telemetry harness + Supabase migration | planned |
+| LPF-PR-10 | Calibration tooling + golden-set regression CI | planned |
+| LPF-PR-11 (optional) | Claude-distilled student (LoRA on DictaBERT) | later |
+| LPF-PR-12 (optional) | Active learning loop + BERTopic cluster filter | later |
+
+See [docs/local_prefilter_cascade_implementation_plan.md](./local_prefilter_cascade_implementation_plan.md) for per-PR scope, file paths, dependencies, test plans, and acceptance criteria.
