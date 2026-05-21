@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 from denbust.discovery.models import DiscoveryQueryKind
 from denbust.discovery.state_paths import DiscoveryStatePaths, resolve_discovery_state_paths
 from denbust.models.common import DatasetName, JobName, normalize_job_name
+from denbust.prefilter.config import PrefilterConfig
 from denbust.store.state_paths import DatasetStatePaths, resolve_dataset_state_paths
 
 
@@ -448,6 +449,7 @@ class Config(BaseModel):
     backfill: BackfillConfig = Field(default_factory=BackfillConfig)
     release: ReleaseConfig = Field(default_factory=ReleaseConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
+    prefilter: PrefilterConfig = Field(default_factory=PrefilterConfig)
 
     @model_validator(mode="before")
     @classmethod
