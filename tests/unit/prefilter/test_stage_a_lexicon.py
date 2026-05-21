@@ -9,7 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from denbust.prefilter.stage_a import LexiconEntry, LexiconScorer, _default_lexicon, _sigmoid
+from denbust.discovery.candidate_filters import globally_excluded_title_terms
+from denbust.prefilter.stage_a import (
+    LexiconEntry,
+    LexiconScorer,
+    _chi2_top_terms,
+    _default_lexicon,
+    _sigmoid,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,6 +123,40 @@ class TestLexiconScorerScoring:
 # ---------------------------------------------------------------------------
 
 
+class TestLexiconScorerValidation:
+    """from_file must reject corrupt artifact data with an informative error."""
+
+    def test_rejects_null_weight(self, tmp_path: Path) -> None:
+        """null log_weight_negative (JSON null → Python None) must raise ValueError."""
+        path = tmp_path / "bad.json"
+        path.write_text(
+            '[{"term": "test", "log_weight_negative": null, "k_neg": 1, "k_pos": 0}]',
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="log_weight_negative"):
+            LexiconScorer.from_file(path)
+
+    def test_rejects_negative_k_neg(self, tmp_path: Path) -> None:
+        """Negative k_neg must raise ValueError."""
+        path = tmp_path / "bad.json"
+        path.write_text(
+            '[{"term": "test", "log_weight_negative": 1.0, "k_neg": -1, "k_pos": 0}]',
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="k_neg"):
+            LexiconScorer.from_file(path)
+
+    def test_rejects_negative_k_pos(self, tmp_path: Path) -> None:
+        """Negative k_pos must raise ValueError."""
+        path = tmp_path / "bad.json"
+        path.write_text(
+            '[{"term": "test", "log_weight_negative": 1.0, "k_neg": 5, "k_pos": -2}]',
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="k_pos"):
+            LexiconScorer.from_file(path)
+
+
 class TestLexiconScorerIO:
     def test_round_trip(self, tmp_path: Path) -> None:
         entries = [_entry("ספורט", 10, 1), _entry("themarker", 20, 0)]
@@ -157,7 +198,53 @@ class TestDefaultLexicon:
         # "ספורט" is in _EXCLUDED_TITLE_TERMS
         assert lex.score("ספורט", "") >= 0.95
 
+    def test_all_excluded_terms_score_high(self) -> None:
+        """Every term in _EXCLUDED_TITLE_TERMS must produce p >= 0.95.
+
+        This is the automated recall-floor check: the default lexicon must
+        replicate the existing hard-drop behaviour for the full excluded-term
+        list, not just for a single sampled term.
+        """
+        lex = _default_lexicon()
+        for term in globally_excluded_title_terms():
+            p = lex.score(term, "")
+            assert p >= 0.95, f"term {term!r} scored {p:.4f} < 0.95"
+
     def test_unrelated_text_scores_zero(self) -> None:
         lex = _default_lexicon()
         p = lex.score("עצור חשוד ברצח אישה בתל אביב", "המשטרה עצרה חשוד ברצח")
         assert p == 0.0
+
+
+# ---------------------------------------------------------------------------
+# chi2 feature selection
+# ---------------------------------------------------------------------------
+
+
+class TestChi2TopTerms:
+    def test_excludes_positive_skewed_terms(self) -> None:
+        """_chi2_top_terms must never return terms where k_neg <= k_pos.
+
+        A positive-skewed term gets log_weight < 0, so sigmoid < 0.5, meaning
+        matching it would *decrease* p_negative and silently hurt recall.
+        """
+        # "good" appears only in positives; "bad" only in negatives.
+        pos_texts = ["good article"] * 20
+        neg_texts = ["bad content"] * 20
+
+        results = _chi2_top_terms(pos_texts, neg_texts, n=100, min_df=1)
+        term_names = [t for t, _, _ in results]
+
+        assert "bad" in term_names, "negative-skewed term missing from output"
+        assert "good" not in term_names, "positive-skewed term must not appear in output"
+
+    def test_all_returned_terms_are_negative_skewed(self) -> None:
+        """Every (term, k_neg, k_pos) triple must satisfy k_neg > k_pos."""
+        pos_texts = ["נושא חיובי שמח ושמח"] * 30
+        neg_texts = ["נושא שלילי רע ורע"] * 30 + ["נושא חיובי"] * 5
+
+        results = _chi2_top_terms(pos_texts, neg_texts, n=50, min_df=2)
+        for term, k_neg, k_pos in results:
+            assert k_neg > k_pos, (
+                f"term {term!r} is not negative-skewed: k_neg={k_neg}, k_pos={k_pos}"
+            )

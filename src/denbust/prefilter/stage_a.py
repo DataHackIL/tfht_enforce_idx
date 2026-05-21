@@ -59,16 +59,19 @@ _N_CHI2_TERMS: int = 100
 _DEFAULT_EXCLUDED_K_NEG: int = 98
 
 # URL path segments that strongly indicate non-article content.
+# These are bare segment roots — no trailing slash.  The boundary check is
+# handled by :func:`_url_has_segment`, which ensures that e.g. ``/feed`` does
+# not fire on ``/feedback/`` or ``/sitemap`` on ``/sitemapper/``.
 _NEGATIVE_URL_SEGMENTS: tuple[str, ...] = (
-    "/tag/",
-    "/category/",
-    "/topic/",
-    "/section/",
-    "/archive/",
+    "/tag",
+    "/category",
+    "/topic",
+    "/section",
+    "/archive",
     "/sitemap",
     "/feed",
     "/rss",
-    "/amp/",
+    "/amp",
 )
 
 # File extensions that indicate non-HTML documents (PDFs, Office files, etc.)
@@ -151,8 +154,9 @@ class LexiconScorer:
     """
 
     def __init__(self, entries: list[LexiconEntry]) -> None:
-        # Sort longest-first so that multi-word terms match before sub-terms.
-        self._entries: list[LexiconEntry] = sorted(entries, key=lambda e: len(e.term), reverse=True)
+        # Pre-casefold every term once at construction time to avoid repeated
+        # casefold() calls on the hot scoring path (one per entry per candidate).
+        self._entries: list[tuple[LexiconEntry, str]] = [(e, e.term.casefold()) for e in entries]
 
     # ------------------------------------------------------------------
     # I/O
@@ -162,21 +166,39 @@ class LexiconScorer:
     def from_file(cls, path: Path) -> LexiconScorer:
         """Load a :class:`LexiconScorer` from a JSON file produced by :func:`build_stage_a_artifacts`."""
         raw = json.loads(path.read_text(encoding="utf-8"))
-        entries = [
-            LexiconEntry(
-                term=row["term"],
-                log_weight_negative=float(row["log_weight_negative"]),
-                k_neg=int(row["k_neg"]),
-                k_pos=int(row["k_pos"]),
+        entries: list[LexiconEntry] = []
+        for row in raw:
+            log_w_raw = row["log_weight_negative"]
+            try:
+                log_w = float(log_w_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Invalid log_weight_negative {log_w_raw!r} for term {row['term']!r}"
+                ) from exc
+            if not math.isfinite(log_w):
+                raise ValueError(
+                    f"Non-finite log_weight_negative {log_w!r} for term {row['term']!r}"
+                )
+            k_neg = int(row["k_neg"])
+            k_pos = int(row["k_pos"])
+            if k_neg < 0 or k_pos < 0:
+                raise ValueError(
+                    f"Negative count for term {row['term']!r}: k_neg={k_neg}, k_pos={k_pos}"
+                )
+            entries.append(
+                LexiconEntry(
+                    term=row["term"],
+                    log_weight_negative=log_w,
+                    k_neg=k_neg,
+                    k_pos=k_pos,
+                )
             )
-            for row in raw
-        ]
         return cls(entries)
 
     def save(self, path: Path) -> None:
         """Persist this lexicon to *path* as a JSON file."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [dataclasses.asdict(e) for e in self._entries]
+        payload = [dataclasses.asdict(e) for e, _ in self._entries]
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # ------------------------------------------------------------------
@@ -190,8 +212,8 @@ class LexiconScorer:
         """
         text = (title + " " + snippet).casefold()
         p_no_neg = 1.0
-        for entry in self._entries:
-            if entry.term.casefold() in text:
+        for entry, term_cf in self._entries:
+            if term_cf in text:
                 p_term = _sigmoid(entry.log_weight_negative)
                 p_no_neg *= 1.0 - p_term
         return 1.0 - p_no_neg
@@ -269,11 +291,17 @@ class DomainReputationScorer:
 
         Returns ``0.0`` when the domain is unknown or has fewer than
         ``min_observations`` training examples.
+
+        The Wilson upper-95 bound is used rather than the posterior mean so
+        that domains with small-but-entirely-negative evidence are penalised
+        more aggressively — the right trade-off for a pre-filter where a
+        missed drop is cheaper than a missed pass during shadow-mode
+        validation.
         """
         rep = self._table.get((domain or "").casefold())
         if rep is None or rep.n < self._min_observations:
             return 0.0
-        return rep.p_post_mean
+        return rep.p_post_upper_95
 
 
 # ---------------------------------------------------------------------------
@@ -290,10 +318,14 @@ class UrlHeuristicScorer:
     """
 
     # Per-heuristic weights expressed as p_negative contributions.
-    _W_SEGMENT: float = 0.70  # navigation/index path segment
-    _W_EXTENSION: float = 0.85  # non-HTML document extension
-    _W_TRAILING_SLASH: float = 0.55  # path ends with "/" → likely directory
-    _W_EXCESS_QS: float = 0.60  # too many query-string parameters
+    # These are hand-tuned conservative priors based on a qualitative
+    # assessment of how reliably each heuristic identifies non-article URLs.
+    # They should be recalibrated against validation-set precision/recall once
+    # the cascade is running in shadow mode and telemetry is available.
+    _W_SEGMENT: float = 0.70  # navigation/index path segment (tag, category, etc.)
+    _W_EXTENSION: float = 0.85  # non-HTML document extension (.pdf, .doc, etc.)
+    _W_TRAILING_SLASH: float = 0.55  # non-root path ending in '/' → likely directory/nav
+    _W_EXCESS_QS: float = 0.60  # more than _MAX_ARTICLE_QS_PARAMS query parameters
 
     def score(self, url: str) -> float:
         """Return ``p_negative ∈ [0.0, 1.0]`` based on URL structure.
@@ -312,15 +344,17 @@ class UrlHeuristicScorer:
 
         components: list[float] = []
 
-        # Heuristic 1 — navigation/index path segments
-        for segment in _NEGATIVE_URL_SEGMENTS:
-            if segment in path:
-                components.append(self._W_SEGMENT)
-                break
+        # Heuristic 1 — navigation/index path segments.
+        # Uses _url_has_segment so that e.g. "/feed" does not fire on
+        # "/feedback/" and "/sitemap" does not fire on "/sitemapper/".
+        if any(_url_has_segment(path, seg) for seg in _NEGATIVE_URL_SEGMENTS):
+            components.append(self._W_SEGMENT)
 
-        # Heuristic 2 — non-HTML document extensions
-        _, ext = path.rsplit(".", 1) if "." in path.split("/")[-1] else ("", "")
-        if f".{ext}" in _NEGATIVE_EXTENSIONS:
+        # Heuristic 2 — non-HTML document extensions.
+        # Path.suffix is reliable and handles edge cases like versioned paths
+        # (/api/v2.0/report.pdf) that naive rsplit would mis-parse.
+        ext = Path(parsed.path).suffix.lower()
+        if ext in _NEGATIVE_EXTENSIONS:
             components.append(self._W_EXTENSION)
 
         # Heuristic 3 — trailing slash (directory / nav page)
@@ -365,6 +399,10 @@ class StageAScorer:
     min_domain_observations:
         Minimum number of training examples required before a domain's
         reputation is used.  Domains below this count contribute ``0.0``.
+    _lexicon_scorer:
+        **For testing only.** When provided, bypasses artifact loading
+        entirely and uses this scorer directly.  The leading underscore
+        signals that callers outside tests should never set this.
     """
 
     def __init__(
@@ -373,9 +411,17 @@ class StageAScorer:
         models_dir: Path | None = None,
         threshold: float = 0.95,
         min_domain_observations: int = 20,
+        _lexicon_scorer: LexiconScorer | None = None,
     ) -> None:
         self._threshold = threshold
         self._url_scorer = UrlHeuristicScorer()
+
+        if _lexicon_scorer is not None:
+            # Testing shortcut: skip all artifact I/O.
+            self._lexicon_scorer = _lexicon_scorer
+            self._model_version = "injected"
+            self._domain_scorer = DomainReputationScorer({}, min_domain_observations)
+            return
 
         stage_dir = models_dir / _STAGE_A_SUBDIR if models_dir is not None else None
 
@@ -428,7 +474,7 @@ class StageAScorer:
         if p_lex > 0.0:
             reason_parts.append(f"lex={p_lex:.3f}")
         if p_dom > 0.0:
-            reason_parts.append(f"dom:{domain}={p_dom:.3f}")
+            reason_parts.append(f"dom={p_dom:.3f}")
         if p_url > 0.0:
             reason_parts.append(f"url={p_url:.3f}")
         reason = "+".join(reason_parts) if reason_parts else "no_signal"
@@ -493,21 +539,32 @@ def build_stage_a_artifacts(
     # Build per-term counts over title+snippet
     excluded_terms = globally_excluded_title_terms()
 
-    # Corpora split by label
-    pos_texts = [r.title + " " + r.snippet for r in train_rows if r.label == "positive"]
-    neg_texts = [r.title + " " + r.snippet for r in train_rows if r.label == "negative"]
+    # Corpora split by label.  Guard against None title/snippet (Optional[str]
+    # in LabeledCandidate) so the training path behaves like evaluate().
+    pos_texts = [
+        (r.title or "") + " " + (r.snippet or "") for r in train_rows if r.label == "positive"
+    ]
+    neg_texts = [
+        (r.title or "") + " " + (r.snippet or "") for r in train_rows if r.label == "negative"
+    ]
+
+    # Pre-casefold corpora once to avoid O(terms × docs) repeated casefold()
+    # calls in the inner-loop term counting below.
+    pos_texts_cf = [t.casefold() for t in pos_texts]
+    neg_texts_cf = [t.casefold() for t in neg_texts]
 
     # --- Lexicon: _EXCLUDED_TITLE_TERMS with computed weights ---
     entries: list[LexiconEntry] = []
     for term in excluded_terms:
-        k_neg = sum(1 for t in neg_texts if term.casefold() in t.casefold())
-        k_pos = sum(1 for t in pos_texts if term.casefold() in t.casefold())
+        term_cf = term.casefold()
+        k_neg = sum(1 for t in neg_texts_cf if term_cf in t)
+        k_pos = sum(1 for t in pos_texts_cf if term_cf in t)
         log_w = math.log((k_neg + 1) / (k_pos + 1))
         entries.append(LexiconEntry(term=term, log_weight_negative=log_w, k_neg=k_neg, k_pos=k_pos))
 
     # --- Lexicon: chi-squared top-N additional terms ---
     existing_casefolded = {e.term.casefold() for e in entries}
-    chi2_terms = _chi2_top_terms(pos_texts, neg_texts, n=n_chi2_terms, min_df=3)
+    chi2_terms = _chi2_top_terms(pos_texts_cf, neg_texts_cf, n=n_chi2_terms, min_df=3)
     for term, k_neg_chi, k_pos_chi in chi2_terms:
         if term.casefold() in existing_casefolded:
             continue
@@ -604,9 +661,42 @@ def _wilson_upper_95(k: int, n: int) -> float:
     return min(numerator / denominator, 1.0)
 
 
+def _url_has_segment(path: str, segment: str) -> bool:
+    """Return True if *segment* is a complete URL path component in *path*.
+
+    A component is complete when the character immediately after the matched
+    segment is ``/``, ``.``, or end-of-string.  This prevents ``/feed`` from
+    matching ``/feedback/`` and ``/sitemap`` from matching ``/sitemapper/``.
+
+    Parameters
+    ----------
+    path:
+        The URL path string (already casefolded by the caller).
+    segment:
+        Bare segment root starting with ``/``, e.g. ``"/feed"``.  Must not
+        have a trailing slash (the boundary check handles that).
+    """
+    start = 0
+    while True:
+        idx = path.find(segment, start)
+        if idx == -1:
+            return False
+        after = idx + len(segment)
+        if after >= len(path) or path[after] in (".", "/"):
+            return True
+        start = idx + 1
+
+
 def _tokenize(text: str) -> list[str]:
-    """Tokenize *text* into whitespace-separated tokens (works for Hebrew)."""
-    return re.split(r"\s+", text.strip())
+    """Tokenize *text* into whitespace-separated tokens (works for Hebrew).
+
+    Returns an empty list for blank input to prevent empty-string tokens from
+    polluting chi-squared term counts.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return []
+    return re.split(r"\s+", stripped)
 
 
 def _word_ngrams(tokens: list[str], n: int) -> list[str]:
@@ -672,5 +762,10 @@ def _chi2_top_terms(
         chi2 = N * (a * d - b * c) ** 2 / denom
         results.append((term, chi2, k_neg_t, k_pos_t))
 
+    # Retain only terms that are more common in negatives: their log_weight is
+    # positive so sigmoid > 0.5, which correctly increases p_negative when they
+    # match.  Positive-skewed terms would have log_weight < 0 (sigmoid < 0.5),
+    # meaning matching them would *reduce* p_negative and silently hurt recall.
+    results = [(t, chi2, kn, kp) for t, chi2, kn, kp in results if kn > kp]
     results.sort(key=lambda x: -x[1])
     return [(term, k_neg_t, k_pos_t) for term, _, k_neg_t, k_pos_t in results[:n]]

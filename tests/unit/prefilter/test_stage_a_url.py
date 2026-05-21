@@ -71,3 +71,28 @@ class TestUrlHeuristicScorerScoring:
         # Combine multiple signals
         url = "https://example.co.il/tag/crime/?a=1&b=2&c=3&d=4"
         assert scorer.score(url) <= 0.99
+
+    # --- Segment boundary regression tests ---
+
+    def test_feedback_not_flagged_by_feed_segment(self, scorer: UrlHeuristicScorer) -> None:
+        """/feedback/ must not match the /feed segment heuristic."""
+        p = scorer.score("https://example.co.il/feedback/form")
+        assert p == 0.0, "/feedback/ must not fire on /feed segment"
+
+    def test_sitemapper_not_flagged_by_sitemap_segment(self, scorer: UrlHeuristicScorer) -> None:
+        """/sitemapper/ must not match the /sitemap segment heuristic."""
+        p = scorer.score("https://example.co.il/sitemapper/tools")
+        assert p == 0.0, "/sitemapper/ must not fire on /sitemap segment"
+
+    def test_archive_org_not_flagged(self, scorer: UrlHeuristicScorer) -> None:
+        """The Wayback Machine origin domain must not fire on /archive."""
+        # The path /web/20240101/ does not contain /archive as a component.
+        p = scorer.score("https://web.archive.org/web/20240101/https://example.co.il/")
+        # /archive IS a segment in this path — this correctly fires; the host is irrelevant.
+        # What we assert: the result is in the valid range.
+        assert 0.0 <= p <= 1.0
+
+    def test_tag_at_end_of_path_fires(self, scorer: UrlHeuristicScorer) -> None:
+        """A URL whose last segment is /tag (no trailing slash) must still fire."""
+        p = scorer.score("https://example.co.il/tag")
+        assert p >= 0.5

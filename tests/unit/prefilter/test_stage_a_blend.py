@@ -69,9 +69,18 @@ class TestBlendFormula:
         assert abs(lex_scorer.score("test_term", "") - p_lex) < 1e-6
 
     def test_zero_all_signals_gives_zero_blend(self) -> None:
-        """If all sub-scorers return 0, blend is 0."""
-        scorer = StageAScorer(models_dir=None, threshold=0.95)
-        # A candidate with no excluded title terms, clean URL, and no domain model
+        """If all sub-scorers return 0, blend is 0.
+
+        Uses an injected empty lexicon so the test does not depend on the
+        ever-changing contents of _EXCLUDED_TITLE_TERMS: a test that relies on
+        the default lexicon returning 0.0 for a given title would break silently
+        if new excluded terms were added.
+        """
+        scorer = StageAScorer(
+            models_dir=None,
+            threshold=0.95,
+            _lexicon_scorer=LexiconScorer([]),  # empty — no terms can ever fire
+        )
         cand = _FakeCand(
             title="עצור חשוד ברצח",
             snippet="המשטרה עצרה חשוד",
@@ -79,7 +88,7 @@ class TestBlendFormula:
             domain="example.co.il",
         )
         result = scorer.evaluate(cand, "thin")
-        # Domain scorer is empty (no_opinion=0), URL is clean, title has no excluded terms
+        # Empty lexicon → p_lex=0; unknown domain → p_dom=0; clean URL → p_url=0
         assert result.p_negative == 0.0
 
     def test_high_lexicon_signal_triggers_drop(self) -> None:
