@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
-
-from pydantic import BaseModel
 
 from denbust.discovery.state_paths import resolve_discovery_state_paths
 from denbust.models.common import DatasetName, JobName
 
 
-class PrefilterStatePaths(BaseModel):
+@dataclasses.dataclass(frozen=True)
+class PrefilterStatePaths:
     """Resolved artifact paths for the pre-filter cascade.
 
     All paths live under ``<state_root>/<dataset>/<job>/prefilter/``.

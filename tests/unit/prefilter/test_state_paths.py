@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from denbust.models.common import DatasetName, JobName
@@ -42,13 +43,19 @@ def test_resolve_does_not_create_directories(tmp_path: Path) -> None:
     assert not paths.calibration_dir.exists()
 
 
-def test_paths_model_is_pydantic() -> None:
+def test_paths_is_frozen_dataclass() -> None:
+    """PrefilterStatePaths is a frozen dataclass — consistent with StageScore/PrefilterDecision."""
     paths = resolve_prefilter_state_paths(
         state_root=Path("data"),
         dataset_name=DatasetName.NEWS_ITEMS,
     )
     assert isinstance(paths, PrefilterStatePaths)
-    # Pydantic model — should be dumpable
-    dumped = paths.model_dump()
+    # Frozen dataclass: asdict works, mutation raises
+    import pytest
+
+    dumped = dataclasses.asdict(paths)
     assert "root" in dumped
     assert "decisions_dir" in dumped
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        paths.root = Path("other")  # type: ignore[misc]

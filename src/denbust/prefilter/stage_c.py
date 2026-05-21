@@ -6,9 +6,7 @@ Full implementation lands in LPF-PR-06.
 
 from __future__ import annotations
 
-from typing import Literal
-
-from denbust.prefilter.models import CandidateView, StageScore
+from denbust.prefilter.models import CandidateView, PassKind, StageScore
 
 
 class StageCScorer:
@@ -21,7 +19,7 @@ class StageCScorer:
     def evaluate(
         self,
         _candidate: CandidateView,
-        _pass_kind: Literal["thin", "thick"],
+        _pass_kind: PassKind,
         _body: str | None = None,
     ) -> StageScore | None:
         """Return ``None`` — stage is not yet implemented."""

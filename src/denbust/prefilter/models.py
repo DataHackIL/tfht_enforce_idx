@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime
 from typing import Literal, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
@@ -11,7 +12,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 Verdict = Literal["pass", "drop"]
 StageName = Literal["A", "B", "C", "D"]
-StoppedAt = Literal["A", "B", "C", "D", "passed_all"]
+StoppedAt = StageName | Literal["passed_all"]
 PassKind = Literal["thin", "thick"]
 
 
@@ -56,6 +57,34 @@ class CandidateView(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# StageEvaluator — common interface that every cascade stage must implement
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class StageEvaluator(Protocol):
+    """Common interface that every cascade stage must implement.
+
+    All stages share this signature so the orchestrator can treat them
+    uniformly.  Stages that do not use ``pass_kind`` or ``body`` must still
+    accept the parameters (prefixed with ``_`` to satisfy linters).
+
+    Returning ``None`` means the stage has no opinion and the cascade
+    continues to the next stage.  Returning a :class:`StageScore` with
+    ``dropped=True`` signals a high-confidence true-negative drop verdict.
+    """
+
+    def evaluate(
+        self,
+        candidate: CandidateView,
+        pass_kind: PassKind,
+        body: str | None = None,
+    ) -> StageScore | None:
+        """Evaluate *candidate* and return a score, or ``None`` to pass through."""
+        ...
+
+
+# ---------------------------------------------------------------------------
 # StageScore — per-stage probability score
 # ---------------------------------------------------------------------------
 
@@ -70,12 +99,13 @@ class StageScore:
         Which stage produced this score (``"A"``, ``"B"``, ``"C"``, or ``"D"``).
     p_negative:
         Estimated probability that the candidate is a true negative.
-        Ranges ``[0.0, 1.0]``.
+        Must be in ``[0.0, 1.0]``.
     threshold:
         The configured drop threshold for this stage.  If
-        ``p_negative >= threshold`` the stage would drop the candidate.
+        ``p_negative >= threshold`` the stage drops the candidate.
+        Must be in ``[0.0, 1.0]``.
     dropped:
-        Whether this stage's score exceeded the threshold.
+        Whether this stage's score met or exceeded the threshold.
     reason:
         Human-readable explanation, e.g. ``"domain_reputation:globes.co.il=0.99"``.
     model_version:
@@ -89,6 +119,12 @@ class StageScore:
     dropped: bool
     reason: str
     model_version: str
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.p_negative <= 1.0:
+            raise ValueError(f"p_negative must be in [0.0, 1.0], got {self.p_negative}")
+        if not 0.0 <= self.threshold <= 1.0:
+            raise ValueError(f"threshold must be in [0.0, 1.0], got {self.threshold}")
 
 
 # ---------------------------------------------------------------------------
@@ -110,14 +146,17 @@ class PrefilterDecision:
     verdict:
         ``"pass"`` — candidate proceeds to the next pipeline step.
         ``"drop"`` — cascade is confident this is a true negative; skip it.
+        In SHADOW mode this is always ``"pass"`` regardless of stage scores.
     stopped_at_stage:
         Which stage emitted the drop verdict, or ``"passed_all"`` when no
-        stage dropped the candidate.
+        stage dropped the candidate.  In SHADOW mode this records the stage
+        that *would* have dropped the candidate even though ``verdict`` is
+        forced to ``"pass"``, preserving the data for recall analysis.
     stage_scores:
-        Ordered tuple of scores from each stage that ran.  Empty when
-        the cascade is in ``off`` mode or all stages are stubs.
+        Ordered tuple of scores from each stage that ran.  Empty when the
+        cascade is in ``off`` mode, disabled, or all stages are stubs.
     decided_at:
-        ISO-8601 UTC timestamp of when the decision was produced.
+        UTC-aware datetime of when the decision was produced.
     config_hash:
         SHA-1 of the ``PrefilterConfig`` that was active when the decision
         was made, for audit traceability.
@@ -128,5 +167,5 @@ class PrefilterDecision:
     verdict: Verdict
     stopped_at_stage: StoppedAt
     stage_scores: tuple[StageScore, ...]
-    decided_at: str
+    decided_at: datetime
     config_hash: str

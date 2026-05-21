@@ -5,6 +5,7 @@ Registered under ``denbust prefilter ...`` via the main ``cli.py``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -29,11 +30,18 @@ def summary(
     Reads all JSONL files under the prefilter decisions directory for the
     configured dataset and prints per-verdict and per-stage counts.
     """
+    if config is None:
+        typer.echo(
+            "Error: --config is required.  Pass the path to your YAML config file.\n"
+            "Example: denbust prefilter summary --config agents/news/local.yaml",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     from denbust.config import load_config
     from denbust.prefilter.state_paths import resolve_prefilter_state_paths
 
-    config_path = config or Path("agents/news/local.yaml")
-    loaded = load_config(config_path)
+    loaded = load_config(config)
     paths = resolve_prefilter_state_paths(
         state_root=loaded.store.state_root,
         dataset_name=loaded.dataset_name,
@@ -48,8 +56,6 @@ def summary(
     if not jsonl_files:
         typer.echo("no decisions yet")
         return
-
-    import json
 
     total = 0
     by_verdict: dict[str, int] = {}

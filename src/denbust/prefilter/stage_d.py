@@ -6,7 +6,7 @@ Full implementation lands in LPF-PR-07.
 
 from __future__ import annotations
 
-from denbust.prefilter.models import CandidateView, StageScore
+from denbust.prefilter.models import CandidateView, PassKind, StageScore
 
 
 class StageDJudge:
@@ -19,6 +19,7 @@ class StageDJudge:
     def evaluate(
         self,
         _candidate: CandidateView,
+        _pass_kind: PassKind,
         _body: str | None = None,
     ) -> StageScore | None:
         """Return ``None`` — stage is not yet implemented."""
