@@ -88,6 +88,69 @@ def summary(
             typer.echo(f"  Stage {stage}: {count}")
 
 
+@prefilter_app.command("retrain")
+def retrain_cmd(
+    stage: Annotated[
+        str,
+        typer.Option("--stage", "-s", help="Stage to retrain: a"),
+    ],
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+) -> None:
+    """Rebuild Stage-A artifacts (lexicon + domain reputation) from labels.parquet.
+
+    Reads the labeled-candidates parquet from the prefilter state path and writes
+    updated Stage-A artifacts to ``models/stage_a/`` under the same state root.
+
+    Only ``--stage a`` is supported in this release; other stages are planned
+    for future PRs.
+    """
+    if config is None:
+        typer.echo(
+            "Error: --config is required.  Pass the path to your YAML config file.\n"
+            "Example: denbust prefilter retrain --stage a --config agents/news/local.yaml",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    stage = stage.lower().strip()
+    if stage != "a":
+        typer.echo(
+            f"Error: --stage {stage!r} is not yet supported.  Only 'a' is available.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    from denbust.config import load_config
+    from denbust.prefilter.stage_a import build_stage_a_artifacts
+    from denbust.prefilter.state_paths import resolve_prefilter_state_paths
+
+    loaded = load_config(config)
+    prefilter_paths = resolve_prefilter_state_paths(
+        state_root=loaded.store.state_root,
+        dataset_name=loaded.dataset_name,
+    )
+
+    if not prefilter_paths.labels_path.exists():
+        typer.echo(
+            f"Error: labels.parquet not found at {prefilter_paths.labels_path}.\n"
+            "Run `denbust prefilter assemble-labels` first.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    typer.echo(f"Retraining Stage A from {prefilter_paths.labels_path} ...")
+    lex_path, dom_path = build_stage_a_artifacts(
+        labels_path=prefilter_paths.labels_path,
+        out_dir=prefilter_paths.models_dir,
+    )
+    typer.echo(f"  lexicon          -> {lex_path}")
+    typer.echo(f"  domain_reputation -> {dom_path}")
+    typer.echo("Stage A retrain complete.")
+
+
 @prefilter_app.command("assemble-labels")
 def assemble_labels_cmd(
     config: Annotated[

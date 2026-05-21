@@ -57,12 +57,17 @@ class CascadeOrchestrator:
         self,
         config: PrefilterConfig,
         decisions_dir: Path,
+        models_dir: Path | None = None,
     ) -> None:
         self._config = config
         self._config_hash = _hash_config(config)
         self._writer = PrefilterDecisionWriter(decisions_dir)
         # Only instantiate enabled stages — real implementations load models.
-        self._stage_a: StageAScorer | None = StageAScorer() if config.stages.a.enabled else None
+        self._stage_a: StageAScorer | None = (
+            StageAScorer(models_dir=models_dir, threshold=config.stages.a.threshold)
+            if config.stages.a.enabled
+            else None
+        )
         self._stage_b: StageBScorer | None = StageBScorer() if config.stages.b.enabled else None
         self._stage_c: StageCScorer | None = StageCScorer() if config.stages.c.enabled else None
         self._stage_d: StageDJudge | None = StageDJudge() if config.stages.d.enabled else None
@@ -89,7 +94,7 @@ class CascadeOrchestrator:
 
         # Stage A — lexicon + domain reputation + URL heuristics
         if self._stage_a is not None:
-            score = self._stage_a.evaluate(candidate, "thin")
+            score: StageScore | None = self._stage_a.evaluate(candidate, "thin")
             if score is not None:
                 scores.append(score)
                 if score.dropped:
@@ -132,7 +137,7 @@ class CascadeOrchestrator:
 
         # Stage A — domain recheck on the canonical scraped URL
         if self._stage_a is not None:
-            score = self._stage_a.evaluate(candidate, "thick")
+            score: StageScore | None = self._stage_a.evaluate(candidate, "thick")
             if score is not None:
                 scores.append(score)
                 if score.dropped:
