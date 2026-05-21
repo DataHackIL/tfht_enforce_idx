@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from denbust.models.common import DatasetName, JobName
+from denbust.prefilter.cli import prefilter_app
 from denbust.validation.common import DEFAULT_VALIDATION_SET_PATH, DEFAULT_VARIANT_MATRIX_PATH
 
 
@@ -25,6 +26,7 @@ app = typer.Typer(
 )
 report_app = typer.Typer(help="Generate report artifacts.")
 app.add_typer(report_app, name="report")
+app.add_typer(prefilter_app, name="prefilter")
 
 
 @app.command()

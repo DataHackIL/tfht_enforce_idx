@@ -470,7 +470,7 @@ DL-PR-08 extends that substrate with fallback retention for imperfect scraping:
   failure-stage diagnostics, and code can select eligible failed candidates for a later
   `self_heal_retry` orchestration pass without implementing AI repair.
 
-### Planned: local pre-classification filter cascade (LPF-PR-XX)
+### Local pre-classification filter cascade (LPF-PR-01–LPF-PR-12)
 
 A four-stage, fully-local, non-LLM-API-based filter cascade is planned for insertion between the
 discovery/triage layer and the Claude Sonnet relevance classifier, to drop high-confidence true
