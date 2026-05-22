@@ -1910,13 +1910,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr(
             "denbust.pipeline._run_candidate_scrape_job",
             AsyncMock(
-                return_value=CandidateScrapeBatch(
-                    selected_candidates=[MagicMock()],
-                    updated_candidates=[],
-                    fallback_candidates=[],
-                    attempts=[],
-                    raw_articles=[raw_article],
-                    errors=["candidate-1: generic fetch fallback not implemented yet"],
+                return_value=(
+                    CandidateScrapeBatch(
+                        selected_candidates=[MagicMock()],
+                        updated_candidates=[],
+                        fallback_candidates=[],
+                        attempts=[],
+                        raw_articles=[raw_article],
+                        errors=["candidate-1: generic fetch fallback not implemented yet"],
+                    ),
+                    [],
                 )
             ),
         )
@@ -2018,13 +2021,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr(
             "denbust.pipeline._run_candidate_scrape_job",
             AsyncMock(
-                return_value=CandidateScrapeBatch(
-                    selected_candidates=[fallback_candidate],
-                    updated_candidates=[fallback_candidate],
-                    fallback_candidates=[fallback_candidate],
-                    attempts=[],
-                    raw_articles=[],
-                    errors=[],
+                return_value=(
+                    CandidateScrapeBatch(
+                        selected_candidates=[fallback_candidate],
+                        updated_candidates=[fallback_candidate],
+                        fallback_candidates=[fallback_candidate],
+                        attempts=[],
+                        raw_articles=[],
+                        errors=[],
+                    ),
+                    [],
                 )
             ),
         )
@@ -2136,13 +2142,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr(
             "denbust.pipeline._run_candidate_scrape_job",
             AsyncMock(
-                return_value=CandidateScrapeBatch(
-                    selected_candidates=[MagicMock()],
-                    updated_candidates=[],
-                    fallback_candidates=[],
-                    attempts=[],
-                    raw_articles=[raw_article],
-                    errors=[],
+                return_value=(
+                    CandidateScrapeBatch(
+                        selected_candidates=[MagicMock()],
+                        updated_candidates=[],
+                        fallback_candidates=[],
+                        attempts=[],
+                        raw_articles=[raw_article],
+                        errors=[],
+                    ),
+                    [],
                 )
             ),
         )
@@ -2191,13 +2200,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr(
             "denbust.pipeline._run_candidate_scrape_job",
             AsyncMock(
-                return_value=CandidateScrapeBatch(
-                    selected_candidates=[fallback_candidate],
-                    updated_candidates=[],
-                    fallback_candidates=[fallback_candidate],
-                    attempts=[],
-                    raw_articles=[],
-                    errors=[],
+                return_value=(
+                    CandidateScrapeBatch(
+                        selected_candidates=[fallback_candidate],
+                        updated_candidates=[],
+                        fallback_candidates=[fallback_candidate],
+                        attempts=[],
+                        raw_articles=[],
+                        errors=[],
+                    ),
+                    [],
                 )
             ),
         )
@@ -2237,13 +2249,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr(
             "denbust.pipeline._run_candidate_scrape_job",
             AsyncMock(
-                return_value=CandidateScrapeBatch(
-                    selected_candidates=[MagicMock()],
-                    updated_candidates=[],
-                    fallback_candidates=[],
-                    attempts=[],
-                    raw_articles=[raw_article],
-                    errors=[],
+                return_value=(
+                    CandidateScrapeBatch(
+                        selected_candidates=[MagicMock()],
+                        updated_candidates=[],
+                        fallback_candidates=[],
+                        attempts=[],
+                        raw_articles=[raw_article],
+                        errors=[],
+                    ),
+                    [],
                 )
             ),
         )
@@ -2325,13 +2340,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr(
             "denbust.pipeline._run_candidate_scrape_job",
             AsyncMock(
-                return_value=CandidateScrapeBatch(
-                    selected_candidates=[fallback_candidate],
-                    updated_candidates=[fallback_candidate],
-                    fallback_candidates=[fallback_candidate],
-                    attempts=[],
-                    raw_articles=[],
-                    errors=[],
+                return_value=(
+                    CandidateScrapeBatch(
+                        selected_candidates=[fallback_candidate],
+                        updated_candidates=[fallback_candidate],
+                        fallback_candidates=[fallback_candidate],
+                        attempts=[],
+                        raw_articles=[],
+                        errors=[],
+                    ),
+                    [],
                 )
             ),
         )
@@ -2382,13 +2400,14 @@ class TestRunPipelineAsync:
         monkeypatch.setattr("denbust.pipeline._scrape_candidate_batch", scrape_mock)
 
         sources = [FakeSource("ynet", [])]
-        result = await pipeline_module._run_candidate_scrape_job(
+        batch, thin_decisions = await pipeline_module._run_candidate_scrape_job(
             config=config,
             sources=sources,
             limit=3,
         )
 
-        assert result.selected_candidates == selected_candidates
+        assert batch.selected_candidates == selected_candidates
+        assert thin_decisions == []
         assert persistence.closed is True
         select_mock.assert_called_once_with(persistence, limit=3)
         scrape_mock.assert_awaited_once_with(
@@ -2497,13 +2516,16 @@ class TestRunPipelineAsync:
         monkeypatch.setattr(
             "denbust.pipeline._run_candidate_scrape_job",
             AsyncMock(
-                return_value=CandidateScrapeBatch(
-                    selected_candidates=[],
-                    updated_candidates=[],
-                    fallback_candidates=[],
-                    attempts=[],
-                    raw_articles=[],
-                    errors=[],
+                return_value=(
+                    CandidateScrapeBatch(
+                        selected_candidates=[],
+                        updated_candidates=[],
+                        fallback_candidates=[],
+                        attempts=[],
+                        raw_articles=[],
+                        errors=[],
+                    ),
+                    [],
                 )
             ),
         )
@@ -2530,17 +2552,21 @@ class TestRunPipelineAsync:
             config: Config,
             sources: list[FakeSource],
             limit: int,
-        ) -> CandidateScrapeBatch:
+            orchestrator: object = None,  # noqa: ARG001
+        ) -> tuple[CandidateScrapeBatch, list[object]]:
             captured["days"] = config.days
             captured["limit"] = limit
             captured["sources"] = [source.name for source in sources]
-            return CandidateScrapeBatch(
-                selected_candidates=[],
-                updated_candidates=[],
-                fallback_candidates=[],
-                attempts=[],
-                raw_articles=[],
-                errors=[],
+            return (
+                CandidateScrapeBatch(
+                    selected_candidates=[],
+                    updated_candidates=[],
+                    fallback_candidates=[],
+                    attempts=[],
+                    raw_articles=[],
+                    errors=[],
+                ),
+                [],
             )
 
         monkeypatch.setattr(
