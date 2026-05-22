@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import mimetypes
 import sys
@@ -103,7 +104,7 @@ def _load_stage_b_scores() -> None:
 
             @property
             def candidate_id(self) -> str:
-                return self._c["candidate_id"]
+                return str(self._c["candidate_id"])
 
             @property
             def domain(self) -> str | None:
@@ -196,6 +197,16 @@ def _stats() -> dict[str, Any]:
     }
 
 
+def _pub_year(c: dict[str, Any]) -> int | None:
+    hint = (c.get("metadata") or {}).get("latest_publication_datetime_hint")
+    if hint and len(hint) >= 4:
+        try:
+            return int(hint[:4])
+        except ValueError:
+            pass
+    return None
+
+
 def _serialize(c: dict[str, Any]) -> dict[str, Any]:
     titles = c.get("titles") or []
     snippets = c.get("snippets") or []
@@ -206,6 +217,7 @@ def _serialize(c: dict[str, Any]) -> dict[str, Any]:
         "title": titles[0] if titles else "",
         "snippet": snippets[0] if snippets else "",
         "first_seen_at": str(c.get("first_seen_at", "")),
+        "pub_year": _pub_year(c),
         "backfill_batch_id": c.get("backfill_batch_id"),
         "candidate_status": c.get("candidate_status", "new"),
         "retry_priority": c.get("retry_priority", 0),
@@ -221,6 +233,7 @@ def _query_candidates(
     page: int,
     limit: int,
     sort: str = "default",
+    pub_year_before: int | None = None,
 ) -> dict[str, Any]:
     items = list(_candidates.values())
 
@@ -233,6 +246,9 @@ def _query_candidates(
         items = [c for c in items if c.get("_triage") == "excluded"]
     elif status == "prioritized":
         items = [c for c in items if c.get("_triage") == "prioritized"]
+
+    if pub_year_before is not None:
+        items = [c for c in items if (_pub_year(c) or 9999) < pub_year_before]
 
     if q:
         ql = q.lower()
@@ -297,6 +313,11 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._json({"error": "invalid page or limit"}, 400)
                 return
+            raw_pyb = qs.get("pub_year_before", [None])[0]
+            pub_year_before: int | None = None
+            if raw_pyb:
+                with contextlib.suppress(ValueError):
+                    pub_year_before = int(raw_pyb)
             self._json(
                 _query_candidates(
                     batch_id=qs.get("batch_id", [None])[0],
@@ -305,6 +326,7 @@ class Handler(BaseHTTPRequestHandler):
                     page=page,
                     limit=limit,
                     sort=qs.get("sort", ["default"])[0],
+                    pub_year_before=pub_year_before,
                 )
             )
         elif parsed.path == "/api/stats":

@@ -8,6 +8,7 @@ let state = {
   status: 'all',
   q: '',
   sort: 'stage_b_asc',   // default to Stage B ranking so likely positives surface first
+  pubYearBefore: '',
   page: 1,
   total: 0,
   pages: 1,
@@ -24,6 +25,7 @@ const pgPrev      = document.getElementById('pg-prev');
 const pgNext      = document.getElementById('pg-next');
 const batchSel    = document.getElementById('batch-select');
 const sortSel     = document.getElementById('sort-select');
+const pubYearSel  = document.getElementById('pub-year-select');
 const searchEl    = document.getElementById('search');
 const toast       = document.getElementById('toast');
 const statTotal   = document.getElementById('stat-total');
@@ -39,8 +41,9 @@ async function fetchCandidates() {
     limit: LIMIT,
     sort: state.sort,
   });
-  if (state.batchId) params.set('batch_id', state.batchId);
-  if (state.q)       params.set('q', state.q);
+  if (state.batchId)       params.set('batch_id', state.batchId);
+  if (state.q)             params.set('q', state.q);
+  if (state.pubYearBefore) params.set('pub_year_before', state.pubYearBefore);
   const res = await fetch(`${API}/api/candidates?${params}`);
   return res.json();
 }
@@ -135,7 +138,7 @@ function renderRows() {
       </td>
       <td><div class="title">${title}</div></td>
       <td><div class="snippet">${snippet}</div></td>
-      <td><div class="date">${formatDate(c.first_seen_at)}</div></td>
+      <td><div class="date${c.pub_year && c.pub_year < 2019 ? ' old' : ''}">${c.pub_year || formatDate(c.first_seen_at)}</div></td>
       ${stageBChip(c.stage_b_score)}
       <td class="actions" style="text-align:left">
         ${badge}
@@ -270,6 +273,11 @@ batchSel.addEventListener('change', () => {
 
 sortSel.addEventListener('change', () => {
   state.sort = sortSel.value;
+  load(true);
+});
+
+pubYearSel.addEventListener('change', () => {
+  state.pubYearBefore = pubYearSel.value;
   load(true);
 });
 
