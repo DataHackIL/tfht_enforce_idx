@@ -1,7 +1,7 @@
 """Stage C — multilingual embedding centroid + FAISS kNN similarity.
 
 :class:`StageCScorer`
-    Centroid-cosine + FAISS-HNSW kNN-max-cosine similarity scorer,
+    Centroid-cosine + FAISS-HNSW kNN-mean-cosine similarity scorer,
     sigmoid-calibrated on the validation split.
     Artifacts: ``models_dir/stage_c/{centroid.npy, index.faiss,
     calibration.json, meta.json}``.  Requires the ``prefilter`` extras
@@ -27,13 +27,24 @@ signals against the *positive* training set:
 centroid_cos
     Cosine similarity between the candidate embedding and the L2-normalised
     mean embedding of all training positives.
-knn_max_cos
-    Maximum cosine similarity over the *n_neighbors* nearest training
-    positives found via the FAISS HNSW index.
+knn_mean_cos
+    Mean cosine similarity over the *n_neighbors* nearest training positives
+    found via the FAISS HNSW index.  Larger values of *n_neighbors* smooth the
+    signal over a broader neighbourhood; the parameter has a real effect on the
+    output because the mean is taken over all *k* retrieved results, not just
+    the closest one.
 
-The combined raw signal is ``raw = max(centroid_cos, knn_max_cos)``.  A
+The combined raw signal is ``raw = max(centroid_cos, knn_mean_cos)``.  A
 logistic-regression sigmoid calibration maps *raw* to ``p_positive``; the
 final ``p_negative = 1 − p_positive``.
+
+Text format
+-----------
+``intfloat/multilingual-e5-large`` requires a ``"passage: "`` prefix for
+document embeddings (see the model card).  :func:`_build_text` applies this
+prefix to *all* inputs — both at training time and at inference time — so the
+embedding space is consistent across the two phases.  Changing this function
+changes both training and inference; there is no separate logic to drift.
 """
 
 from __future__ import annotations
@@ -43,6 +54,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import shutil
 import tempfile
 import warnings
@@ -67,6 +79,13 @@ _META_FILE = "meta.json"
 _DEFAULT_BASE_MODEL = "intfloat/multilingual-e5-large"
 _DEFAULT_N_NEIGHBORS = 5
 _HNSW_M = 32  # connections per HNSW layer; 32 is a solid default for recall
+_HNSW_EF_CONSTRUCTION = 200  # higher → better index quality at build time
+_HNSW_EF_SEARCH = 64  # fixed search budget — must NOT scale with corpus size or
+# HNSW degrades to O(n) traversal, defeating its purpose
+
+# intfloat/multilingual-e5-large requires this prefix for document embeddings.
+# See: https://huggingface.co/intfloat/multilingual-e5-large
+_E5_PASSAGE_PREFIX = "passage: "
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +100,8 @@ class StageCModelMeta:
     Attributes
     ----------
     model_version:
-        Short (12-char) SHA-1 prefix derived from the centroid artifact.
+        Short (12-char) SHA-1 prefix derived from the centroid, FAISS index,
+        and calibration artifacts combined — changes whenever any artifact does.
     trained_at:
         ISO-8601 UTC timestamp of when the artifacts were written.
     n_train_positives:
@@ -91,7 +111,7 @@ class StageCModelMeta:
     base_model_id:
         HuggingFace model ID used for encoding.
     n_neighbors:
-        Number of HNSW neighbours queried for the kNN-max-cosine signal.
+        Number of HNSW neighbours queried for the kNN-mean-cosine signal.
     """
 
     model_version: str
@@ -125,19 +145,36 @@ def _l2_normalize(v: Any) -> Any:
     return v / norm
 
 
-def _thick_text(candidate: CandidateView, body: str | None) -> str:
-    """Assemble the thick-pass input text for *candidate*."""
-    title = candidate.title or ""
-    if body and body.strip():
-        return (title + " " + body.strip()).strip()
-    snippet = candidate.snippet or ""
-    return (title + " " + snippet).strip()
+def _build_text(title: str | None, body_or_snippet: str | None) -> str:
+    """Assemble the E5-format passage text for a candidate.
+
+    This is the **single source of truth** for text assembly — called by both
+    :func:`train_stage_c` (for training positives and validation rows) and
+    :meth:`StageCScorer.evaluate` (for inference), guaranteeing train/serve
+    consistency.
+
+    ``intfloat/multilingual-e5-large`` requires a ``"passage: "`` prefix for
+    all document embeddings; omitting it measurably degrades retrieval quality.
+    Both *title* and *body_or_snippet* are stripped independently before
+    concatenation so leading/trailing whitespace never leaks into the input.
+    Falls back to title-only when *body_or_snippet* is absent or blank.
+    """
+    t = (title or "").strip()
+    b = (body_or_snippet or "").strip()
+    core = f"{t} {b}".strip() if b else t
+    return f"{_E5_PASSAGE_PREFIX}{core}"
 
 
-def _sha1_file(path: Path) -> str:
-    """Return the first 12 hex chars of the SHA-1 of *path*."""
+def _sha1_files(*paths: Path) -> str:
+    """Return the first 12 hex chars of SHA-1 over the concatenated bytes of *paths*.
+
+    Feed paths in a fixed caller-chosen order so the hash is deterministic.
+    Hashing multiple artifacts together means the version changes when *any*
+    of them changes — not just the first one.
+    """
     h = hashlib.sha1(usedforsecurity=False)  # noqa: S324
-    h.update(path.read_bytes())
+    for path in paths:
+        h.update(path.read_bytes())
     return h.hexdigest()[:12]
 
 
@@ -166,18 +203,22 @@ def _build_hnsw_index(embeddings: Any) -> Any:
         L2-normalised.  L2 distance on normalised vectors is equivalent to
         cosine distance, so the nearest neighbour by L2 is the nearest
         neighbour by cosine similarity.
+
+    Notes
+    -----
+    ``efSearch`` is set to :data:`_HNSW_EF_SEARCH` (64), a fixed constant.
+    Setting it to ``n`` (the corpus size) would force HNSW to explore every
+    node at query time — O(n) cost — making it worse than brute-force search.
     """
     import faiss
     import numpy as np
 
     arr: Any = np.ascontiguousarray(embeddings, dtype=np.float32)
-    n, dim = arr.shape
+    _n, dim = arr.shape
     index = faiss.IndexHNSWFlat(dim, _HNSW_M)
-    # Higher efConstruction → better recall at index time; 200 is a safe default.
-    index.hnsw.efConstruction = 200
+    index.hnsw.efConstruction = _HNSW_EF_CONSTRUCTION
     index.add(arr)
-    # Bump efSearch for query accuracy (can be overridden by callers).
-    index.hnsw.efSearch = max(64, n)
+    index.hnsw.efSearch = _HNSW_EF_SEARCH
     return index
 
 
@@ -187,7 +228,7 @@ def _compute_similarity(
     index: Any,
     n_neighbors: int,
 ) -> tuple[float, float]:
-    """Return ``(centroid_cos, knn_max_cos)`` for *query*.
+    """Return ``(centroid_cos, knn_mean_cos)`` for *query*.
 
     Parameters
     ----------
@@ -198,7 +239,16 @@ def _compute_similarity(
     index:
         Populated FAISS HNSW index (L2 metric, normalised vectors).
     n_neighbors:
-        Number of neighbours to retrieve.
+        Number of neighbours to retrieve.  The *mean* cosine over all *k*
+        retrieved neighbours is returned as ``knn_mean_cos``, so this parameter
+        has a genuine effect on the signal: larger values average over a
+        broader neighbourhood rather than just the single closest point.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(centroid_cos, knn_mean_cos)`` both clipped to ``[−1, 1]``.
+        ``knn_mean_cos`` is ``−1.0`` when the index is empty.
     """
     import numpy as np
 
@@ -212,11 +262,12 @@ def _compute_similarity(
     q2d: Any = query.reshape(1, -1).astype(np.float32)
     dists, _ = index.search(q2d, k)
     # FAISS returns squared L2 for normalised vectors: d² = 2(1 − cos)
-    # → cos = 1 − d²/2.
-    min_dist_sq = float(dists[0, 0])
-    knn_max_cos = max(-1.0, min(1.0, 1.0 - min_dist_sq / 2.0))
+    # → cos = 1 − d²/2.  Take the mean over all k retrieved neighbours so
+    # that n_neighbors controls the signal rather than being a no-op.
+    cosines: Any = np.clip(1.0 - dists[0] / 2.0, -1.0, 1.0)
+    knn_mean_cos = float(cosines.mean())
 
-    return centroid_cos, knn_max_cos
+    return centroid_cos, knn_mean_cos
 
 
 def _fit_calibration(
@@ -256,7 +307,7 @@ def _fit_calibration(
 
 
 class StageCScorer:
-    """Stage C cascade scorer: embedding centroid + kNN similarity.
+    """Stage C cascade scorer: embedding centroid + kNN mean similarity.
 
     Returns ``None`` for the thin pass (this stage is thick-pass only), and
     when no trained artifacts exist or the ``prefilter`` extras are missing.
@@ -271,7 +322,7 @@ class StageCScorer:
         Drop threshold.  Candidates whose ``p_negative >= threshold`` are
         tagged ``dropped=True``.
     n_neighbors:
-        Number of HNSW neighbours used for the kNN-max-cosine signal.
+        Number of HNSW neighbours used for the kNN-mean-cosine signal.
         When ``None`` the value from ``meta.json`` is used; falls back to
         :data:`_DEFAULT_N_NEIGHBORS`.
     """
@@ -344,8 +395,11 @@ class StageCScorer:
             self._embed_model = SentenceTransformer(model_id)
 
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Stage C: failed to load artifacts from %s: %s",
+            # Artifacts are present but corrupt or incompatible — log at ERROR
+            # so operators can distinguish this from a "not yet trained" state.
+            logger.error(
+                "Stage C: artifacts at %s are present but failed to load: %s — "
+                "run `denbust prefilter retrain --stage c` to rebuild.",
                 stage_dir,
                 exc,
             )
@@ -387,20 +441,20 @@ class StageCScorer:
 
         import numpy as np
 
-        text = _thick_text(candidate, body)
+        text = _build_text(candidate.title, body or candidate.snippet)
         emb_batch: Any = _embed_texts(self._embed_model, [text])
         query: Any = emb_batch[0]  # shape (dim,)
 
-        centroid_cos, knn_max_cos = _compute_similarity(
+        centroid_cos, knn_mean_cos = _compute_similarity(
             query, self._centroid, self._index, self._n_neighbors
         )
-        raw_score = max(centroid_cos, knn_max_cos)
+        raw_score = max(centroid_cos, knn_mean_cos)
 
         p_positive = _sigmoid(self._calib_coef * raw_score + self._calib_intercept)
         p_negative = float(np.clip(1.0 - p_positive, 0.0, 1.0))
 
         dropped = p_negative >= self._threshold
-        reason = f"embed/thick=centroid:{centroid_cos:.3f},knn:{knn_max_cos:.3f}"
+        reason = f"embed/thick=centroid:{centroid_cos:.3f},knn_mean:{knn_mean_cos:.3f}"
         return StageScore(
             stage="C",
             p_negative=p_negative,
@@ -430,7 +484,7 @@ def train_stage_c(
     1. Embeds training positives with :class:`sentence_transformers.SentenceTransformer`.
     2. Computes the L2-normalised centroid of positive embeddings.
     3. Builds a FAISS HNSW index over the positive embeddings.
-    4. Scores every validation row (centroid-cosine + kNN-max-cosine).
+    4. Scores every validation row (centroid-cosine + kNN-mean-cosine).
     5. Fits a sigmoid calibration (logistic regression) on the validation scores.
     6. Writes all artifacts atomically under ``out_dir/stage_c/``.
 
@@ -454,7 +508,7 @@ def train_stage_c(
     base_model_id:
         HuggingFace model ID for the sentence encoder.
     n_neighbors:
-        Number of HNSW neighbours for the kNN-max-cosine signal.
+        Number of HNSW neighbours for the kNN-mean-cosine signal.
 
     Returns
     -------
@@ -470,9 +524,11 @@ def train_stage_c(
     ValueError
         When the training split contains no positive examples.
     """
+    # Single import block: guard + acquire the names used throughout.
     try:
-        import faiss  # noqa: F401
-        from sentence_transformers import SentenceTransformer  # noqa: F401
+        import faiss
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
     except ImportError as exc:
         raise ImportError(
             "Stage C training requires the prefilter extras. "
@@ -493,11 +549,9 @@ def train_stage_c(
             "centroid and FAISS index."
         )
 
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
-
-    # Build thick-pass text for each training positive.
-    pos_texts = [(r.title + " " + (r.article_body or r.snippet)).strip() for r in train_positives]
+    # Build E5-format passage texts via _build_text — the same function used
+    # at inference time, so training and serving share identical text assembly.
+    pos_texts = [_build_text(r.title, r.article_body or r.snippet) for r in train_positives]
     model = SentenceTransformer(base_model_id)
     pos_embeddings = _embed_texts(model, pos_texts)  # shape (n_pos, dim)
 
@@ -513,7 +567,7 @@ def train_stage_c(
     val_labels: list[int] = []
 
     if val_rows:
-        val_texts = [(r.title + " " + (r.article_body or r.snippet)).strip() for r in val_rows]
+        val_texts = [_build_text(r.title, r.article_body or r.snippet) for r in val_rows]
         val_embeddings = _embed_texts(model, val_texts)
 
         for i, row in enumerate(val_rows):
@@ -528,14 +582,13 @@ def train_stage_c(
     out_dir.mkdir(parents=True, exist_ok=True)
     final_dir = out_dir / _STAGE_C_SUBDIR
 
+    old_dir: Path | None = None
     tmp_dir = Path(tempfile.mkdtemp(dir=out_dir, prefix=f"{_STAGE_C_SUBDIR}.tmp."))
     try:
         centroid_path = tmp_dir / _CENTROID_FILE
         index_path = tmp_dir / _INDEX_FILE
         calib_path = tmp_dir / _CALIBRATION_FILE
         meta_path = tmp_dir / _META_FILE
-
-        import faiss
 
         np.save(str(centroid_path), centroid)
         faiss.write_index(index, str(index_path))
@@ -548,7 +601,9 @@ def train_stage_c(
             encoding="utf-8",
         )
 
-        model_version = _sha1_file(centroid_path)
+        # Hash all three artifacts so model_version changes when any of them
+        # does — not just the centroid.
+        model_version = _sha1_files(centroid_path, index_path, calib_path)
 
         meta = StageCModelMeta(
             model_version=model_version,
@@ -563,13 +618,27 @@ def train_stage_c(
             encoding="utf-8",
         )
 
-        # Replace old artifact dir atomically.
+        # Replace old artifact dir using rename-aside so readers never see a
+        # missing directory.  Both rename() calls are atomic at the filesystem
+        # level; the old content is accessible in old_dir until cleanup below.
         if final_dir.exists():
-            shutil.rmtree(final_dir)
+            old_dir = out_dir / f"{_STAGE_C_SUBDIR}.old.{os.getpid()}"
+            final_dir.rename(old_dir)
         tmp_dir.rename(final_dir)
 
     except Exception:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+        # Restore the displaced old artifacts so the scorer stays usable.
+        if old_dir is not None and not final_dir.exists():
+            try:
+                old_dir.rename(final_dir)
+                old_dir = None
+            except OSError:
+                pass
         raise
+
+    # Clean up the displaced old artifacts on success.
+    if old_dir is not None:
+        shutil.rmtree(old_dir, ignore_errors=True)
 
     return meta, final_dir

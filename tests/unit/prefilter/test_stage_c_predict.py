@@ -60,7 +60,8 @@ def stage_c_models_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
                     split,  # type: ignore[arg-type]
                     title="ספורט ופנאי",
                     snippet="כדורגל ושחמט",
-                    body="משחקי כדורגל וטניס" if split == "train" else None,
+                    # Include idx so each training row has a unique embedding.
+                    body=f"משחקי כדורגל וטניס {idx}" if split == "train" else None,
                 )
             )
             idx += 1
@@ -71,7 +72,10 @@ def stage_c_models_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
                     split,  # type: ignore[arg-type]
                     title="עצור חשוד ברצח",
                     snippet="המשטרה עצרה חשוד",
-                    body="החשוד נעצר לאחר חקירה" if split == "train" else None,
+                    # Include idx so each training positive has a unique embedding.
+                    # This ensures that knn_mean(k=1) ≠ knn_mean(k=5) in tests
+                    # that verify n_neighbors has a genuine effect on the signal.
+                    body=f"החשוד נעצר לאחר חקירה {idx}" if split == "train" else None,
                 )
             )
             idx += 1
@@ -185,11 +189,12 @@ class TestStageCStoreScorerLoaded:
         assert 0.0 <= result.p_negative <= 1.0
 
     @patch(_PATCH_ST, _fake_st)
-    def test_reason_starts_with_embed_thick(self, stage_c_models_dir: Path) -> None:
+    def test_reason_format(self, stage_c_models_dir: Path) -> None:
         scorer = StageCScorer(models_dir=stage_c_models_dir)
         result = scorer.evaluate(FakeCandidate(), "thick", body="body")
         assert result is not None
-        assert result.reason.startswith("embed/thick=")
+        assert result.reason.startswith("embed/thick=centroid:")
+        assert "knn_mean:" in result.reason
 
     @patch(_PATCH_ST, _fake_st)
     def test_threshold_propagated(self, stage_c_models_dir: Path) -> None:
@@ -235,9 +240,30 @@ class TestStageCStoreScorerLoaded:
         assert r1.p_negative == r2.p_negative
 
     @patch(_PATCH_ST, _fake_st)
-    def test_n_neighbors_override_respected(self, stage_c_models_dir: Path) -> None:
+    def test_n_neighbors_override_stored(self, stage_c_models_dir: Path) -> None:
         """A caller-supplied n_neighbors overrides the value from meta.json."""
         scorer = StageCScorer(models_dir=stage_c_models_dir, n_neighbors=1)
         assert scorer._n_neighbors == 1
         result = scorer.evaluate(FakeCandidate(), "thick", body="body")
         assert isinstance(result, StageScore)
+
+    @patch(_PATCH_ST, _fake_st)
+    def test_n_neighbors_affects_score(self, stage_c_models_dir: Path) -> None:
+        """n_neighbors=1 (nearest-neighbour cosine) differs from n_neighbors=5 (mean over 5).
+
+        With the fixed implementation, knn_mean_cos is the mean cosine over k
+        neighbours.  k=1 gives the cosine to the single nearest neighbour;
+        k=5 averages over 5 neighbours — these are distinct signals unless all
+        5 neighbours are equidistant (astronomically unlikely with hash-based
+        fake embeddings and 12 distinct training positives).
+        """
+        cand = FakeCandidate(title="עצור חשוד ברצח", snippet="המשטרה עצרה חשוד")
+        scorer1 = StageCScorer(models_dir=stage_c_models_dir, n_neighbors=1)
+        scorer5 = StageCScorer(models_dir=stage_c_models_dir, n_neighbors=5)
+        r1 = scorer1.evaluate(cand, "thick", body="נעצר לאחר חקירה")
+        r5 = scorer5.evaluate(cand, "thick", body="נעצר לאחר חקירה")
+        assert r1 is not None and r5 is not None
+        assert r1.p_negative != r5.p_negative, (
+            "n_neighbors=1 and n_neighbors=5 produced identical p_negative — "
+            "the knn_mean signal is not actually using k neighbours"
+        )
