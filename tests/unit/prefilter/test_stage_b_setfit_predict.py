@@ -16,48 +16,19 @@ from unittest.mock import patch
 
 import pytest
 
-setfit = pytest.importorskip("setfit")  # skip whole module if setfit not installed
+_ = pytest.importorskip("setfit")  # skip whole module if setfit not installed
 
 from denbust.prefilter.models import StageScore
 from denbust.prefilter.stage_b import StageBSetFitScorer
-from tests.unit.prefilter._helpers import FakeCandidate
-
-# ---------------------------------------------------------------------------
-# Fake SetFit model that covers both save_pretrained and predict_proba
-# ---------------------------------------------------------------------------
+from tests.unit.prefilter._helpers import FakeCandidate, FakeSetFitModel
 
 
-class _FakeSetFitModel:
-    """Lightweight SetFit model stub for predict tests."""
-
-    def __init__(self, p_negative: float = 0.2) -> None:
-        self._p_negative = p_negative
-
-    def predict_proba(self, texts: list[str]) -> Any:
-        import numpy as np
-
-        n = len(texts)
-        result = np.zeros((n, 2), dtype=np.float64)
-        result[:, 0] = self._p_negative
-        result[:, 1] = 1.0 - self._p_negative
-        return result
-
-    def save_pretrained(self, path: str) -> None:
-        p = Path(path)
-        p.mkdir(parents=True, exist_ok=True)
-        (p / "config_setfit.json").write_text(
-            json.dumps({"model_type": "fake_setfit"}), encoding="utf-8"
-        )
-        (p / "model_head.pkl").write_bytes(b"fake")
-        (p / "config.json").write_text(json.dumps({"hidden_size": 4}), encoding="utf-8")
-
-
-def _fake_from_pretrained(path: str, **_kwargs: Any) -> _FakeSetFitModel:
+def _fake_from_pretrained(path: str, **_kwargs: Any) -> FakeSetFitModel:
     """Fake loader: deterministically varies p_negative based on model path."""
     # Thin model gets p_negative=0.2 (positive-leaning);
     # thick model gets p_negative=0.8 (negative-leaning).
     p_neg = 0.2 if "thin" in str(path) else 0.8
-    return _FakeSetFitModel(p_negative=p_neg)
+    return FakeSetFitModel(p_negative=p_neg)
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +46,8 @@ def setfit_models_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     thin_dir = stage_dir / "thin_model"
     thick_dir = stage_dir / "thick_model"
 
-    fake_thin = _FakeSetFitModel(p_negative=0.2)
-    fake_thick = _FakeSetFitModel(p_negative=0.8)
+    fake_thin = FakeSetFitModel(p_negative=0.2)
+    fake_thick = FakeSetFitModel(p_negative=0.8)
     fake_thin.save_pretrained(str(thin_dir))
     fake_thick.save_pretrained(str(thick_dir))
 

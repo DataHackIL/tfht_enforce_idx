@@ -21,49 +21,15 @@ from unittest.mock import patch
 
 import pytest
 
-setfit = pytest.importorskip("setfit")  # skip whole module if setfit not installed
+_ = pytest.importorskip("setfit")  # skip whole module if setfit not installed
 
 from denbust.prefilter.labels import LabeledCandidate, write_labels_parquet
 from denbust.prefilter.stage_b import StageBModelMeta, train_setfit
-from tests.unit.prefilter._helpers import make_labeled_row
-
-# ---------------------------------------------------------------------------
-# Fake SetFit model & trainer (avoids any network or GPU usage)
-# ---------------------------------------------------------------------------
+from tests.unit.prefilter._helpers import FakeSetFitModel, make_labeled_row
 
 
-class _FakeSetFitModel:
-    """Minimal SetFit model stub that persists/loads without real weights."""
-
-    def __init__(self, p_negative: float = 0.2) -> None:
-        self._p_negative = p_negative
-
-    def predict_proba(self, texts: list[str]) -> Any:
-        import numpy as np
-
-        n = len(texts)
-        result = np.zeros((n, 2), dtype=np.float64)
-        result[:, 0] = self._p_negative
-        result[:, 1] = 1.0 - self._p_negative
-        return result
-
-    def save_pretrained(self, path: str) -> None:
-        p = Path(path)
-        p.mkdir(parents=True, exist_ok=True)
-        # Write the files that _sha1_setfit_head looks for.
-        (p / "config_setfit.json").write_text(
-            json.dumps({"model_type": "fake_setfit", "p_negative": self._p_negative}),
-            encoding="utf-8",
-        )
-        (p / "model_head.pkl").write_bytes(b"fake-head-bytes")
-        (p / "config.json").write_text(
-            json.dumps({"hidden_size": 4}),
-            encoding="utf-8",
-        )
-
-
-def _fake_from_pretrained(*_args: Any, **_kwargs: Any) -> _FakeSetFitModel:
-    return _FakeSetFitModel()
+def _fake_from_pretrained(*_args: Any, **_kwargs: Any) -> FakeSetFitModel:
+    return FakeSetFitModel()
 
 
 class _FakeSetFitTrainer:

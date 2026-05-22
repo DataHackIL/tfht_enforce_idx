@@ -7,7 +7,9 @@ self-contained at the import level.
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from pathlib import Path
+from typing import Any, Literal
 
 from denbust.prefilter.labels import LabeledCandidate
 
@@ -86,3 +88,46 @@ class FakeCandidate:
     @property
     def url(self) -> str | None:
         return self._url
+
+
+# ---------------------------------------------------------------------------
+# Minimal SetFit model stub for SetFit-related tests
+#
+# Defined here so both test_stage_b_setfit_predict.py and
+# test_stage_b_setfit_train.py share one implementation.  numpy is imported
+# lazily inside predict_proba so this file stays importable even without the
+# prefilter extras installed.
+# ---------------------------------------------------------------------------
+
+
+class FakeSetFitModel:
+    """Minimal SetFit model stub for testing: no network, no GPU.
+
+    ``predict_proba`` returns a constant probability matrix parameterised by
+    *p_negative*.  ``save_pretrained`` writes the three files that
+    :func:`~denbust.prefilter.stage_b._sha1_setfit_head` looks for, including
+    *p_negative* in ``config_setfit.json`` so that different instances produce
+    distinct SHA-1 hashes.
+    """
+
+    def __init__(self, p_negative: float = 0.2) -> None:
+        self._p_negative = p_negative
+
+    def predict_proba(self, texts: list[str]) -> Any:
+        import numpy as np  # lazy: only needed when setfit extras are installed
+
+        n = len(texts)
+        result = np.zeros((n, 2), dtype=np.float64)
+        result[:, 0] = self._p_negative
+        result[:, 1] = 1.0 - self._p_negative
+        return result
+
+    def save_pretrained(self, path: str) -> None:
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+        (p / "config_setfit.json").write_text(
+            json.dumps({"model_type": "fake_setfit", "p_negative": self._p_negative}),
+            encoding="utf-8",
+        )
+        (p / "model_head.pkl").write_bytes(b"fake-head-bytes")
+        (p / "config.json").write_text(json.dumps({"hidden_size": 4}), encoding="utf-8")

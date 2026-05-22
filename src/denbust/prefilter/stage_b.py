@@ -43,7 +43,7 @@ import tempfile
 import warnings
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from denbust.prefilter.models import CandidateView, PassKind, StageScore
 
@@ -62,6 +62,8 @@ _THIN_MODEL_DIRNAME = "thin_model"
 _THICK_MODEL_DIRNAME = "thick_model"
 
 _META_FILE = "meta.json"
+
+_DEFAULT_SETFIT_BASE_MODEL = "intfloat/multilingual-e5-large"
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +99,31 @@ class StageBModelMeta:
     n_train: int
     n_val: int
     n_thick_with_body: int
+    base_model_id: str = ""  # HuggingFace model ID; empty string for naive_bayes
+
+
+# ---------------------------------------------------------------------------
+# Scorer protocol (structural interface shared by both Stage B implementations)
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class StageBScorerProtocol(Protocol):
+    """Structural interface shared by :class:`StageBScorer` and :class:`StageBSetFitScorer`.
+
+    Any class that exposes ``model_version`` and a compatible ``evaluate``
+    method satisfies this protocol without subclassing.  Use it as the
+    annotation type in code that must accept either implementation.
+    """
+
+    model_version: str
+
+    def evaluate(
+        self,
+        candidate: CandidateView,
+        pass_kind: PassKind,
+        body: str | None = None,
+    ) -> StageScore | None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +311,7 @@ class StageBSetFitScorer:
         self._thin_model: Any = None
         self._thick_model: Any = None
         self.model_version: str = ""
+        self.base_model_id: str = ""
 
         if models_dir is None:
             return
@@ -310,6 +338,7 @@ class StageBSetFitScorer:
         if meta_path.exists():
             meta_raw = json.loads(meta_path.read_text(encoding="utf-8"))
             self.model_version = str(meta_raw.get("model_version", ""))
+            self.base_model_id = str(meta_raw.get("base_model_id", ""))
         else:
             logger.warning(
                 "Stage B SetFit: meta.json missing from %s; model_version will be empty.",
@@ -426,15 +455,7 @@ def train_naive_bayes(
     train_rows = [r for r in rows if r.split == "train"]
     val_rows = [r for r in rows if r.split == "val"]
 
-    if not train_rows:
-        raise ValueError(f"No training rows found in {labels_path}")
-
-    classes = {r.label for r in train_rows}
-    if len(classes) < 2:
-        raise ValueError(
-            f"Training data contains only one label class ({classes}); "
-            "both 'positive' and 'negative' labels are required."
-        )
+    _validate_training_split(train_rows, labels_path)
 
     # Label mapping: y=0 → "negative", y=1 → "positive".
     # sklearn sorts unique integer labels, so predict_proba columns are ordered
@@ -486,18 +507,10 @@ def train_naive_bayes(
             n_train=len(train_rows),
             n_val=len(val_rows),
             n_thick_with_body=n_thick_with_body,
+            # base_model_id left as "" (default) for naive_bayes
         )
-        # Serialize only the JSON-safe fields — exclude any future Path-typed fields.
-        meta_dict = {
-            "model_kind": meta.model_kind,
-            "model_version": meta.model_version,
-            "trained_at": meta.trained_at,
-            "n_train": meta.n_train,
-            "n_val": meta.n_val,
-            "n_thick_with_body": meta.n_thick_with_body,
-        }
         meta_path.write_text(
-            json.dumps(meta_dict, ensure_ascii=False, indent=2),
+            json.dumps(dataclasses.asdict(meta), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -522,7 +535,7 @@ def train_setfit(
     labels_path: Path,
     out_dir: Path,
     *,
-    base_model_id: str = "intfloat/multilingual-e5-large",
+    base_model_id: str = _DEFAULT_SETFIT_BASE_MODEL,
     seed: int = 20260521,
 ) -> tuple[StageBModelMeta, Path]:
     """Train SetFit classifiers and write Stage B SetFit artifacts.
@@ -584,15 +597,7 @@ def train_setfit(
     train_rows = [r for r in rows if r.split == "train"]
     val_rows = [r for r in rows if r.split == "val"]
 
-    if not train_rows:
-        raise ValueError(f"No training rows found in {labels_path}")
-
-    classes = {r.label for r in train_rows}
-    if len(classes) < 2:
-        raise ValueError(
-            f"Training data contains only one label class ({classes}); "
-            "both 'positive' and 'negative' labels are required."
-        )
+    _validate_training_split(train_rows, labels_path)
 
     label_to_int = {"negative": 0, "positive": 1}
     y_train = [label_to_int[r.label] for r in train_rows]
@@ -626,7 +631,14 @@ def train_setfit(
         return model
 
     thin_model = _train_one(thin_texts, y_train)
-    thick_model = _train_one(thick_texts, y_train)
+
+    # When no body data is available the thick texts are identical to thin texts.
+    # Skip the redundant second training run — copy the thin artifacts instead.
+    thick_from_copy = n_thick_with_body == 0
+    if thick_from_copy:
+        thick_model: Any = thin_model
+    else:
+        thick_model = _train_one(thick_texts, y_train)
 
     # Atomic write
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -638,7 +650,10 @@ def train_setfit(
         meta_path = tmp_dir / _META_FILE
 
         thin_model.save_pretrained(str(thin_path))
-        thick_model.save_pretrained(str(thick_path))
+        if thick_from_copy:
+            shutil.copytree(thin_path, thick_path)
+        else:
+            thick_model.save_pretrained(str(thick_path))
 
         model_version = _sha1_setfit_head(thin_path)[:12]
 
@@ -649,18 +664,10 @@ def train_setfit(
             n_train=len(train_rows),
             n_val=len(val_rows),
             n_thick_with_body=n_thick_with_body,
+            base_model_id=base_model_id,
         )
-        meta_dict = {
-            "model_kind": meta.model_kind,
-            "model_version": meta.model_version,
-            "trained_at": meta.trained_at,
-            "n_train": meta.n_train,
-            "n_val": meta.n_val,
-            "n_thick_with_body": meta.n_thick_with_body,
-            "base_model_id": base_model_id,
-        }
         meta_path.write_text(
-            json.dumps(meta_dict, ensure_ascii=False, indent=2),
+            json.dumps(dataclasses.asdict(meta), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -678,6 +685,22 @@ def train_setfit(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def _validate_training_split(train_rows: list[Any], labels_path: Path) -> None:
+    """Raise :exc:`ValueError` if *train_rows* is empty or single-class.
+
+    Called by both :func:`train_naive_bayes` and :func:`train_setfit` to
+    consolidate identical pre-training guards in one place.
+    """
+    if not train_rows:
+        raise ValueError(f"No training rows found in {labels_path}")
+    classes = {r.label for r in train_rows}
+    if len(classes) < 2:
+        raise ValueError(
+            f"Training data contains only one label class ({classes}); "
+            "both 'positive' and 'negative' labels are required."
+        )
 
 
 def _sha1_file(path: Path) -> str:

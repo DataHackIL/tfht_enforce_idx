@@ -191,10 +191,10 @@ def retrain_cmd(
         typer.echo(f"Stage B retrain complete.  model_version={meta.model_version}")
 
     else:  # setfit
-        from denbust.prefilter.stage_b import train_setfit
+        from denbust.prefilter.stage_b import _DEFAULT_SETFIT_BASE_MODEL, train_setfit
 
         typer.echo(f"Retraining Stage B (setfit) from {prefilter_paths.labels_path} ...")
-        typer.echo("  base model: intfloat/multilingual-e5-large  (download may take a while)")
+        typer.echo(f"  base model: {_DEFAULT_SETFIT_BASE_MODEL}  (download may take a while)")
         meta, stage_dir = train_setfit(
             labels_path=prefilter_paths.labels_path,
             out_dir=prefilter_paths.models_dir,
@@ -216,15 +216,15 @@ def evaluate_cmd(
         typer.Option("--split", help="Labeled split to evaluate on: val or test"),
     ] = "val",
     compare_b: Annotated[
-        str | None,
+        str,
         typer.Option(
             "--compare-b",
             help=(
-                "Comma-separated Stage B model kinds to compare, e.g. "
-                "'naive_bayes,setfit'.  Both must be trained first."
+                "Comma-separated Stage B model kinds to evaluate, e.g. "
+                "'naive_bayes' or 'naive_bayes,setfit'.  All must be trained first."
             ),
         ),
-    ] = None,
+    ] = "naive_bayes",
     recall_floor: Annotated[
         float,
         typer.Option(
@@ -237,14 +237,15 @@ def evaluate_cmd(
         typer.Option("--report-path", "-r", help="Write a markdown report to this path."),
     ] = None,
 ) -> None:
-    """Compare Stage B model variants on a labeled evaluation split.
+    """Evaluate Stage B model variants on a labeled split.
 
     Loads each model from the configured models directory, scores every
     candidate in the chosen split using the thin pass (title + snippet), and
     prints precision / recall / Brier score for each at the threshold that
-    achieves ``--recall-floor`` on that same split.
+    achieves ``--recall-floor`` on that same split.  Unscored candidates
+    (scorer returned ``None``) are excluded from metric calculations.
 
-    Both models must be trained before running this command:
+    Models must be trained before running this command:
 
     \\b
         denbust prefilter retrain --stage b --model naive_bayes --config CFG
@@ -265,13 +266,6 @@ def evaluate_cmd(
         )
         raise typer.Exit(1)
 
-    if compare_b is None:
-        typer.echo(
-            "Error: --compare-b is required (e.g. --compare-b naive_bayes,setfit).",
-            err=True,
-        )
-        raise typer.Exit(1)
-
     model_kinds = [k.strip() for k in compare_b.split(",") if k.strip()]
     valid_kinds = {"naive_bayes", "setfit"}
     unknown = set(model_kinds) - valid_kinds
@@ -285,7 +279,7 @@ def evaluate_cmd(
 
     from denbust.config import load_config
     from denbust.prefilter.labels import read_labels_parquet
-    from denbust.prefilter.stage_b import StageBScorer, StageBSetFitScorer
+    from denbust.prefilter.stage_b import StageBScorer, StageBScorerProtocol, StageBSetFitScorer
     from denbust.prefilter.state_paths import resolve_prefilter_state_paths
 
     loaded = load_config(config)
@@ -319,72 +313,67 @@ def evaluate_cmd(
     results: list[dict[str, Any]] = []
 
     for kind in model_kinds:
+        scorer: StageBScorerProtocol
         if kind == "naive_bayes":
-            scorer: StageBScorer | StageBSetFitScorer = StageBScorer(
-                models_dir=prefilter_paths.models_dir
-            )
+            scorer = StageBScorer(models_dir=prefilter_paths.models_dir)
         else:
             scorer = StageBSetFitScorer(models_dir=prefilter_paths.models_dir)
 
-        p_negatives: list[float] = []
+        # Collect scores only for rows the scorer can actually handle.
+        # Rows returning None pass through the filter — they must NOT be
+        # imputed with a fake probability or they corrupt every metric.
+        scored_p: list[float] = []
+        scored_y: list[int] = []
         n_skipped = 0
-        for row in eval_rows:
+        for row, y in zip(eval_rows, y_true):
             score = scorer.evaluate(row, "thin")
             if score is None:
                 n_skipped += 1
-                p_negatives.append(0.5)  # no-info fallback: neutral probability
             else:
-                p_negatives.append(score.p_negative)
+                scored_p.append(score.p_negative)
+                scored_y.append(y)
 
-        if n_skipped == len(eval_rows):
+        if not scored_p:
             typer.echo(
                 f"  {kind}: scorer returned None for all candidates "
                 "(artifacts missing or package not installed) — skipping.\n"
             )
             continue
 
-        threshold = _threshold_at_recall_floor(p_negatives, y_true, recall_floor)
-
-        dropped = [p >= threshold for p in p_negatives]
-        true_drops = sum(1 for d, y in zip(dropped, y_true) if d and y == 0)
-        false_drops = sum(1 for d, y in zip(dropped, y_true) if d and y == 1)
-        total_dropped = sum(dropped)
-
-        recall = (n_pos - false_drops) / n_pos if n_pos > 0 else 1.0
-        drop_precision = true_drops / total_dropped if total_dropped > 0 else 0.0
-        drop_rate = total_dropped / len(y_true)
-        # Brier score: MSE between p_positive = (1 - p_negative) and y ∈ {0, 1}
-        brier = sum((1.0 - p - y) ** 2 for p, y in zip(p_negatives, y_true)) / len(y_true)
+        metrics = _compute_stage_b_metrics(
+            scored_p=scored_p,
+            scored_y=scored_y,
+            n_pos_total=n_pos,
+            n_total=len(y_true),
+            recall_floor=recall_floor,
+        )
 
         version = scorer.model_version or "(unknown)"
         typer.echo(f"  {kind}  [version: {version}]")
-        typer.echo(f"    threshold      : {threshold:.4f}")
-        typer.echo(f"    recall         : {recall:.4f}  (target ≥ {recall_floor:.4f})")
-        typer.echo(f"    drop_precision : {drop_precision:.4f}  (true_neg / total_dropped)")
-        typer.echo(f"    drop_rate      : {drop_rate:.4f}")
-        typer.echo(f"    brier_score    : {brier:.4f}")
+        typer.echo(f"    threshold      : {metrics['threshold']:.4f}")
+        typer.echo(f"    recall         : {metrics['recall']:.4f}  (target ≥ {recall_floor:.4f})")
+        typer.echo(
+            f"    drop_precision : {metrics['drop_precision']:.4f}  (true_neg / total_dropped)"
+        )
+        typer.echo(f"    drop_rate      : {metrics['drop_rate']:.4f}")
+        typer.echo(f"    brier_score    : {metrics['brier_score']:.4f}")
         if n_skipped:
-            typer.echo(f"    no-score rows  : {n_skipped} (treated as p_negative=0.5)")
+            typer.echo(
+                f"    no-score rows  : {n_skipped} (excluded from metrics; "
+                "treated as pass-through in production)"
+            )
         typer.echo("")
 
-        results.append(
-            {
-                "kind": kind,
-                "version": version,
-                "threshold": threshold,
-                "recall": recall,
-                "drop_precision": drop_precision,
-                "drop_rate": drop_rate,
-                "brier_score": brier,
-            }
-        )
+        results.append({"kind": kind, "version": version, **metrics})
 
     if len(results) >= 2:
-        # Prefer higher drop_rate (more negatives filtered); break ties by lower Brier.
-        best = max(results, key=lambda r: (r["drop_rate"], -r["brier_score"]))
+        # Prefer the model with the best calibration (lower Brier score).
+        # Break ties by drop rate — a higher rate means more noise is filtered
+        # at the same quality level.
+        best = min(results, key=lambda r: (r["brier_score"], -r["drop_rate"]))
         typer.echo(
-            f"Recommendation: '{best['kind']}' achieves the highest drop rate "
-            f"({best['drop_rate']:.1%}) at the given recall floor."
+            f"Recommendation: '{best['kind']}' has the best calibration "
+            f"(Brier={best['brier_score']:.4f}) at the given recall floor."
         )
         typer.echo("")
 
@@ -476,44 +465,139 @@ def _threshold_at_recall_floor(
 ) -> float:
     """Find the lowest drop-threshold that keeps recall ≥ *recall_floor*.
 
-    A candidate is "dropped" when ``p_negative >= threshold``.  Lower
-    thresholds drop more candidates and reduce recall.  This function finds
-    the minimum threshold at which recall still meets the floor, maximising
-    the drop rate for a given recall constraint.
+    A candidate is "dropped" when ``p_negative >= threshold``.  Higher
+    thresholds drop fewer candidates and increase recall.  This function
+    finds the minimum threshold at which recall still meets the floor,
+    maximising the drop rate for a given recall constraint.
 
     Parameters
     ----------
     p_negatives:
         Model output ``p_negative`` for each evaluation candidate.
+        Must contain only *scored* rows (no imputed values).
     y_true:
-        Ground-truth labels: ``1`` = positive, ``0`` = negative.
+        Ground-truth labels aligned with *p_negatives*: ``1`` = positive,
+        ``0`` = negative.
     recall_floor:
         Target minimum recall (e.g. ``0.99``).
 
     Returns
     -------
     float
-        The operating threshold.  Returns ``1.0`` (no drops) when the
-        positive set is empty.
+        The tightest threshold that satisfies the recall floor.
+        Returns ``1.0`` when the positive set is empty.
+        Returns ``max(p_negatives) + 1e-9`` (no drops) when no candidate
+        threshold can satisfy the floor.
+
+    Notes
+    -----
+    The algorithm sweeps unique p_negative values in ascending order.
+    Since false-drop count is monotonically non-increasing as the threshold
+    rises, the first value where ``false_drops ≤ max_false_drops`` is the
+    optimal (minimum) threshold.  If no value in the set satisfies the
+    constraint, we return just above the maximum so that nothing is dropped
+    and recall stays at 1.0.
     """
     n_pos = sum(y_true)
     if n_pos == 0:
         return 1.0
 
     # Maximum number of positives we can afford to drop.
-    max_false_drops = int(n_pos * (1.0 - recall_floor))
+    # Use int() (floor) rather than round() — dropping k positives achieves
+    # recall = (n_pos − k) / n_pos; we need that ≥ recall_floor, so
+    # k ≤ n_pos * (1 − recall_floor).  Float arithmetic can push the product
+    # just below a true integer (e.g. 10 * 0.1 → 0.9999…), so we add a tiny
+    # epsilon before truncating to recover the intended whole number.
+    max_false_drops = int(n_pos * (1.0 - recall_floor) + 1e-9)
 
-    # Candidate thresholds: each unique p_negative value is a potential
-    # boundary.  We try them in ascending order — lower threshold = more
-    # drops.  We stop at the first threshold that drops too many positives.
+    # Sweep ascending: for each candidate threshold T, count how many
+    # positives would be incorrectly dropped (p_negative >= T and y == 1).
+    # False-drop count is non-increasing as T rises, so the first T that
+    # satisfies the constraint IS the minimum (most aggressive) safe threshold.
     for threshold in sorted(set(p_negatives)):
         false_drops = sum(1 for p, y in zip(p_negatives, y_true) if p >= threshold and y == 1)
-        if false_drops > max_false_drops:
-            # This threshold drops too many positives; use a slightly higher
-            # value so the previous set of candidates is still dropped.
-            return threshold + 1e-9
-    # Even the lowest threshold satisfies the recall floor.
-    return min(p_negatives)
+        if false_drops <= max_false_drops:
+            return threshold
+
+    # No value in the candidate set satisfies the floor (e.g. a positive
+    # example has the single highest p_negative in the dataset).
+    # Return just above the maximum so nothing is dropped and recall = 1.0.
+    return max(p_negatives) + 1e-9
+
+
+def _compute_stage_b_metrics(
+    scored_p: list[float],
+    scored_y: list[int],
+    n_pos_total: int,
+    n_total: int,
+    recall_floor: float,
+) -> dict[str, float]:
+    """Compute Stage B evaluation metrics over *scored* candidates only.
+
+    Parameters
+    ----------
+    scored_p:
+        ``p_negative`` values for rows where the scorer returned a score.
+        Must NOT include imputed values for rows that scored ``None``.
+    scored_y:
+        Ground-truth labels aligned with *scored_p* (``1`` = positive).
+    n_pos_total:
+        Total number of positives in the evaluation split, including any
+        rows that were unscored (those pass through without being dropped).
+    n_total:
+        Total number of candidates in the evaluation split.
+    recall_floor:
+        Target minimum recall passed to :func:`_threshold_at_recall_floor`.
+
+    Returns
+    -------
+    dict[str, float]
+        Keys: ``threshold``, ``recall``, ``drop_precision``,
+        ``drop_rate``, ``brier_score``.
+
+    Notes
+    -----
+    *Recall* and *drop_rate* are expressed over the full split (``n_total``,
+    ``n_pos_total``) so unscored rows are correctly treated as pass-through
+    (not dropped) rather than being counted against recall.
+    *Brier score* is computed only over scored rows — that is where we have
+    actual model predictions.
+    """
+    if not scored_p:
+        return {
+            "threshold": 1.0,
+            "recall": 1.0,
+            "drop_precision": 0.0,
+            "drop_rate": 0.0,
+            "brier_score": 0.0,
+        }
+
+    threshold = _threshold_at_recall_floor(scored_p, scored_y, recall_floor)
+    dropped = [p >= threshold for p in scored_p]
+    true_drops = sum(1 for d, y in zip(dropped, scored_y) if d and y == 0)
+    false_drops = sum(1 for d, y in zip(dropped, scored_y) if d and y == 1)
+    total_dropped = sum(dropped)
+
+    # Recall: unscored positives are NOT dropped, so they don't reduce recall.
+    recall = (n_pos_total - false_drops) / n_pos_total if n_pos_total > 0 else 1.0
+    drop_precision = true_drops / total_dropped if total_dropped > 0 else 0.0
+    # Drop rate: over the full split so unscored rows are counted as retained.
+    drop_rate = total_dropped / n_total if n_total > 0 else 0.0
+    # Brier score: MSE between p_positive = (1 − p_negative) and y ∈ {0, 1},
+    # computed only over rows that actually scored.
+    brier = (
+        sum((1.0 - p - y) ** 2 for p, y in zip(scored_p, scored_y)) / len(scored_p)
+        if scored_p
+        else 0.0
+    )
+
+    return {
+        "threshold": threshold,
+        "recall": recall,
+        "drop_precision": drop_precision,
+        "drop_rate": drop_rate,
+        "brier_score": brier,
+    }
 
 
 def _write_evaluate_report(
