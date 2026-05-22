@@ -138,6 +138,7 @@ _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
         "עסקי מזון",  # food businesses (plural construct)
         # ── construction / real-estate noise ─────────────────────────────────
         "אתר בנייה",  # construction site
+        "לאתר בנייה",  # to a construction site (dative)
         "אתר הבנייה",  # the construction site
         "דירה למכירה",  # apartment for sale
         "דירות למכירה",  # apartments for sale
@@ -153,6 +154,9 @@ _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
         "צו סגירה למפעל",  # factory closure order
         "צו סגירה לסניף",  # branch closure order
         "צו סגירה למאפיה",  # bakery closure order (מאפיה = bakery in Hebrew)
+        "צו סגירה לעסק",  # business closure order (generic)
+        "צו סגירה ניתן לעסק",  # business closure order issued to business
+        "צו סגירה הוצא לעסק",  # business closure order issued to business (alt form)
         # ── retail / brand noise ─────────────────────────────────────────────
         "המשביר",  # HaMashbir department-store chain
         "איקאה",  # IKEA
@@ -160,9 +164,12 @@ _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
         "מסחר בבורסה",  # stock-market trading
         "מסחר עצמאי",  # independent trading / freelance commerce
         # ── AI / tech noise ──────────────────────────────────────────────────
-        "גרוק",  # Grok AI
-        "ג'מיני",  # Gemini AI
+        "גרוק",  # Grok AI (Hebrew)
+        "grok",  # Grok AI (English, case-insensitive)
+        "ג'מיני",  # Gemini AI (Hebrew)
+        "gemini",  # Gemini AI (English, case-insensitive)
         "chatgpt",  # ChatGPT (case-insensitive)
+        "claude",  # Claude AI (case-insensitive)
         "מודל שפה",  # language model
         # ── unrelated legal / civic ───────────────────────────────────────────
         "בגצ",  # HCJ (no punctuation)
@@ -213,6 +220,11 @@ _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
         "הטרדה מינית",  # sexual harassment — covers "להטרדה מינית", "הוטרדה מינית"
         # ── AI / tech (second batch) ─────────────────────────────────────────
         "בינה מלאכותית",  # artificial intelligence
+        # ── religious content noise ──────────────────────────────────────────
+        "תורה",  # Torah — religious content, off-topic
+        # ── generic reward / prize phrases ────────────────────────────────────
+        "מגיע לך",  # "you deserve it" — prize/reward noise
+        "מגיע לכם",  # "you all deserve it" — prize/reward noise
         # ── civic / protest noise ────────────────────────────────────────────
         "מפגינים",  # protesters
         # ── license revocation (driving/professional, non-enforcement) ────────
