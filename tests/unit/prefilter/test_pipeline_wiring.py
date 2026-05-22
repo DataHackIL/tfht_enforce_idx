@@ -29,6 +29,7 @@ from denbust.prefilter.adapters import (
     PersistentCandidateView,
     RawArticleCandidateView,
     _etld1,
+    _etld1_from_host,
 )
 from denbust.prefilter.models import PrefilterDecision
 
@@ -93,8 +94,18 @@ class TestEtld1:
     def test_standard_two_part_domain(self) -> None:
         assert _etld1("https://example.com/path") == "example.com"
 
-    def test_subdomain_trimmed(self) -> None:
-        assert _etld1("https://www.ynet.co.il/news") == "co.il"
+    def test_co_il_subdomain_returns_domain_not_tld(self) -> None:
+        # Previously (bug): returned "co.il". Correct value is "ynet.co.il".
+        assert _etld1("https://www.ynet.co.il/news") == "ynet.co.il"
+
+    def test_co_il_no_subdomain(self) -> None:
+        assert _etld1("https://haaretz.co.il/article") == "haaretz.co.il"
+
+    def test_co_il_with_subdomain_mako(self) -> None:
+        assert _etld1("https://www.mako.co.il/article/123") == "mako.co.il"
+
+    def test_com_domain_with_subdomain(self) -> None:
+        assert _etld1("https://www.example.com/path") == "example.com"
 
     def test_bare_hostname(self) -> None:
         assert (
@@ -110,11 +121,35 @@ class TestEtld1:
         # single-label host: return as-is or None
         assert result in ("intranet", None)
 
-    def test_co_il_domain(self) -> None:
-        assert _etld1("https://www.mako.co.il/article/123") == "co.il"
+    def test_co_il_suffix_alone_never_returned_for_three_label_host(self) -> None:
+        # Regression: "co.il" must NOT be returned when the host has 3+ labels.
+        result = _etld1("https://news.walla.co.il/article")
+        assert result == "walla.co.il"
+        assert result != "co.il"
 
-    def test_news_domain(self) -> None:
-        assert _etld1("https://haaretz.co.il/article") == "co.il"
+    def test_co_uk_treated_as_two_part_tld(self) -> None:
+        assert _etld1("https://www.bbc.co.uk/news") == "bbc.co.uk"
+
+
+class TestEtld1FromHost:
+    """_etld1_from_host operates on bare hostnames (no scheme/path)."""
+
+    def test_two_label_com_host(self) -> None:
+        assert _etld1_from_host("example.com") == "example.com"
+
+    def test_netloc_with_co_il(self) -> None:
+        # PersistentCandidate.domain stores netloc; adapter normalises it.
+        assert _etld1_from_host("www.ynet.co.il") == "ynet.co.il"
+
+    def test_netloc_without_subdomain_co_il(self) -> None:
+        assert _etld1_from_host("haaretz.co.il") == "haaretz.co.il"
+
+    def test_empty_host(self) -> None:
+        assert _etld1_from_host("") is None
+
+    def test_single_label(self) -> None:
+        result = _etld1_from_host("localhost")
+        assert result in ("localhost", None)
 
 
 # ===========================================================================
@@ -130,11 +165,27 @@ class TestPersistentCandidateView:
         view = PersistentCandidateView(c)
         assert view.candidate_id == "xyz-999"
 
-    def test_domain_from_candidate(self) -> None:
-        c = _make_persistent_candidate()
+    def test_domain_normalised_to_etld1(self) -> None:
+        # PersistentCandidate.domain stores the raw netloc ("www.ynet.co.il").
+        # The adapter must normalise it to eTLD+1 ("ynet.co.il") so that
+        # domain-reputation lookups use the same key as RawArticleCandidateView.
+        c = _make_persistent_candidate(
+            canonical_url="https://www.ynet.co.il/news/article/1234",
+            current_url="https://www.ynet.co.il/news/article/1234",
+        )
         view = PersistentCandidateView(c)
-        assert view.domain is not None
-        assert "ynet" in view.domain or "co.il" in view.domain
+        assert view.domain == "ynet.co.il"
+
+    def test_domain_consistent_with_raw_article_view(self) -> None:
+        # Both adapters should return the same eTLD+1 for the same underlying site.
+        c = _make_persistent_candidate(
+            canonical_url="https://www.mako.co.il/news/article/abc",
+            current_url="https://www.mako.co.il/news/article/abc",
+        )
+        a = _make_raw_article(url="https://www.mako.co.il/news/article/abc")
+        pv = PersistentCandidateView(c)
+        av = RawArticleCandidateView(a, candidate_id="c-1")
+        assert pv.domain == av.domain == "mako.co.il"
 
     def test_title_returns_first_title(self) -> None:
         c = _make_persistent_candidate(titles=["כותרת ראשונה", "כותרת שניה"])
@@ -213,11 +264,10 @@ class TestRawArticleCandidateView:
         assert isinstance(view.url, str)
 
     def test_domain_extracted_from_url(self) -> None:
+        # news.walla.co.il → "walla.co.il" (not "co.il")
         a = _make_raw_article(url="https://news.walla.co.il/article/3456")
         view = RawArticleCandidateView(a, candidate_id="c-1")
-        # _etld1("https://news.walla.co.il/article/3456") → "co.il"
-        assert view.domain is not None
-        assert "." in view.domain
+        assert view.domain == "walla.co.il"
 
     def test_domain_none_for_invalid_url(self) -> None:
         # We can't construct a RawArticle with a truly invalid URL (pydantic validates)
@@ -431,10 +481,12 @@ class TestThickPassPrefilter:
             candidate_id_map={"https://example.com/article": "mapped-cand-id"},
         )
 
-        # The view passed to evaluate_thick should use the mapped candidate_id
+        # The view passed to evaluate_thick should use the mapped candidate_id,
+        # and body=None should be passed (RawArticle has no full-body field yet).
         call_args = orchestrator.evaluate_thick.call_args
         view = call_args[0][0]  # positional arg 0
         assert view.candidate_id == "mapped-cand-id"
+        assert call_args.kwargs.get("body") is None
 
     def test_empty_articles_with_orchestrator(self) -> None:
         orchestrator = MagicMock()

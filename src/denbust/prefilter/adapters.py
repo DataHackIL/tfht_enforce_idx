@@ -15,7 +15,7 @@ Usage example::
     decision = orchestrator.evaluate_thin(view)
 
     article_view = RawArticleCandidateView(article, candidate_id=cid)
-    decision = orchestrator.evaluate_thick(article_view, body=article.snippet)
+    decision = orchestrator.evaluate_thick(article_view, body=None)
 """
 
 from __future__ import annotations
@@ -25,18 +25,76 @@ from urllib.parse import urlparse
 from denbust.data_models import RawArticle
 from denbust.discovery.models import PersistentCandidate
 
+# ---------------------------------------------------------------------------
+# Two-part TLD suffixes (no public-suffix-list dependency)
+#
+# ``_etld1_from_host`` checks whether the last two labels of a hostname form a
+# known two-part suffix and, if so, takes one extra label so that, e.g.,
+# ``www.ynet.co.il`` yields ``ynet.co.il`` rather than the useless ``co.il``.
+# The set covers the suffixes relevant to Israeli news and a handful of other
+# common two-part ccTLDs.  It is intentionally small; add entries as needed
+# rather than pulling in ``tldextract``.
+# ---------------------------------------------------------------------------
+
+_TWO_PART_TLDS: frozenset[str] = frozenset(
+    {
+        # Israeli
+        "co.il",
+        "org.il",
+        "net.il",
+        "ac.il",
+        "gov.il",
+        "k12.il",
+        # British
+        "co.uk",
+        "org.uk",
+        "me.uk",
+        "net.uk",
+        "ltd.uk",
+        "plc.uk",
+        # Australian / New Zealand
+        "com.au",
+        "net.au",
+        "org.au",
+        "edu.au",
+        "co.nz",
+        "org.nz",
+        "net.nz",
+        # South African
+        "co.za",
+        "org.za",
+    }
+)
+
+
+def _etld1_from_host(host: str) -> str | None:
+    """Return a best-effort eTLD+1 from a bare *host* string.
+
+    Unlike a naïve last-two-labels approach, this function checks against a
+    curated :data:`_TWO_PART_TLDS` set so that ``www.ynet.co.il`` yields
+    ``ynet.co.il`` rather than the meaningless ``co.il``.
+
+    Always returns a non-empty string or ``None`` — never an empty string.
+    """
+    parts = [p for p in host.split(".") if p]
+    if len(parts) >= 3:
+        two_part = ".".join(parts[-2:])
+        if two_part in _TWO_PART_TLDS:
+            return ".".join(parts[-3:])
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return parts[0] if parts else None
+
 
 def _etld1(url_str: str) -> str | None:
-    """Return a best-effort eTLD+1 from *url_str* without external dependencies.
+    """Return a best-effort eTLD+1 from a full *url_str* without external dependencies.
 
-    Uses only stdlib ``urllib.parse``; always returns a non-empty string or
+    Delegates hostname extraction to stdlib :func:`urllib.parse.urlparse`, then
+    calls :func:`_etld1_from_host`.  Always returns a non-empty string or
     ``None`` — never an empty string.
     """
     host = urlparse(url_str).hostname or ""
-    parts = [p for p in host.split(".") if p]
-    if len(parts) >= 2:
-        return ".".join(parts[-2:])
-    return host or None
+    return _etld1_from_host(host)
 
 
 class PersistentCandidateView:
@@ -47,7 +105,10 @@ class PersistentCandidateView:
     ``candidate_id``
         → ``PersistentCandidate.candidate_id``
     ``domain``
-        → ``PersistentCandidate.domain``
+        → best-effort eTLD+1 derived from ``PersistentCandidate.domain`` (the
+        stored netloc) via :func:`_etld1_from_host`.  For example, a stored
+        domain of ``www.ynet.co.il`` yields ``ynet.co.il``.  Consistent with
+        :class:`RawArticleCandidateView`.
     ``title``
         → first element of ``PersistentCandidate.titles``, or ``None``
     ``snippet``
@@ -65,7 +126,10 @@ class PersistentCandidateView:
 
     @property
     def domain(self) -> str | None:
-        return self._c.domain
+        # _c.domain stores the raw netloc (e.g. "www.ynet.co.il").  Normalise
+        # to eTLD+1 so domain-reputation lookups use the same key regardless of
+        # whether a candidate or a raw article is being evaluated.
+        return _etld1_from_host(self._c.domain or "")
 
     @property
     def title(self) -> str | None:

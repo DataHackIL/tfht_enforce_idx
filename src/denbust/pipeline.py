@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 from uuid import uuid4
 
 from denbust.classifier.relevance import (
@@ -287,7 +287,7 @@ def _thin_pass_prefilter(
             "Prefilter thin pass: %d/%d candidates passed (mode=%s).",
             len(passed),
             len(candidates),
-            orchestrator._config.mode.value,
+            orchestrator.mode.value,
         )
     return passed, decisions
 
@@ -318,7 +318,10 @@ def _thick_pass_prefilter(
         url_key = canonicalize_news_url(str(article.url))
         candidate_id = candidate_id_map.get(url_key, str(article.url))
         view = RawArticleCandidateView(article, candidate_id=candidate_id)
-        decision = orchestrator.evaluate_thick(view, body=article.snippet)
+        # TODO: pass body=article.body once RawArticle gains a full-body field
+        # from the scraper.  Until then, body=None lets each stage fall back to
+        # candidate.snippet, which is the same text as the thin pass already had.
+        decision = orchestrator.evaluate_thick(view, body=None)
         decisions.append(decision)
         if decision.verdict != "drop":
             passed.append(article)
@@ -327,13 +330,22 @@ def _thick_pass_prefilter(
             "Prefilter thick pass: %d/%d articles passed (mode=%s).",
             len(passed),
             len(articles),
-            orchestrator._config.mode.value,
+            orchestrator.mode.value,
         )
     return passed, decisions
 
 
-def _build_prefilter_pass_dict(decisions: list[PrefilterDecision]) -> dict[str, object]:
-    """Build a per-pass summary dict from a list of :class:`PrefilterDecision` records.
+class _PrefilterPassSummary(TypedDict):
+    """Typed schema for one prefilter pass entry in ``prefilter_summary.json``."""
+
+    evaluated: int
+    passed: int
+    dropped: int
+    stage_stopped_counts: dict[str, int]
+
+
+def _build_prefilter_pass_dict(decisions: list[PrefilterDecision]) -> _PrefilterPassSummary:
+    """Build a typed per-pass summary from a list of :class:`PrefilterDecision` records.
 
     ``stage_stopped_counts`` counts decisions where ``stopped_at_stage``
     is a stage name (not ``"passed_all"``).  This captures both effective drops
@@ -346,12 +358,12 @@ def _build_prefilter_pass_dict(decisions: list[PrefilterDecision]) -> dict[str, 
         if d.stopped_at_stage != "passed_all":
             stage = str(d.stopped_at_stage)
             stage_stopped[stage] = stage_stopped.get(stage, 0) + 1
-    return {
-        "evaluated": evaluated,
-        "passed": evaluated - dropped,
-        "dropped": dropped,
-        "stage_stopped_counts": stage_stopped,
-    }
+    return _PrefilterPassSummary(
+        evaluated=evaluated,
+        passed=evaluated - dropped,
+        dropped=dropped,
+        stage_stopped_counts=stage_stopped,
+    )
 
 
 def _write_prefilter_run_summary(
@@ -366,7 +378,7 @@ def _write_prefilter_run_summary(
     and ``config.prefilter.enabled`` is ``False``).  Errors during write are
     caught and logged so they never abort the surrounding pipeline job.
     """
-    if not thin_decisions and not thick_decisions and not config.prefilter.enabled:
+    if not (config.prefilter.enabled or thin_decisions or thick_decisions):
         return
     try:
         prefilter_paths = resolve_prefilter_state_paths(
@@ -2837,6 +2849,7 @@ async def run_news_backfill_scrape_job(
                     batch_id=batch_id,
                 )
             )
+            _write_prefilter_run_summary(config, thin_decisions=thin_decisions, thick_decisions=[])
             return result
 
         out_of_window_article_count = len(scrape_batch.raw_articles)

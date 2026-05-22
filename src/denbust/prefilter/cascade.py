@@ -76,6 +76,15 @@ class CascadeOrchestrator:
         self._stage_d: StageDScorer | None = StageDScorer() if config.stages.d.enabled else None
 
     # ------------------------------------------------------------------
+    # Public properties
+    # ------------------------------------------------------------------
+
+    @property
+    def mode(self) -> PrefilterMode:
+        """The configured :class:`PrefilterMode` for this orchestrator."""
+        return self._config.mode
+
+    # ------------------------------------------------------------------
     # Public evaluation interface
     # ------------------------------------------------------------------
 
@@ -113,7 +122,7 @@ class CascadeOrchestrator:
 
         return self._conclude("thin", "pass", "passed_all", candidate, tuple(scores))
 
-    def evaluate_thick(self, candidate: CandidateView, body: str) -> PrefilterDecision:
+    def evaluate_thick(self, candidate: CandidateView, body: str | None) -> PrefilterDecision:
         """Run the thick (post-scrape) pass: Stages A through D.
 
         In OFF mode (or when ``enabled=False``) returns a pass decision
@@ -124,7 +133,11 @@ class CascadeOrchestrator:
         candidate:
             A :class:`CandidateView`-compatible object.
         body:
-            Full article body text (truncation handled per stage).
+            Full article body text (truncation handled per stage), or ``None``
+            when no full body is available.  All body-dependent stages (B, C,
+            D) fall back gracefully to ``candidate.snippet`` when *body* is
+            ``None`` or empty.  Pass ``None`` until :class:`~denbust.data_models.RawArticle`
+            gains a full-body field populated by the scraper.
 
         Note
         ----
