@@ -49,6 +49,13 @@
 pip install -e ".[dev]"
 ```
 
+- Install the optional prefilter extras (SetFit, sentence-transformers, torch,
+  faiss-cpu, mlx-lm) needed for Stage B SetFit and future Stage C / D:
+
+```bash
+pip install -e ".[dev,prefilter]"
+```
+
 - Install browser runtime before live Mako runs:
 
 ```bash
