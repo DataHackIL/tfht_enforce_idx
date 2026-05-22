@@ -155,7 +155,7 @@ class TestBakeAtomicOverwrite:
 
     def test_second_bake_overwrites(self, tmp_path: Path) -> None:
         bake_stage_d(tmp_path, prompt_template="v1: {title} {body}")
-        meta2, stage_dir = bake_stage_d(tmp_path, prompt_template="v2: {title} {body}")
+        _, stage_dir = bake_stage_d(tmp_path, prompt_template="v2: {title} {body}")
         written = (stage_dir / _PROMPT_FILE).read_text(encoding="utf-8")
         assert written == "v2: {title} {body}"
 

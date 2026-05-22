@@ -491,12 +491,9 @@ def evaluate_cmd(
 
     stage_d_dir = prefilter_paths.models_dir / _STAGE_D_SUBDIR
     if (stage_d_dir / _PROMPT_FILE).exists():
-        try:
-            scorer_d = StageDScorer(models_dir=prefilter_paths.models_dir)
-        except Exception:  # noqa: BLE001
-            scorer_d = None
+        scorer_d = StageDScorer(models_dir=prefilter_paths.models_dir)
 
-        if scorer_d is not None and scorer_d._model is not None:
+        if scorer_d.is_loaded:
             scored_p_d: list[float] = []
             scored_y_d: list[int] = []
             n_skipped_d = 0

@@ -24,6 +24,7 @@ from denbust.prefilter.stage_d import (
     _DEFAULT_CB_THRESHOLD,
     _DEFAULT_TIMEOUT_SECONDS,
     StageDScorer,
+    _get_token_id,
     bake_stage_d,
 )
 from tests.unit.prefilter._helpers import FakeCandidate, FakeMLXTokenizer
@@ -234,6 +235,41 @@ class TestStageDScorerLoaded:
 
 
 # ---------------------------------------------------------------------------
+# _get_token_id helper
+# ---------------------------------------------------------------------------
+
+
+class TestGetTokenId:
+    """Unit tests for the _get_token_id helper."""
+
+    def test_single_token_returns_id(self) -> None:
+        """Encoding 'כן' via FakeMLXTokenizer returns the expected single ID."""
+        tok = FakeMLXTokenizer()
+        assert _get_token_id(tok, "כן") == FakeMLXTokenizer.KEN_ID
+
+    def test_multi_token_returns_first_and_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """When a text tokenizes to multiple tokens the first is returned and a warning logged."""
+        tok = FakeMLXTokenizer()
+        # FakeMLXTokenizer.encode("some text") → [1, 2, 3, 4, 5]
+        with caplog.at_level(logging.WARNING, logger="denbust.prefilter.stage_d"):
+            result = _get_token_id(tok, "some text")
+        assert result == 1  # first of [1, 2, 3, 4, 5]
+        assert any("tokenizes to" in r.message for r in caplog.records)
+
+    def test_empty_encoding_returns_none_and_errors(self, caplog: pytest.LogCaptureFixture) -> None:
+        """When encoding produces an empty list, None is returned and an error logged."""
+
+        class _EmptyTokenizer:
+            def encode(self, _text: str, *, add_special_tokens: bool = True) -> list[int]:  # noqa: ARG002
+                return []
+
+        with caplog.at_level(logging.ERROR, logger="denbust.prefilter.stage_d"):
+            result = _get_token_id(_EmptyTokenizer(), "כן")
+        assert result is None
+        assert any("empty token list" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
 # Timeout and circuit breaker
 # ---------------------------------------------------------------------------
 
@@ -254,12 +290,13 @@ class TestStageDCircuitBreaker:
     def test_single_timeout_returns_none(self, stage_d_models_dir: Path) -> None:
         """A single timeout must return None but NOT open the circuit."""
         scorer = self._make_scorer(stage_d_models_dir, cb_threshold=3)
-        # _mlx_score is NOT patched — the real function will block until the
-        # thread pool timeout fires.  We patch it to sleep so the timeout fires.
+        # Patch _mlx_score to sleep longer than the scorer's 1 ms timeout so the
+        # timeout fires.  0.1 s is ample; a real 10 s sleep is not needed here
+        # because executor.shutdown(wait=False) returns immediately on timeout.
         import time
 
         def _slow_score(*_args: Any, **_kwargs: Any) -> float:
-            time.sleep(10)
+            time.sleep(0.1)
             return 0.5
 
         with patch(_PATCH_MLX_SCORE, _slow_score):
@@ -275,7 +312,7 @@ class TestStageDCircuitBreaker:
         import time
 
         def _slow_score(*_args: Any, **_kwargs: Any) -> float:
-            time.sleep(10)
+            time.sleep(0.1)
             return 0.5
 
         with patch(_PATCH_MLX_SCORE, _slow_score):

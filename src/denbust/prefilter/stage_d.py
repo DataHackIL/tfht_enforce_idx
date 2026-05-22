@@ -24,16 +24,22 @@ Baking entry point
 Prompt template
 ---------------
 The default prompt is written at bake time.  It must contain ``{title}`` and
-``{body}`` placeholders which are substituted at inference time.  The prompt
-is Hebrew and designed for :data:`_DEFAULT_BASE_MODEL_D`
-(``dicta-il/dictalm2.0-instruct``); the fallback is
-:data:`_FALLBACK_BASE_MODEL_D` (``Qwen/Qwen2.5-7B-Instruct``).
+``{body}`` placeholders which are substituted at inference time using
+:meth:`str.replace`, not :meth:`str.format`, so article text that contains
+literal ``{`` or ``}`` characters never raises ``KeyError``.  The prompt is
+Hebrew and designed for :data:`_DEFAULT_BASE_MODEL_D`
+(``dicta-il/dictalm2.0-instruct``).
 
 Timeout and circuit breaker
 ---------------------------
-Each inference call is wrapped in a :class:`concurrent.futures.ThreadPoolExecutor`
-with a per-candidate timeout of :data:`_DEFAULT_TIMEOUT_SECONDS` seconds.  If
-inference times out, ``p_negative`` for that candidate is ``None`` (pass-through).
+Each inference call creates a :class:`concurrent.futures.ThreadPoolExecutor`
+with a per-candidate timeout of :data:`_DEFAULT_TIMEOUT_SECONDS` seconds.
+On timeout, ``executor.shutdown(wait=False)`` is called so ``evaluate()``
+returns immediately without waiting for the background thread to finish.
+Do **not** use the ``with`` form of ``ThreadPoolExecutor`` here: its
+``__exit__`` calls ``shutdown(wait=True)``, which would block until inference
+completes — defeating the timeout entirely.
+
 After :data:`_DEFAULT_CB_THRESHOLD` consecutive timeouts the circuit breaker
 trips: the scorer skips inference entirely for all subsequent candidates and
 returns ``None`` until the object is recreated.
@@ -78,11 +84,12 @@ _PROMPT_FILE = "prompt.txt"
 _META_FILE = "meta.json"
 
 _DEFAULT_BASE_MODEL_D = "dicta-il/dictalm2.0-instruct"
-_FALLBACK_BASE_MODEL_D = "Qwen/Qwen2.5-7B-Instruct"
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 _DEFAULT_CB_THRESHOLD = 3  # consecutive timeouts before opening the circuit
 
 # Default Hebrew prompt template.  Uses {title} and {body} as placeholders.
+# Substitution is done with str.replace(), not str.format(), so article text
+# that contains literal { or } characters never raises KeyError.
 _DEFAULT_PROMPT_TEMPLATE = """\
 [הוראה]
 אתה עוזר לסווג כתבות עיתוניות. ענה בדיוק "כן" או "לא" בלבד.
@@ -181,18 +188,32 @@ def _mlx_score(model: Any, tokenizer: Any, prompt: str, ken_id: int, lo_id: int)
     return exp_lo / (exp_ken + exp_lo)
 
 
-def _get_token_id(tokenizer: Any, text: str) -> int:
-    """Return the single token ID for *text*.
+def _get_token_id(tokenizer: Any, text: str) -> int | None:
+    """Return the single token ID for *text*, or ``None`` if encoding fails.
+
+    Returns ``None`` (rather than a fallback) when *text* tokenizes to an
+    empty sequence — the caller must treat ``None`` as a fatal load error so
+    the scorer disables itself instead of querying a garbage token index.
 
     Logs a warning and returns the first token when *text* tokenizes to
-    multiple tokens (best-effort fallback; should not happen for short Hebrew
-    words with a well-configured tokenizer).
+    multiple tokens (best-effort; should not happen for short Hebrew words
+    with a well-configured tokenizer).  The caller continues with the first
+    token in that case rather than disabling the scorer entirely.
     """
     ids: list[int] = tokenizer.encode(text, add_special_tokens=False)
-    if len(ids) == 1:
-        return ids[0]
-    logger.warning("Stage D: '%s' tokenizes to %d tokens; using first token only.", text, len(ids))
-    return ids[0] if ids else -1
+    if not ids:
+        logger.error(
+            "Stage D: '%s' encodes to an empty token list; cannot determine token ID.", text
+        )
+        return None
+    if len(ids) > 1:
+        logger.warning(
+            "Stage D: '%s' tokenizes to %d tokens; using first token only "
+            "(expected a single token for a short Hebrew word).",
+            text,
+            len(ids),
+        )
+    return ids[0]
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +227,9 @@ class StageDScorer:
     Returns ``None`` for the thin pass (this stage is thick-pass only), when
     no baked artifacts exist, when ``mlx_lm`` is not installed, when a
     per-candidate timeout fires, or when the circuit breaker is open.
+
+    Use :attr:`is_loaded` to check whether artifacts and the model were
+    successfully loaded before calling :meth:`evaluate`.
 
     Parameters
     ----------
@@ -245,8 +269,8 @@ class StageDScorer:
         self._prompt_template: str = ""
         self._model: Any = None
         self._tokenizer: Any = None
-        self._ken_id: int = -1
-        self._lo_id: int = -1
+        self._ken_id: int | None = None
+        self._lo_id: int | None = None
         self.model_version: str = ""
         self.base_model_id: str = ""
         # Circuit-breaker state (mutable — not thread-safe, but cascade is single-threaded).
@@ -304,23 +328,48 @@ class StageDScorer:
             _loaded: Any = mlx_load(model_id)
             self._model = _loaded[0]
             self._tokenizer = _loaded[1]
+
+            # Resolve the yes/no token IDs.  _get_token_id returns None when
+            # encoding fails — treat that as a fatal load error so the scorer
+            # returns None for every candidate rather than silently querying a
+            # garbage token index (e.g. -1 via Python's negative-index aliasing).
             self._ken_id = _get_token_id(self._tokenizer, "כן")
             self._lo_id = _get_token_id(self._tokenizer, "לא")
+            if self._ken_id is None or self._lo_id is None:
+                raise ValueError(
+                    f"Could not determine token IDs for 'כן'/'לא' "
+                    f"with tokenizer from '{model_id}'; Stage D disabled."
+                )
 
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                "Stage D: artifacts at %s failed to load: %s — "
-                "run `denbust prefilter retrain --stage d` to rebuild.",
+                "Stage D: failed to load model '%s' from %s: %s — "
+                "check that the model is accessible (HuggingFace Hub or local path) "
+                "and that mlx_lm is installed correctly.",
+                self.base_model_id or _DEFAULT_BASE_MODEL_D,
                 stage_dir,
                 exc,
             )
             self._model = None
             self._tokenizer = None
             self._prompt_template = ""
+            self._ken_id = None
+            self._lo_id = None
 
     # ------------------------------------------------------------------
-    # Evaluation
+    # Public interface
     # ------------------------------------------------------------------
+
+    @property
+    def is_loaded(self) -> bool:
+        """``True`` when model, tokenizer, prompt, and token IDs are all ready."""
+        return (
+            self._model is not None
+            and self._tokenizer is not None
+            and bool(self._prompt_template)
+            and self._ken_id is not None
+            and self._lo_id is not None
+        )
 
     def evaluate(
         self,
@@ -347,7 +396,16 @@ class StageDScorer:
         if pass_kind == "thin":
             return None  # Stage D is thick-pass only
 
-        if self._model is None or self._tokenizer is None or not self._prompt_template:
+        # Extract to locals: narrows Optional types for mypy and avoids repeated attr lookups.
+        ken_id = self._ken_id
+        lo_id = self._lo_id
+        if (
+            self._model is None
+            or self._tokenizer is None
+            or not self._prompt_template
+            or ken_id is None
+            or lo_id is None
+        ):
             return None
 
         if self._circuit_open:
@@ -359,37 +417,45 @@ class StageDScorer:
 
         title = (candidate.title or "").strip()
         content = (body or candidate.snippet or "").strip()
-        prompt = self._prompt_template.format(title=title, body=content)
+        # Use str.replace rather than str.format so that article text containing
+        # literal { or } characters (e.g. JSON snippets) never raises KeyError.
+        prompt = self._prompt_template.replace("{title}", title).replace("{body}", content)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                _mlx_score,
-                self._model,
-                self._tokenizer,
-                prompt,
-                self._ken_id,
-                self._lo_id,
+        # Timeout implementation note: do NOT use `with ThreadPoolExecutor() as executor:`
+        # here.  The context manager calls shutdown(wait=True) on __exit__, which blocks
+        # until the background thread finishes — defeating the timeout entirely.  Instead,
+        # create the executor explicitly and call shutdown(wait=False) on both paths so
+        # evaluate() returns immediately when the timeout fires.
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            _mlx_score,
+            self._model,
+            self._tokenizer,
+            prompt,
+            ken_id,
+            lo_id,
+        )
+        try:
+            p_negative = future.result(timeout=self._timeout_seconds)
+            self._consecutive_timeouts = 0
+            executor.shutdown(wait=False)
+        except concurrent.futures.TimeoutError:
+            executor.shutdown(wait=False)  # abandon thread; don't block
+            self._consecutive_timeouts += 1
+            logger.warning(
+                "Stage D: inference timed out after %.1fs for candidate %s (consecutive=%d/%d).",
+                self._timeout_seconds,
+                candidate.candidate_id,
+                self._consecutive_timeouts,
+                self._cb_threshold,
             )
-            try:
-                p_negative = future.result(timeout=self._timeout_seconds)
-                self._consecutive_timeouts = 0
-            except concurrent.futures.TimeoutError:
-                self._consecutive_timeouts += 1
-                logger.warning(
-                    "Stage D: inference timed out after %.1fs for candidate %s "
-                    "(consecutive=%d/%d).",
-                    self._timeout_seconds,
-                    candidate.candidate_id,
+            if self._consecutive_timeouts >= self._cb_threshold:
+                self._circuit_open = True
+                logger.error(
+                    "Stage D: circuit breaker opened after %d consecutive timeouts.",
                     self._consecutive_timeouts,
-                    self._cb_threshold,
                 )
-                if self._consecutive_timeouts >= self._cb_threshold:
-                    self._circuit_open = True
-                    logger.error(
-                        "Stage D: circuit breaker opened after %d consecutive timeouts.",
-                        self._consecutive_timeouts,
-                    )
-                return None
+            return None
 
         # Clamp to [0, 1] for safety.
         p_negative = max(0.0, min(1.0, p_negative))
