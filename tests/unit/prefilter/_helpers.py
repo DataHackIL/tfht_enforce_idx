@@ -100,6 +100,52 @@ class FakeCandidate:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Minimal SentenceTransformer stub for Stage C tests
+#
+# Defined here so both test_stage_c_train.py and test_stage_c_predict.py
+# share one implementation.  numpy and faiss are imported lazily so this
+# file stays importable without the prefilter extras.
+# ---------------------------------------------------------------------------
+
+
+class FakeSentenceTransformer:
+    """Minimal SentenceTransformer stub for Stage C tests.
+
+    ``encode`` returns deterministic, text-dependent float32 embeddings of
+    dimension *dim*.  When *normalize_embeddings=True* the rows are L2-
+    normalised before returning (matching the real SentenceTransformer API).
+    """
+
+    def __init__(self, dim: int = 8) -> None:
+        self._dim = dim
+
+    def encode(
+        self,
+        texts: list[str],
+        *,
+        normalize_embeddings: bool = False,
+        show_progress_bar: bool = False,  # noqa: ARG002
+        batch_size: int = 32,  # noqa: ARG002
+    ) -> Any:
+        import hashlib
+
+        import numpy as np
+
+        result = np.zeros((len(texts), self._dim), dtype=np.float32)
+        for i, text in enumerate(texts):
+            raw = hashlib.md5(text.encode(), usedforsecurity=False).digest()  # noqa: S324
+            for j in range(self._dim):
+                result[i, j] = (raw[j % len(raw)] / 127.5) - 1.0  # in (−1, 1)
+
+        if normalize_embeddings:
+            norms = np.linalg.norm(result, axis=1, keepdims=True)
+            norms = np.maximum(norms, 1e-9)
+            result = result / norms
+
+        return result
+
+
 class FakeSetFitModel:
     """Minimal SetFit model stub for testing: no network, no GPU.
 

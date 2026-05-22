@@ -92,7 +92,7 @@ def summary(
 def retrain_cmd(
     stage: Annotated[
         str,
-        typer.Option("--stage", "-s", help="Stage to retrain: a, b"),
+        typer.Option("--stage", "-s", help="Stage to retrain: a, b, or c"),
     ],
     config: Annotated[
         Path | None,
@@ -122,6 +122,10 @@ def retrain_cmd(
         setfit
             SetFit on ``intfloat/multilingual-e5-large``.  Requires the
             ``prefilter`` extras: ``pip install -e '.[dev,prefilter]'``.
+
+    c   Embedding similarity (centroid-cosine + FAISS kNN).  Requires the
+        ``prefilter`` extras: ``pip install -e '.[dev,prefilter]'``.
+        Thick-pass only — returns None on thin-pass candidates.
     """
     if config is None:
         typer.echo(
@@ -132,9 +136,9 @@ def retrain_cmd(
         raise typer.Exit(1)
 
     stage = stage.lower().strip()
-    if stage not in {"a", "b"}:
+    if stage not in {"a", "b", "c"}:
         typer.echo(
-            f"Error: --stage {stage!r} is not supported.  Choose 'a' or 'b'.",
+            f"Error: --stage {stage!r} is not supported.  Choose 'a', 'b', or 'c'.",
             err=True,
         )
         raise typer.Exit(1)
@@ -177,32 +181,48 @@ def retrain_cmd(
         typer.echo(f"  domain_reputation -> {dom_path}")
         typer.echo("Stage A retrain complete.")
 
-    elif model == "naive_bayes":
-        from denbust.prefilter.stage_b import train_naive_bayes
+    elif stage == "b":
+        if model == "naive_bayes":
+            from denbust.prefilter.stage_b import train_naive_bayes
 
-        typer.echo(f"Retraining Stage B (naive_bayes) from {prefilter_paths.labels_path} ...")
-        meta, stage_dir = train_naive_bayes(
+            typer.echo(f"Retraining Stage B (naive_bayes) from {prefilter_paths.labels_path} ...")
+            meta, stage_dir = train_naive_bayes(
+                labels_path=prefilter_paths.labels_path,
+                out_dir=prefilter_paths.models_dir,
+            )
+            typer.echo(f"  thin_model        -> {stage_dir / 'thin_model.joblib'}")
+            typer.echo(f"  thick_model       -> {stage_dir / 'thick_model.joblib'}")
+            typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
+            typer.echo(f"Stage B retrain complete.  model_version={meta.model_version}")
+
+        else:  # setfit
+            from denbust.prefilter.stage_b import _DEFAULT_SETFIT_BASE_MODEL, train_setfit
+
+            typer.echo(f"Retraining Stage B (setfit) from {prefilter_paths.labels_path} ...")
+            typer.echo(f"  base model: {_DEFAULT_SETFIT_BASE_MODEL}  (download may take a while)")
+            meta, stage_dir = train_setfit(
+                labels_path=prefilter_paths.labels_path,
+                out_dir=prefilter_paths.models_dir,
+            )
+            typer.echo(f"  thin_model/       -> {stage_dir / 'thin_model'}")
+            typer.echo(f"  thick_model/      -> {stage_dir / 'thick_model'}")
+            typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
+            typer.echo(f"Stage B SetFit retrain complete.  model_version={meta.model_version}")
+
+    else:  # stage == "c"
+        from denbust.prefilter.stage_c import _DEFAULT_BASE_MODEL, train_stage_c
+
+        typer.echo(f"Retraining Stage C from {prefilter_paths.labels_path} ...")
+        typer.echo(f"  base model: {_DEFAULT_BASE_MODEL}  (download may take a while)")
+        c_meta, stage_dir = train_stage_c(
             labels_path=prefilter_paths.labels_path,
             out_dir=prefilter_paths.models_dir,
         )
-        typer.echo(f"  thin_model        -> {stage_dir / 'thin_model.joblib'}")
-        typer.echo(f"  thick_model       -> {stage_dir / 'thick_model.joblib'}")
+        typer.echo(f"  centroid.npy      -> {stage_dir / 'centroid.npy'}")
+        typer.echo(f"  index.faiss       -> {stage_dir / 'index.faiss'}")
+        typer.echo(f"  calibration.json  -> {stage_dir / 'calibration.json'}")
         typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
-        typer.echo(f"Stage B retrain complete.  model_version={meta.model_version}")
-
-    else:  # setfit
-        from denbust.prefilter.stage_b import _DEFAULT_SETFIT_BASE_MODEL, train_setfit
-
-        typer.echo(f"Retraining Stage B (setfit) from {prefilter_paths.labels_path} ...")
-        typer.echo(f"  base model: {_DEFAULT_SETFIT_BASE_MODEL}  (download may take a while)")
-        meta, stage_dir = train_setfit(
-            labels_path=prefilter_paths.labels_path,
-            out_dir=prefilter_paths.models_dir,
-        )
-        typer.echo(f"  thin_model/       -> {stage_dir / 'thin_model'}")
-        typer.echo(f"  thick_model/      -> {stage_dir / 'thick_model'}")
-        typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
-        typer.echo(f"Stage B SetFit retrain complete.  model_version={meta.model_version}")
+        typer.echo(f"Stage C retrain complete.  model_version={c_meta.model_version}")
 
 
 @prefilter_app.command("evaluate")
@@ -237,19 +257,26 @@ def evaluate_cmd(
         typer.Option("--report-path", "-r", help="Write a markdown report to this path."),
     ] = None,
 ) -> None:
-    """Evaluate Stage B model variants on a labeled split.
+    """Evaluate prefilter stage models on a labeled split.
 
-    Loads each model from the configured models directory, scores every
-    candidate in the chosen split using the thin pass (title + snippet), and
-    prints precision / recall / Brier score for each at the threshold that
-    achieves ``--recall-floor`` on that same split.  Unscored candidates
-    (scorer returned ``None``) are excluded from metric calculations.
+    Stage B (thin pass, title + snippet): loads each model kind listed in
+    ``--compare-b`` and prints precision / recall / Brier score at the
+    threshold that achieves ``--recall-floor``.
+
+    Stage C (thick pass, title + body/snippet): evaluated automatically when
+    trained artifacts exist under the configured models directory.  Uses the
+    ``article_body`` field from the labeled dataset as the thick-pass body,
+    falling back to ``snippet`` when absent.
+
+    Unscored candidates (scorer returned ``None``) are excluded from metric
+    calculations but are treated as pass-through in the drop-rate denominator.
 
     Models must be trained before running this command:
 
     \\b
         denbust prefilter retrain --stage b --model naive_bayes --config CFG
         denbust prefilter retrain --stage b --model setfit --config CFG
+        denbust prefilter retrain --stage c --config CFG
         denbust prefilter evaluate --compare-b naive_bayes,setfit --config CFG
     """
     if config is None:
@@ -377,8 +404,67 @@ def evaluate_cmd(
         )
         typer.echo("")
 
-    if report_path is not None and results:
-        _write_evaluate_report(report_path, split, recall_floor, n_pos, n_neg, results)
+    # Stage C evaluation (thick pass) — automatic when artifacts exist.
+    stage_c_result: dict[str, Any] | None = None
+    from denbust.prefilter.stage_c import _CENTROID_FILE, _STAGE_C_SUBDIR, StageCScorer
+
+    stage_c_dir = prefilter_paths.models_dir / _STAGE_C_SUBDIR
+    if (stage_c_dir / _CENTROID_FILE).exists():
+        scorer_c = StageCScorer(models_dir=prefilter_paths.models_dir)
+        scored_p_c: list[float] = []
+        scored_y_c: list[int] = []
+        n_skipped_c = 0
+        for row, y in zip(eval_rows, y_true):
+            score_c = scorer_c.evaluate(row, "thick", body=row.article_body)
+            if score_c is None:
+                n_skipped_c += 1
+            else:
+                scored_p_c.append(score_c.p_negative)
+                scored_y_c.append(y)
+
+        if scored_p_c:
+            metrics_c = _compute_stage_b_metrics(
+                scored_p=scored_p_c,
+                scored_y=scored_y_c,
+                n_pos_total=n_pos,
+                n_total=len(y_true),
+                recall_floor=recall_floor,
+            )
+            version_c = scorer_c.model_version or "(unknown)"
+            typer.echo(f"  stage_c (thick)  [version: {version_c}]")
+            typer.echo(f"    threshold      : {metrics_c['threshold']:.4f}")
+            typer.echo(
+                f"    recall         : {metrics_c['recall']:.4f}  (target ≥ {recall_floor:.4f})"
+            )
+            typer.echo(
+                f"    drop_precision : {metrics_c['drop_precision']:.4f}"
+                f"  (true_neg / total_dropped)"
+            )
+            typer.echo(f"    drop_rate      : {metrics_c['drop_rate']:.4f}")
+            typer.echo(f"    brier_score    : {metrics_c['brier_score']:.4f}")
+            if n_skipped_c:
+                typer.echo(
+                    f"    no-score rows  : {n_skipped_c} (excluded from metrics; "
+                    "treated as pass-through in production)"
+                )
+            typer.echo("")
+            stage_c_result = {"kind": "stage_c", "version": version_c, **metrics_c}
+        else:
+            typer.echo(
+                "  stage_c: scorer returned None for all candidates "
+                "(prefilter extras missing or artifacts corrupt) — skipping.\n"
+            )
+
+    if report_path is not None and (results or stage_c_result):
+        _write_evaluate_report(
+            report_path,
+            split,
+            recall_floor,
+            n_pos,
+            n_neg,
+            results,
+            stage_c_result=stage_c_result,
+        )
         typer.echo(f"Report written to {report_path}")
 
 
@@ -607,24 +693,44 @@ def _write_evaluate_report(
     n_pos: int,
     n_neg: int,
     results: list[dict[str, Any]],
+    stage_c_result: dict[str, Any] | None = None,
 ) -> None:
-    """Write a markdown A/B evaluation report to *path*."""
+    """Write a markdown prefilter evaluation report to *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# Stage B A/B Evaluation Report",
+        "# Prefilter Evaluation Report",
         "",
         f"**Split:** {split}  |  **Recall floor:** {recall_floor:.1%}  "
         f"|  **Rows:** {n_pos + n_neg} (pos={n_pos}, neg={n_neg})",
         "",
-        "| Model | Version | Threshold | Recall | Drop Precision | Drop Rate | Brier |",
-        "|-------|---------|-----------|--------|----------------|-----------|-------|",
     ]
-    for r in results:
-        lines.append(
-            f"| {r['kind']} | {r['version']} "
+    if results:
+        lines += [
+            "## Stage B (thin pass)",
+            "",
+            "| Model | Version | Threshold | Recall | Drop Precision | Drop Rate | Brier |",
+            "|-------|---------|-----------|--------|----------------|-----------|-------|",
+        ]
+        for r in results:
+            lines.append(
+                f"| {r['kind']} | {r['version']} "
+                f"| {r['threshold']:.4f} | {r['recall']:.4f} "
+                f"| {r['drop_precision']:.4f} | {r['drop_rate']:.4f} "
+                f"| {r['brier_score']:.4f} |"
+            )
+        lines.append("")
+    if stage_c_result:
+        r = stage_c_result
+        lines += [
+            "## Stage C (thick pass)",
+            "",
+            "| Version | Threshold | Recall | Drop Precision | Drop Rate | Brier |",
+            "|---------|-----------|--------|----------------|-----------|-------|",
+            f"| {r['version']} "
             f"| {r['threshold']:.4f} | {r['recall']:.4f} "
             f"| {r['drop_precision']:.4f} | {r['drop_rate']:.4f} "
-            f"| {r['brier_score']:.4f} |"
-        )
-    lines += ["", ""]
+            f"| {r['brier_score']:.4f} |",
+            "",
+        ]
+    lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
