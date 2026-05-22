@@ -122,6 +122,10 @@ def retrain_cmd(
         setfit
             SetFit on ``intfloat/multilingual-e5-large``.  Requires the
             ``prefilter`` extras: ``pip install -e '.[dev,prefilter]'``.
+
+    c   Embedding similarity (centroid-cosine + FAISS kNN).  Requires the
+        ``prefilter`` extras: ``pip install -e '.[dev,prefilter]'``.
+        Thick-pass only — returns None on thin-pass candidates.
     """
     if config is None:
         typer.echo(
@@ -132,9 +136,9 @@ def retrain_cmd(
         raise typer.Exit(1)
 
     stage = stage.lower().strip()
-    if stage not in {"a", "b"}:
+    if stage not in {"a", "b", "c"}:
         typer.echo(
-            f"Error: --stage {stage!r} is not supported.  Choose 'a' or 'b'.",
+            f"Error: --stage {stage!r} is not supported.  Choose 'a', 'b', or 'c'.",
             err=True,
         )
         raise typer.Exit(1)
@@ -189,6 +193,21 @@ def retrain_cmd(
         typer.echo(f"  thick_model       -> {stage_dir / 'thick_model.joblib'}")
         typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
         typer.echo(f"Stage B retrain complete.  model_version={meta.model_version}")
+
+    elif stage == "c":
+        from denbust.prefilter.stage_c import _DEFAULT_BASE_MODEL, train_stage_c
+
+        typer.echo(f"Retraining Stage C from {prefilter_paths.labels_path} ...")
+        typer.echo(f"  base model: {_DEFAULT_BASE_MODEL}  (download may take a while)")
+        c_meta, stage_dir = train_stage_c(
+            labels_path=prefilter_paths.labels_path,
+            out_dir=prefilter_paths.models_dir,
+        )
+        typer.echo(f"  centroid.npy      -> {stage_dir / 'centroid.npy'}")
+        typer.echo(f"  index.faiss       -> {stage_dir / 'index.faiss'}")
+        typer.echo(f"  calibration.json  -> {stage_dir / 'calibration.json'}")
+        typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
+        typer.echo(f"Stage C retrain complete.  model_version={c_meta.model_version}")
 
     else:  # setfit
         from denbust.prefilter.stage_b import _DEFAULT_SETFIT_BASE_MODEL, train_setfit

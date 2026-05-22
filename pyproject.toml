@@ -90,6 +90,7 @@ known-first-party = ["denbust"]
 [tool.ruff.lint.per-file-ignores]
 # importorskip must precede application imports; E402 is expected here.
 "tests/unit/prefilter/test_stage_b_setfit_*.py" = ["E402"]
+"tests/unit/prefilter/test_stage_c_*.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -119,6 +120,7 @@ module = [
     "joblib.*",
     "kaggle.*",
     "mlx_lm.*",
+    "numpy.*",
     "pyarrow.*",
     "playwright.*",
     "sentence_transformers.*",
