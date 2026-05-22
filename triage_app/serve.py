@@ -38,6 +38,8 @@ DEFAULT_PORT = 7070
 _candidates: dict[str, dict[str, Any]] = {}
 _batch_ids: list[str] = []
 _origin: str = f"http://localhost:{DEFAULT_PORT}"
+# Stage B p_negative scores keyed by candidate_id (lower = more likely positive)
+_stage_b_scores: dict[str, float] = {}
 
 
 def _load_candidates() -> None:
@@ -58,6 +60,76 @@ def _load_candidates() -> None:
         if bid and bid not in seen:
             seen.add(bid)
             _batch_ids.append(bid)
+
+
+def _load_stage_b_scores() -> None:
+    """Score every candidate with Stage B NaiveBayes and cache p_negative.
+
+    Lower score = more likely to be a relevant (positive) candidate.
+    Falls back silently if the model artifacts or config are missing.
+    """
+    _cfg_candidates = [
+        REPO_ROOT / "agents/news/local_search_brave_exa.yaml",
+        REPO_ROOT / "agents/news/local.yaml",
+        REPO_ROOT / "agents/news/local_search.yaml",
+    ]
+    cfg_path = next((p for p in _cfg_candidates if p.exists()), None)
+    if cfg_path is None:
+        print("  Stage B ranking skipped: no YAML config found under agents/news/")
+        return
+
+    try:
+        from denbust.config import load_config as _load_config
+        from denbust.prefilter.adapters import _etld1_from_host as _etld1
+        from denbust.prefilter.stage_b import StageBScorer as _StageBScorer
+        from denbust.prefilter.state_paths import resolve_prefilter_state_paths as _resolve
+
+        loaded = _load_config(cfg_path)
+        pp = _resolve(state_root=loaded.store.state_root, dataset_name=loaded.dataset_name)
+        model_dir = pp.models_dir / "stage_b"
+        if not model_dir.exists():
+            print(
+                "  Stage B ranking skipped: no trained model (run: denbust prefilter retrain --stage b)"
+            )
+            return
+
+        scorer = _StageBScorer(models_dir=pp.models_dir, threshold=0.9962)
+
+        class _View:
+            __slots__ = ("_c",)
+
+            def __init__(self, c: dict[str, Any]) -> None:
+                self._c = c
+
+            @property
+            def candidate_id(self) -> str:
+                return self._c["candidate_id"]
+
+            @property
+            def domain(self) -> str | None:
+                return _etld1(self._c.get("domain") or "")
+
+            @property
+            def title(self) -> str | None:
+                t = self._c.get("titles") or []
+                return t[0] if t else None
+
+            @property
+            def snippet(self) -> str | None:
+                s = self._c.get("snippets") or []
+                return s[0] if s else None
+
+            @property
+            def url(self) -> str | None:
+                return str(self._c.get("canonical_url") or self._c.get("current_url") or "")
+
+        for cid, c in _candidates.items():
+            score = scorer.evaluate(_View(c), "thin")
+            _stage_b_scores[cid] = score.p_negative if score is not None else 1.0
+
+        print(f"  Stage B scored {len(_stage_b_scores)} candidates")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Stage B ranking failed (non-fatal): {exc}", file=sys.stderr)
 
 
 def _load_decisions() -> None:
@@ -138,6 +210,7 @@ def _serialize(c: dict[str, Any]) -> dict[str, Any]:
         "candidate_status": c.get("candidate_status", "new"),
         "retry_priority": c.get("retry_priority", 0),
         "triage": c.get("_triage", ""),
+        "stage_b_score": _stage_b_scores.get(c["candidate_id"]),
     }
 
 
@@ -147,6 +220,7 @@ def _query_candidates(
     q: str,
     page: int,
     limit: int,
+    sort: str = "default",
 ) -> dict[str, Any]:
     items = list(_candidates.values())
 
@@ -170,10 +244,14 @@ def _query_candidates(
             or any(ql in s.lower() for s in (c.get("snippets") or []))
         ]
 
-    def _sort_key(c: dict[str, Any]) -> tuple[int, str]:
+    def _sort_key(c: dict[str, Any]) -> tuple[int, float, str]:
         t = c.get("_triage", "")
-        order = 0 if t == "prioritized" else 1 if t == "" else 2
-        return (order, str(c.get("first_seen_at", "")))
+        triage_order = 0 if t == "prioritized" else 1 if t == "" else 2
+        if sort == "stage_b_asc":
+            sb = _stage_b_scores.get(c["candidate_id"], 1.0)
+            return (triage_order, sb, str(c.get("first_seen_at", "")))
+        # default: triage group, then chronological (oldest first)
+        return (triage_order, 0.0, str(c.get("first_seen_at", "")))
 
     items.sort(key=_sort_key)
 
@@ -226,6 +304,7 @@ class Handler(BaseHTTPRequestHandler):
                     q=qs.get("q", [""])[0],
                     page=page,
                     limit=limit,
+                    sort=qs.get("sort", ["default"])[0],
                 )
             )
         elif parsed.path == "/api/stats":
@@ -283,6 +362,7 @@ def main() -> None:
 
     print(f"Loading candidates from {CANDIDATES_FILE} …")
     _load_candidates()
+    _load_stage_b_scores()
     _load_decisions()
     s = _stats()
     print(

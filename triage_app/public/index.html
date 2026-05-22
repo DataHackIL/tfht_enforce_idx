@@ -92,6 +92,13 @@
     #toast.show { opacity: 1; }
 
     #empty { padding: 48px; text-align: center; color: var(--muted); }
+
+    /* Stage B score chip */
+    .sb-score { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; padding: 2px 6px; border-radius: 4px; display: inline-block; }
+    .sb-score.tier1 { background: rgba(76,175,130,.25); color: var(--green); }   /* < 0.95 */
+    .sb-score.tier2 { background: rgba(224,154,76,.18); color: var(--orange); }  /* 0.95–0.99 */
+    .sb-score.tier3 { background: rgba(108,117,240,.12); color: var(--accent); } /* 0.99–0.9957 */
+    .sb-score.tier4 { background: transparent; color: var(--muted); }            /* ≥ 0.9957 */
   </style>
 </head>
 <body>
@@ -117,6 +124,10 @@
     <button class="tab" data-status="excluded">הוחרגו</button>
   </div>
   <div class="spacer"></div>
+  <select id="sort-select" title="מיון">
+    <option value="default">מיון: ברירת מחדל</option>
+    <option value="stage_b_asc">מיון: Stage B ↑ (סביר ביותר להיות רלוונטי)</option>
+  </select>
   <input type="text" id="search" placeholder="חפש…" dir="rtl">
   <span id="result-count"></span>
 </div>
@@ -129,6 +140,7 @@
         <th>כותרת</th>
         <th>תקציר</th>
         <th>תאריך</th>
+        <th title="Stage B p_negative — נמוך יותר = סביר יותר להיות רלוונטי">B↑</th>
         <th style="text-align:left">סטטוס / פעולה</th>
       </tr>
     </thead>

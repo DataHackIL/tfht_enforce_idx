@@ -13,6 +13,7 @@ from denbust.data_models import RawArticle
 from denbust.discovery.base import SourceCandidateProducer, SourceDiscoveryContext
 from denbust.discovery.candidate_filters import (
     candidate_domain,
+    classify_no_hebrew_content,
     classify_search_noise,
     classify_title_noise,
     normalize_domain,
@@ -168,7 +169,12 @@ def merge_discovered_candidate(
     is_social = _is_social_candidate(discovered)
     search_noise_classification = classify_search_noise(discovered)
     title_noise_classification = classify_title_noise(discovered)
-    is_any_noise = search_noise_classification is not None or title_noise_classification is not None
+    no_hebrew_classification = classify_no_hebrew_content(discovered)
+    is_any_noise = (
+        search_noise_classification is not None
+        or title_noise_classification is not None
+        or no_hebrew_classification is not None
+    )
     candidate_status = existing.candidate_status if existing else CandidateStatus.NEW
     if (is_social or is_any_noise) and existing is None:
         candidate_status = CandidateStatus.UNSUPPORTED_SOURCE
@@ -193,6 +199,9 @@ def merge_discovered_candidate(
             existing_metadata["unsupported_source_keyword"] = (
                 title_noise_classification.matched_keyword
             )
+        elif no_hebrew_classification is not None:
+            existing_metadata["unsupported_source_filter"] = "no_hebrew_content"
+            existing_metadata["unsupported_source_reason"] = no_hebrew_classification.reason.value
 
     return PersistentCandidate(
         candidate_id=existing.candidate_id
@@ -295,6 +304,15 @@ def persist_discovered_candidates(
                         **discovered.metadata,
                         "title_noise_filter_reason": classification.reason.value,
                         "title_noise_filter_keyword": classification.matched_keyword,
+                    }
+                }
+            )
+        elif (classification := classify_no_hebrew_content(discovered)) is not None:
+            discovered = discovered.model_copy(
+                update={
+                    "metadata": {
+                        **discovered.metadata,
+                        "no_hebrew_content_filter_reason": classification.reason.value,
                     }
                 }
             )
