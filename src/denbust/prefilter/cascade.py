@@ -18,7 +18,7 @@ from denbust.prefilter.models import (
 from denbust.prefilter.stage_a import StageAScorer
 from denbust.prefilter.stage_b import StageBScorer
 from denbust.prefilter.stage_c import StageCScorer
-from denbust.prefilter.stage_d import StageDJudge
+from denbust.prefilter.stage_d import StageDScorer
 from denbust.prefilter.telemetry import PrefilterDecisionWriter
 
 
@@ -47,9 +47,9 @@ class CascadeOrchestrator:
     load embedding models and SLM weights at construction time; disabled
     stages must never pay that cost.
 
-    Stage A (LPF-PR-03) and Stage B (LPF-PR-04) are fully implemented.
-    Stages C and D remain stubs returning ``None``; full implementations
-    arrive in LPF-PR-06 and LPF-PR-07.
+    Stages A (LPF-PR-03), B (LPF-PR-04), C (LPF-PR-06), and D (LPF-PR-07)
+    are all fully implemented.  When artifacts are absent or optional extras
+    are missing the scorer returns ``None`` (pass-through) for that stage.
     """
 
     def __init__(
@@ -73,7 +73,7 @@ class CascadeOrchestrator:
             else None
         )
         self._stage_c: StageCScorer | None = StageCScorer() if config.stages.c.enabled else None
-        self._stage_d: StageDJudge | None = StageDJudge() if config.stages.d.enabled else None
+        self._stage_d: StageDScorer | None = StageDScorer() if config.stages.d.enabled else None
 
     # ------------------------------------------------------------------
     # Public evaluation interface

@@ -91,6 +91,7 @@ known-first-party = ["denbust"]
 # importorskip must precede application imports; E402 is expected here.
 "tests/unit/prefilter/test_stage_b_setfit_*.py" = ["E402"]
 "tests/unit/prefilter/test_stage_c_*.py" = ["E402"]
+"tests/unit/prefilter/test_stage_d_*.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -119,6 +120,7 @@ module = [
     "huggingface_hub.*",
     "joblib.*",
     "kaggle.*",
+    "mlx.*",
     "mlx_lm.*",
     "numpy.*",
     "pyarrow.*",
