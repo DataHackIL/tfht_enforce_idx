@@ -47,10 +47,9 @@ class CascadeOrchestrator:
     load embedding models and SLM weights at construction time; disabled
     stages must never pay that cost.
 
-    In LPF-PR-01 all stages are stubs returning ``None``, so every SHADOW or
-    ENFORCE call also produces ``verdict="pass"`` with an empty
-    ``stage_scores`` tuple.  Full implementations arrive in LPF-PR-03
-    through LPF-PR-07.
+    Stage A (LPF-PR-03) and Stage B (LPF-PR-04) are fully implemented.
+    Stages C and D remain stubs returning ``None``; full implementations
+    arrive in LPF-PR-06 and LPF-PR-07.
     """
 
     def __init__(
@@ -68,7 +67,11 @@ class CascadeOrchestrator:
             if config.stages.a.enabled
             else None
         )
-        self._stage_b: StageBScorer | None = StageBScorer() if config.stages.b.enabled else None
+        self._stage_b: StageBScorer | None = (
+            StageBScorer(models_dir=models_dir, threshold=config.stages.b.threshold)
+            if config.stages.b.enabled
+            else None
+        )
         self._stage_c: StageCScorer | None = StageCScorer() if config.stages.c.enabled else None
         self._stage_d: StageDJudge | None = StageDJudge() if config.stages.d.enabled else None
 
