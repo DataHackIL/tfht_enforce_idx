@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -114,6 +115,11 @@ from denbust.ops.factory import create_operational_store
 from denbust.ops.storage import OperationalStore
 from denbust.output.email import send_email_report
 from denbust.output.formatter import print_items
+from denbust.prefilter.adapters import PersistentCandidateView, RawArticleCandidateView
+from denbust.prefilter.cascade import CascadeOrchestrator
+from denbust.prefilter.config import PrefilterMode
+from denbust.prefilter.models import PrefilterDecision
+from denbust.prefilter.state_paths import resolve_prefilter_state_paths
 from denbust.sources.base import Source
 from denbust.sources.haaretz import create_haaretz_source
 from denbust.sources.ice import create_ice_source
@@ -228,6 +234,161 @@ def release_publication_dir(config: Config) -> Path:
     return config.store.publication_dir or (
         config.store.state_root / config.dataset_name / JobName.RELEASE / "publication"
     )
+
+
+# ---------------------------------------------------------------------------
+# Pre-classification filter (prefilter) helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_cascade_orchestrator(config: Config) -> CascadeOrchestrator | None:
+    """Construct a :class:`CascadeOrchestrator` for *config*, or ``None``.
+
+    Returns ``None`` when ``config.prefilter.enabled`` is ``False`` or the
+    configured mode is ``OFF`` so callers can short-circuit filter wiring
+    without the cost of loading stage model artifacts.
+    """
+    if not config.prefilter.enabled or config.prefilter.mode == PrefilterMode.OFF:
+        return None
+    prefilter_paths = resolve_prefilter_state_paths(
+        state_root=config.store.state_root,
+        dataset_name=config.dataset_name,
+    )
+    return CascadeOrchestrator(
+        config=config.prefilter,
+        decisions_dir=prefilter_paths.decisions_dir,
+        models_dir=prefilter_paths.models_dir,
+    )
+
+
+def _thin_pass_prefilter(
+    candidates: list[PersistentCandidate],
+    orchestrator: CascadeOrchestrator | None,
+) -> tuple[list[PersistentCandidate], list[PrefilterDecision]]:
+    """Apply the thin (pre-scrape) prefilter pass to *candidates*.
+
+    Returns ``(passed_candidates, all_decisions)``.  When *orchestrator* is
+    ``None`` all candidates pass through unchanged and the decision list is
+    empty.  In SHADOW mode the orchestrator downgrades ``"drop"`` to ``"pass"``
+    internally, so all candidates still flow to the scrape queue — only the
+    telemetry reflects the simulated drop.
+    """
+    if orchestrator is None:
+        return candidates, []
+    passed: list[PersistentCandidate] = []
+    decisions: list[PrefilterDecision] = []
+    for candidate in candidates:
+        decision = orchestrator.evaluate_thin(PersistentCandidateView(candidate))
+        decisions.append(decision)
+        if decision.verdict != "drop":
+            passed.append(candidate)
+    if decisions:
+        logger.info(
+            "Prefilter thin pass: %d/%d candidates passed (mode=%s).",
+            len(passed),
+            len(candidates),
+            orchestrator._config.mode.value,
+        )
+    return passed, decisions
+
+
+def _thick_pass_prefilter(
+    articles: list[RawArticle],
+    orchestrator: CascadeOrchestrator | None,
+    *,
+    candidate_id_map: dict[str, str],
+) -> tuple[list[RawArticle], list[PrefilterDecision]]:
+    """Apply the thick (post-scrape, pre-classifier) prefilter pass to *articles*.
+
+    Returns ``(passed_articles, all_decisions)``.  When *orchestrator* is
+    ``None`` all articles pass through unchanged and the decision list is empty.
+
+    Parameters
+    ----------
+    candidate_id_map:
+        Mapping from canonicalized URL strings to ``candidate_id`` values built
+        from the scrape batch's ``selected_candidates``.  When a URL has no
+        entry the raw URL string is used as the decision ``candidate_id``.
+    """
+    if orchestrator is None:
+        return articles, []
+    passed: list[RawArticle] = []
+    decisions: list[PrefilterDecision] = []
+    for article in articles:
+        url_key = canonicalize_news_url(str(article.url))
+        candidate_id = candidate_id_map.get(url_key, str(article.url))
+        view = RawArticleCandidateView(article, candidate_id=candidate_id)
+        decision = orchestrator.evaluate_thick(view, body=article.snippet)
+        decisions.append(decision)
+        if decision.verdict != "drop":
+            passed.append(article)
+    if decisions:
+        logger.info(
+            "Prefilter thick pass: %d/%d articles passed (mode=%s).",
+            len(passed),
+            len(articles),
+            orchestrator._config.mode.value,
+        )
+    return passed, decisions
+
+
+def _build_prefilter_pass_dict(decisions: list[PrefilterDecision]) -> dict[str, object]:
+    """Build a per-pass summary dict from a list of :class:`PrefilterDecision` records.
+
+    ``stage_stopped_counts`` counts decisions where ``stopped_at_stage``
+    is a stage name (not ``"passed_all"``).  This captures both effective drops
+    (ENFORCE mode) and shadow would-drops (SHADOW mode) per stage.
+    """
+    evaluated = len(decisions)
+    dropped = sum(1 for d in decisions if d.verdict == "drop")
+    stage_stopped: dict[str, int] = {}
+    for d in decisions:
+        if d.stopped_at_stage != "passed_all":
+            stage = str(d.stopped_at_stage)
+            stage_stopped[stage] = stage_stopped.get(stage, 0) + 1
+    return {
+        "evaluated": evaluated,
+        "passed": evaluated - dropped,
+        "dropped": dropped,
+        "stage_stopped_counts": stage_stopped,
+    }
+
+
+def _write_prefilter_run_summary(
+    config: Config,
+    *,
+    thin_decisions: list[PrefilterDecision],
+    thick_decisions: list[PrefilterDecision],
+) -> None:
+    """Write ``prefilter_summary.json`` to the prefilter reports directory.
+
+    Silently skipped when the prefilter is disabled (both decision lists empty
+    and ``config.prefilter.enabled`` is ``False``).  Errors during write are
+    caught and logged so they never abort the surrounding pipeline job.
+    """
+    if not thin_decisions and not thick_decisions and not config.prefilter.enabled:
+        return
+    try:
+        prefilter_paths = resolve_prefilter_state_paths(
+            state_root=config.store.state_root,
+            dataset_name=config.dataset_name,
+        )
+        prefilter_paths.reports_dir.mkdir(parents=True, exist_ok=True)
+        summary: dict[str, object] = {
+            "schema_version": "prefilter.run_summary.v1",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "mode": config.prefilter.mode.value,
+            "thin_pass": _build_prefilter_pass_dict(thin_decisions),
+            "thick_pass": _build_prefilter_pass_dict(thick_decisions),
+        }
+        out_path = prefilter_paths.reports_dir / "prefilter_summary.json"
+        out_path.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logger.debug("Prefilter run summary written to %s", out_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to write prefilter run summary: %s", exc)
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -1176,8 +1337,13 @@ async def _run_candidate_scrape_job(
     config: Config,
     sources: list[Source],
     limit: int,
-) -> CandidateScrapeBatch:
-    """Select queued candidates and run the scrape-attempt layer."""
+    orchestrator: CascadeOrchestrator | None = None,
+) -> tuple[CandidateScrapeBatch, list[PrefilterDecision]]:
+    """Select queued candidates, apply the thin prefilter, and run the scrape-attempt layer.
+
+    Returns ``(scrape_batch, thin_decisions)``.  When *orchestrator* is ``None``
+    the thin pass is skipped and ``thin_decisions`` is empty.
+    """
     persistence = create_discovery_persistence(config)
     try:
         selected_candidates = select_candidates_for_scrape(
@@ -1187,11 +1353,13 @@ async def _run_candidate_scrape_job(
     finally:
         persistence.close()
 
-    return await _scrape_candidate_batch(
+    passed_candidates, thin_decisions = _thin_pass_prefilter(selected_candidates, orchestrator)
+    batch = await _scrape_candidate_batch(
         config=config,
-        candidates=selected_candidates,
+        candidates=passed_candidates,
         sources=sources,
     )
+    return batch, thin_decisions
 
 
 async def _run_backfill_candidate_scrape_job(
@@ -1200,8 +1368,13 @@ async def _run_backfill_candidate_scrape_job(
     sources: list[Source],
     limit: int,
     batch_id: str | None = None,
-) -> CandidateScrapeBatch:
-    """Select one historical batch and run the scrape-attempt layer over it."""
+    orchestrator: CascadeOrchestrator | None = None,
+) -> tuple[CandidateScrapeBatch, list[PrefilterDecision]]:
+    """Select one historical batch, apply the thin prefilter, and run the scrape-attempt layer.
+
+    Returns ``(scrape_batch, thin_decisions)``.  When *orchestrator* is ``None``
+    the thin pass is skipped and ``thin_decisions`` is empty.
+    """
     persistence = create_discovery_persistence(config)
     try:
         selected_candidates = select_backfill_candidates_for_scrape(
@@ -1212,12 +1385,14 @@ async def _run_backfill_candidate_scrape_job(
     finally:
         persistence.close()
 
-    return await _scrape_candidate_batch(
+    passed_candidates, thin_decisions = _thin_pass_prefilter(selected_candidates, orchestrator)
+    batch = await _scrape_candidate_batch(
         config=config,
-        candidates=selected_candidates,
+        candidates=passed_candidates,
         sources=sources,
         backfill_mode=True,
     )
+    return batch, thin_decisions
 
 
 async def _process_ingest_articles(
@@ -1992,13 +2167,26 @@ async def run_news_ingest_job(
                 f"source_native_candidate_persistence_failed={type(exc).__name__}: {exc}"
             )
 
-    result.raw_article_count = len(ingest_articles)
+    # Thick prefilter pass — applied to the final article list before classification.
+    # For the ingest job there is no candidate_id_map (articles come from RSS feeds
+    # directly), so the article URL itself is used as the candidate_id.
+    orchestrator = _build_cascade_orchestrator(config)
+    thick_articles, thick_decisions = _thick_pass_prefilter(
+        ingest_articles, orchestrator, candidate_id_map={}
+    )
+    if len(thick_articles) < len(ingest_articles):
+        result.warnings.append(
+            f"prefilter_thick_dropped={len(ingest_articles) - len(thick_articles)}"
+        )
+    _write_prefilter_run_summary(config, thin_decisions=[], thick_decisions=thick_decisions)
+
+    result.raw_article_count = len(thick_articles)
     return await _process_ingest_articles(
         config=config,
         result=result,
         source_names=source_names,
         sources=sources,
-        all_articles=ingest_articles,
+        all_articles=thick_articles,
         seen_store=seen_store,
         classifier=classifier,
         deduplicator=deduplicator,
@@ -2219,18 +2407,21 @@ async def run_news_scrape_candidates_job(
     result.seen_count_before = seen_store.count
     store = operational_store
     owns_store = False
+    orchestrator = _build_cascade_orchestrator(config)
 
     try:
-        scrape_batch = await _run_candidate_scrape_job(
+        scrape_batch, thin_decisions = await _run_candidate_scrape_job(
             config=config.model_copy(update={"days": days}),
             sources=sources,
             limit=config.max_articles,
+            orchestrator=orchestrator,
         )
         result.raw_article_count = len(scrape_batch.raw_articles)
         if scrape_batch.errors:
             result.errors.extend(scrape_batch.errors)
             result.warnings.append(f"candidate_scrape_failures={len(scrape_batch.errors)}")
         if not scrape_batch.selected_candidates:
+            _write_prefilter_run_summary(config, thin_decisions=thin_decisions, thick_decisions=[])
             return result.finish("no queued candidates eligible for scrape")
 
         if store is None and (scrape_batch.raw_articles or scrape_batch.fallback_candidates):
@@ -2249,6 +2440,7 @@ async def run_news_scrape_candidates_job(
                 sanitized_error,
             )
             result.seen_count_after = seen_store.count
+            _write_prefilter_run_summary(config, thin_decisions=thin_decisions, thick_decisions=[])
             return result.finish("fatal: classifier provider error")
         if fallback_records and store is not None:
             store.upsert_records(
@@ -2273,14 +2465,31 @@ async def run_news_scrape_candidates_job(
                     fallback_record_count=len(fallback_records),
                 )
             )
+            _write_prefilter_run_summary(config, thin_decisions=thin_decisions, thick_decisions=[])
             return result
 
+        # Build URL → candidate_id map for the thick pass.
+        candidate_id_map = {
+            canonicalize_news_url(str(c.canonical_url or c.current_url)): c.candidate_id
+            for c in scrape_batch.selected_candidates
+        }
+        thick_articles, thick_decisions = _thick_pass_prefilter(
+            scrape_batch.raw_articles, orchestrator, candidate_id_map=candidate_id_map
+        )
+        if len(thick_articles) < len(scrape_batch.raw_articles):
+            result.warnings.append(
+                f"prefilter_thick_dropped={len(scrape_batch.raw_articles) - len(thick_articles)}"
+            )
+
+        _write_prefilter_run_summary(
+            config, thin_decisions=thin_decisions, thick_decisions=thick_decisions
+        )
         processed = await _process_ingest_articles(
             config=config,
             result=result,
             source_names=source_names,
             sources=sources,
-            all_articles=scrape_batch.raw_articles,
+            all_articles=thick_articles,
             seen_store=seen_store,
             classifier=classifier,
             deduplicator=deduplicator,
@@ -2563,19 +2772,23 @@ async def run_news_backfill_scrape_job(
     store = operational_store
     owns_store = False
     scrape_batch: CandidateScrapeBatch | None = None
+    orchestrator = _build_cascade_orchestrator(config)
+    thin_decisions: list[PrefilterDecision] = []
 
     try:
-        scrape_batch = await _run_backfill_candidate_scrape_job(
+        scrape_batch, thin_decisions = await _run_backfill_candidate_scrape_job(
             config=config.model_copy(update={"days": days}),
             sources=sources,
             limit=config.backfill.max_scrape_attempts_per_run,
             batch_id=batch_id,
+            orchestrator=orchestrator,
         )
         result.raw_article_count = len(scrape_batch.raw_articles)
         if scrape_batch.errors:
             result.errors.extend(scrape_batch.errors)
             result.warnings.append(f"candidate_scrape_failures={len(scrape_batch.errors)}")
         if not scrape_batch.selected_candidates:
+            _write_prefilter_run_summary(config, thin_decisions=thin_decisions, thick_decisions=[])
             return result.finish("no queued backfill candidates eligible for scrape")
 
         if store is None and (scrape_batch.raw_articles or scrape_batch.fallback_candidates):
@@ -2657,14 +2870,31 @@ async def run_news_backfill_scrape_job(
                     batch_id=batch_id,
                 )
             )
+            _write_prefilter_run_summary(config, thin_decisions=thin_decisions, thick_decisions=[])
             return result
+
+        # Thick prefilter pass — post-window-filter, pre-classifier.
+        candidate_id_map = {
+            canonicalize_news_url(str(c.canonical_url or c.current_url)): c.candidate_id
+            for c in scrape_batch.selected_candidates
+        }
+        thick_articles, thick_decisions = _thick_pass_prefilter(
+            scrape_batch.raw_articles, orchestrator, candidate_id_map=candidate_id_map
+        )
+        if len(thick_articles) < len(scrape_batch.raw_articles):
+            result.warnings.append(
+                f"prefilter_thick_dropped={len(scrape_batch.raw_articles) - len(thick_articles)}"
+            )
+        _write_prefilter_run_summary(
+            config, thin_decisions=thin_decisions, thick_decisions=thick_decisions
+        )
 
         processed = await _process_ingest_articles(
             config=config,
             result=result,
             source_names=[source.name for source in sources],
             sources=sources,
-            all_articles=scrape_batch.raw_articles,
+            all_articles=thick_articles,
             seen_store=seen_store,
             classifier=classifier,
             deduplicator=deduplicator,

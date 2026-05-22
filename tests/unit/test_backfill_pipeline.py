@@ -736,23 +736,26 @@ async def test_run_news_backfill_scrape_job_marks_classifier_provider_error_fata
     monkeypatch.setattr(
         "denbust.pipeline._run_backfill_candidate_scrape_job",
         AsyncMock(
-            return_value=build_scrape_batch(
-                raw_articles=[
-                    RawArticle(
-                        url=HttpUrl("https://example.com/outside-window"),
-                        title="outside",
-                        snippet="outside",
-                        date=datetime(2026, 3, 2, tzinfo=UTC),
-                        source_name="ynet",
-                    ),
-                    RawArticle(
-                        url=HttpUrl("https://example.com/raw"),
-                        title="title",
-                        snippet="snippet",
-                        date=datetime(2026, 1, 2, tzinfo=UTC),
-                        source_name="ynet",
-                    ),
-                ]
+            return_value=(
+                build_scrape_batch(
+                    raw_articles=[
+                        RawArticle(
+                            url=HttpUrl("https://example.com/outside-window"),
+                            title="outside",
+                            snippet="outside",
+                            date=datetime(2026, 3, 2, tzinfo=UTC),
+                            source_name="ynet",
+                        ),
+                        RawArticle(
+                            url=HttpUrl("https://example.com/raw"),
+                            title="title",
+                            snippet="snippet",
+                            date=datetime(2026, 1, 2, tzinfo=UTC),
+                            source_name="ynet",
+                        ),
+                    ]
+                ),
+                [],
             )
         ),
     )
@@ -797,22 +800,25 @@ async def test_run_news_backfill_scrape_job_marks_fallback_provider_error_fatal(
     monkeypatch.setattr(
         "denbust.pipeline._run_backfill_candidate_scrape_job",
         AsyncMock(
-            return_value=build_scrape_batch(
-                fallback_candidates=[
-                    build_candidate("batch-1").model_copy(
-                        update={
-                            "metadata": {
-                                "backfill_window_start": datetime(
-                                    2026, 1, 1, tzinfo=UTC
-                                ).isoformat(),
-                                "fallback_publication_datetime": datetime(
-                                    2026, 1, 2, tzinfo=UTC
-                                ).isoformat(),
+            return_value=(
+                build_scrape_batch(
+                    fallback_candidates=[
+                        build_candidate("batch-1").model_copy(
+                            update={
+                                "metadata": {
+                                    "backfill_window_start": datetime(
+                                        2026, 1, 1, tzinfo=UTC
+                                    ).isoformat(),
+                                    "fallback_publication_datetime": datetime(
+                                        2026, 1, 2, tzinfo=UTC
+                                    ).isoformat(),
+                                }
                             }
-                        }
-                    )
-                ],
-                raw_articles=[],
+                        )
+                    ],
+                    raw_articles=[],
+                ),
+                [],
             )
         ),
     )
@@ -1146,13 +1152,16 @@ async def test_run_news_backfill_scrape_job_returns_when_selected_batch_drains_t
     monkeypatch.setattr(
         "denbust.pipeline._run_backfill_candidate_scrape_job",
         AsyncMock(
-            return_value=CandidateScrapeBatch(
-                selected_candidates=[],
-                updated_candidates=[],
-                fallback_candidates=[],
-                attempts=[],
-                raw_articles=[],
-                errors=[],
+            return_value=(
+                CandidateScrapeBatch(
+                    selected_candidates=[],
+                    updated_candidates=[],
+                    fallback_candidates=[],
+                    attempts=[],
+                    raw_articles=[],
+                    errors=[],
+                ),
+                [],
             )
         ),
     )
@@ -1180,7 +1189,9 @@ async def test_run_news_backfill_scrape_job_keeps_batch_open_for_future_retries(
     monkeypatch.setattr("denbust.pipeline.create_deduplicator", lambda **_kwargs: MagicMock())
     monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
 
-    async def fake_scrape_job(**_kwargs: object) -> CandidateScrapeBatch:
+    async def fake_scrape_job(
+        **_kwargs: object,
+    ) -> tuple[CandidateScrapeBatch, list[object]]:
         store.upsert_candidates(
             [
                 build_candidate("batch-1").model_copy(
@@ -1192,7 +1203,9 @@ async def test_run_news_backfill_scrape_job_keeps_batch_open_for_future_retries(
                 )
             ]
         )
-        return build_scrape_batch(raw_articles=[], fallback_candidates=[], errors=["retry later"])
+        return build_scrape_batch(
+            raw_articles=[], fallback_candidates=[], errors=["retry later"]
+        ), []
 
     monkeypatch.setattr("denbust.pipeline._run_backfill_candidate_scrape_job", fake_scrape_job)
     monkeypatch.setattr(
@@ -1239,10 +1252,13 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
     monkeypatch.setattr(
         "denbust.pipeline._run_backfill_candidate_scrape_job",
         AsyncMock(
-            return_value=build_scrape_batch(
-                fallback_candidates=[build_candidate("batch-1")],
-                raw_articles=[],
-                errors=["candidate failed"],
+            return_value=(
+                build_scrape_batch(
+                    fallback_candidates=[build_candidate("batch-1")],
+                    raw_articles=[],
+                    errors=["candidate failed"],
+                ),
+                [],
             )
         ),
     )
@@ -1310,23 +1326,26 @@ async def test_run_news_backfill_scrape_job_handles_fallback_and_processed_paths
     monkeypatch.setattr(
         "denbust.pipeline._run_backfill_candidate_scrape_job",
         AsyncMock(
-            return_value=build_scrape_batch(
-                raw_articles=[
-                    RawArticle(
-                        url=HttpUrl("https://example.com/outside-window"),
-                        title="outside",
-                        snippet="outside",
-                        date=datetime(2026, 3, 2, tzinfo=UTC),
-                        source_name="ynet",
-                    ),
-                    RawArticle(
-                        url=HttpUrl("https://example.com/raw"),
-                        title="title",
-                        snippet="snippet",
-                        date=datetime(2026, 1, 2, tzinfo=UTC),
-                        source_name="ynet",
-                    ),
-                ]
+            return_value=(
+                build_scrape_batch(
+                    raw_articles=[
+                        RawArticle(
+                            url=HttpUrl("https://example.com/outside-window"),
+                            title="outside",
+                            snippet="outside",
+                            date=datetime(2026, 3, 2, tzinfo=UTC),
+                            source_name="ynet",
+                        ),
+                        RawArticle(
+                            url=HttpUrl("https://example.com/raw"),
+                            title="title",
+                            snippet="snippet",
+                            date=datetime(2026, 1, 2, tzinfo=UTC),
+                            source_name="ynet",
+                        ),
+                    ]
+                ),
+                [],
             )
         ),
     )
