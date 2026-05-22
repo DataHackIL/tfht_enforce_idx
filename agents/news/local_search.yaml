@@ -99,3 +99,18 @@ store:
 
 operational:
   provider: local_json
+
+prefilter:
+  enabled: true
+  mode: enforce
+  stages:
+    a:
+      enabled: false   # domain-reputation model penalises major Israeli news sites — disabled
+    b:
+      enabled: true
+      model: naive_bayes
+      threshold: 0.9921  # val-optimal: 100% recall, 100% drop-precision, 8.2% drop rate
+    c:
+      enabled: false   # no independent signal over Stage B until article bodies are scraped
+    d:
+      enabled: false   # SLM judge needs scraped bodies; re-enable after scraping pipeline runs
