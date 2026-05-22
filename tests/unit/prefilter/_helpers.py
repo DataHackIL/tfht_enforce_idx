@@ -146,6 +146,38 @@ class FakeSentenceTransformer:
         return result
 
 
+# ---------------------------------------------------------------------------
+# Minimal MLX tokenizer stub for Stage D tests
+#
+# Defined here so both test_stage_d_bake.py and test_stage_d_predict.py
+# share one implementation.  mlx_lm is imported nowhere so this file stays
+# importable without the prefilter extras.
+# ---------------------------------------------------------------------------
+
+
+class FakeMLXTokenizer:
+    """Minimal tokenizer stub for Stage D inference tests.
+
+    ``encode`` returns deterministic token IDs:
+    - ``"כן"`` → ``[KEN_ID]``
+    - ``"לא"`` → ``[LO_ID]``
+    - any other text → ``[1, 2, 3, 4, 5]``
+
+    This lets tests verify that :func:`~denbust.prefilter.stage_d._get_token_id`
+    correctly extracts single-token IDs for the yes/no Hebrew words.
+    """
+
+    KEN_ID: int = 100
+    LO_ID: int = 101
+
+    def encode(self, text: str, *, add_special_tokens: bool = True) -> list[int]:  # noqa: ARG002
+        if text == "כן":
+            return [self.KEN_ID]
+        if text == "לא":
+            return [self.LO_ID]
+        return [1, 2, 3, 4, 5]
+
+
 class FakeSetFitModel:
     """Minimal SetFit model stub for testing: no network, no GPU.
 

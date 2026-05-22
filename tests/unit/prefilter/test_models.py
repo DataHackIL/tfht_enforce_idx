@@ -220,9 +220,9 @@ class TestStageEvaluatorProtocol:
         assert isinstance(StageCScorer(), StageEvaluator)
 
     def test_stage_d_satisfies_protocol(self) -> None:
-        from denbust.prefilter.stage_d import StageDJudge
+        from denbust.prefilter.stage_d import StageDScorer
 
-        assert isinstance(StageDJudge(), StageEvaluator)
+        assert isinstance(StageDScorer(), StageEvaluator)
 
     def test_object_without_evaluate_does_not_satisfy(self) -> None:
         class _NoEvaluate:

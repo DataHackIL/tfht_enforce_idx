@@ -92,7 +92,7 @@ def summary(
 def retrain_cmd(
     stage: Annotated[
         str,
-        typer.Option("--stage", "-s", help="Stage to retrain: a, b, or c"),
+        typer.Option("--stage", "-s", help="Stage to retrain: a, b, c, or d"),
     ],
     config: Annotated[
         Path | None,
@@ -126,6 +126,11 @@ def retrain_cmd(
     c   Embedding similarity (centroid-cosine + FAISS kNN).  Requires the
         ``prefilter`` extras: ``pip install -e '.[dev,prefilter]'``.
         Thick-pass only — returns None on thin-pass candidates.
+
+    d   Local SLM judge (MLX, Apple Silicon only).  Writes a versioned prompt
+        template and meta.json; the SLM itself is loaded from HuggingFace at
+        inference time.  Thick-pass only.  Requires the ``prefilter`` extras:
+        ``pip install -e '.[dev,prefilter]'``.
     """
     if config is None:
         typer.echo(
@@ -136,9 +141,9 @@ def retrain_cmd(
         raise typer.Exit(1)
 
     stage = stage.lower().strip()
-    if stage not in {"a", "b", "c"}:
+    if stage not in {"a", "b", "c", "d"}:
         typer.echo(
-            f"Error: --stage {stage!r} is not supported.  Choose 'a', 'b', or 'c'.",
+            f"Error: --stage {stage!r} is not supported.  Choose 'a', 'b', 'c', or 'd'.",
             err=True,
         )
         raise typer.Exit(1)
@@ -209,7 +214,7 @@ def retrain_cmd(
             typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
             typer.echo(f"Stage B SetFit retrain complete.  model_version={meta.model_version}")
 
-    else:  # stage == "c"
+    elif stage == "c":
         from denbust.prefilter.stage_c import _DEFAULT_BASE_MODEL, train_stage_c
 
         typer.echo(f"Retraining Stage C from {prefilter_paths.labels_path} ...")
@@ -223,6 +228,23 @@ def retrain_cmd(
         typer.echo(f"  calibration.json  -> {stage_dir / 'calibration.json'}")
         typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
         typer.echo(f"Stage C retrain complete.  model_version={c_meta.model_version}")
+
+    else:  # stage == "d"
+        from denbust.prefilter.stage_d import (
+            _DEFAULT_BASE_MODEL_D,
+            _DEFAULT_PROMPT_TEMPLATE,
+            bake_stage_d,
+        )
+
+        typer.echo("Baking Stage D artifacts ...")
+        typer.echo(f"  base model: {_DEFAULT_BASE_MODEL_D}  (loaded at inference time)")
+        d_meta, stage_dir = bake_stage_d(
+            out_dir=prefilter_paths.models_dir,
+            prompt_template=_DEFAULT_PROMPT_TEMPLATE,
+        )
+        typer.echo(f"  prompt.txt        -> {stage_dir / 'prompt.txt'}")
+        typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")
+        typer.echo(f"Stage D bake complete.  prompt_version={d_meta.prompt_version}")
 
 
 @prefilter_app.command("evaluate")
@@ -267,6 +289,10 @@ def evaluate_cmd(
     trained artifacts exist under the configured models directory.  Uses the
     ``article_body`` field from the labeled dataset as the thick-pass body,
     falling back to ``snippet`` when absent.
+
+    Stage D (thick pass, SLM judge): evaluated automatically when baked
+    artifacts exist and ``mlx_lm`` is installed.  Skipped silently on
+    non-Apple-Silicon platforms or when the model cannot be loaded.
 
     Unscored candidates (scorer returned ``None``) are excluded from metric
     calculations but are treated as pass-through in the drop-rate denominator.
@@ -455,7 +481,67 @@ def evaluate_cmd(
                 "(prefilter extras missing or artifacts corrupt) — skipping.\n"
             )
 
-    if report_path is not None and (results or stage_c_result):
+    # Stage D evaluation (thick pass, SLM judge) — automatic when artifacts exist.
+    stage_d_result: dict[str, Any] | None = None
+    from denbust.prefilter.stage_d import (
+        _PROMPT_FILE,
+        _STAGE_D_SUBDIR,
+        StageDScorer,
+    )
+
+    stage_d_dir = prefilter_paths.models_dir / _STAGE_D_SUBDIR
+    if (stage_d_dir / _PROMPT_FILE).exists():
+        try:
+            scorer_d = StageDScorer(models_dir=prefilter_paths.models_dir)
+        except Exception:  # noqa: BLE001
+            scorer_d = None
+
+        if scorer_d is not None and scorer_d._model is not None:
+            scored_p_d: list[float] = []
+            scored_y_d: list[int] = []
+            n_skipped_d = 0
+            for row, y in zip(eval_rows, y_true):
+                score_d = scorer_d.evaluate(row, "thick", body=row.article_body)
+                if score_d is None:
+                    n_skipped_d += 1
+                else:
+                    scored_p_d.append(score_d.p_negative)
+                    scored_y_d.append(y)
+
+            if scored_p_d:
+                metrics_d = _compute_stage_b_metrics(
+                    scored_p=scored_p_d,
+                    scored_y=scored_y_d,
+                    n_pos_total=n_pos,
+                    n_total=len(y_true),
+                    recall_floor=recall_floor,
+                )
+                version_d = scorer_d.model_version or "(unknown)"
+                typer.echo(f"  stage_d (thick, SLM)  [version: {version_d}]")
+                typer.echo(f"    threshold      : {metrics_d['threshold']:.4f}")
+                typer.echo(
+                    f"    recall         : {metrics_d['recall']:.4f}  (target ≥ {recall_floor:.4f})"
+                )
+                typer.echo(
+                    f"    drop_precision : {metrics_d['drop_precision']:.4f}"
+                    f"  (true_neg / total_dropped)"
+                )
+                typer.echo(f"    drop_rate      : {metrics_d['drop_rate']:.4f}")
+                typer.echo(f"    brier_score    : {metrics_d['brier_score']:.4f}")
+                if n_skipped_d:
+                    typer.echo(
+                        f"    no-score rows  : {n_skipped_d} (excluded from metrics; "
+                        "treated as pass-through in production)"
+                    )
+                typer.echo("")
+                stage_d_result = {"kind": "stage_d", "version": version_d, **metrics_d}
+            else:
+                typer.echo(
+                    "  stage_d: scorer returned None for all candidates "
+                    "(mlx_lm missing, model load failed, or circuit open) — skipping.\n"
+                )
+
+    if report_path is not None and (results or stage_c_result or stage_d_result):
         _write_evaluate_report(
             report_path,
             split,
@@ -464,6 +550,7 @@ def evaluate_cmd(
             n_neg,
             results,
             stage_c_result=stage_c_result,
+            stage_d_result=stage_d_result,
         )
         typer.echo(f"Report written to {report_path}")
 
@@ -694,6 +781,7 @@ def _write_evaluate_report(
     n_neg: int,
     results: list[dict[str, Any]],
     stage_c_result: dict[str, Any] | None = None,
+    stage_d_result: dict[str, Any] | None = None,
 ) -> None:
     """Write a markdown prefilter evaluation report to *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -723,6 +811,19 @@ def _write_evaluate_report(
         r = stage_c_result
         lines += [
             "## Stage C (thick pass)",
+            "",
+            "| Version | Threshold | Recall | Drop Precision | Drop Rate | Brier |",
+            "|---------|-----------|--------|----------------|-----------|-------|",
+            f"| {r['version']} "
+            f"| {r['threshold']:.4f} | {r['recall']:.4f} "
+            f"| {r['drop_precision']:.4f} | {r['drop_rate']:.4f} "
+            f"| {r['brier_score']:.4f} |",
+            "",
+        ]
+    if stage_d_result:
+        r = stage_d_result
+        lines += [
+            "## Stage D (thick pass, SLM judge)",
             "",
             "| Version | Threshold | Recall | Drop Precision | Drop Rate | Brier |",
             "|---------|-----------|--------|----------------|-----------|-------|",
