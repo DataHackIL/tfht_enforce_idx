@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from urllib.parse import urlparse
@@ -63,6 +64,7 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "din.org.il",  # legal info NGO — off-topic
         "todojustice.co.il",  # legal info site — off-topic
         "tomoko.co.il",  # unrelated e-commerce — off-topic
+        "polisa.news",  # insurance news site — off-topic
     }
 )
 
@@ -78,6 +80,10 @@ _SOCIAL_POST_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "youtube.com": ("/shorts/", "/watch"),
 }
 
+
+# Matches any Hebrew letter (Unicode block U+05D0–U+05EA).
+# Used to gate-keep candidates whose title and snippet contain no Hebrew at all.
+_HEBREW_RE: re.Pattern[str] = re.compile(r"[א-ת]")
 
 _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
     {
@@ -237,6 +243,7 @@ class SearchNoiseReason(StrEnum):
     TITLE_KEYWORD_MATCH = "title_keyword_match"
     UNSUPPORTED_SEARCH_DOMAIN = "unsupported_search_domain"
     IRRELEVANT_CONTENT_DOMAIN = "irrelevant_content_domain"
+    NO_HEBREW_CONTENT = "no_hebrew_content"
 
 
 @dataclass(frozen=True)
@@ -407,3 +414,24 @@ def classify_title_noise(
                 matched_keyword=term,
             )
     return None
+
+
+def classify_no_hebrew_content(
+    discovered: DiscoveredCandidate,
+) -> SearchNoiseClassification | None:
+    """Classify candidates that contain no Hebrew letters in title or snippet.
+
+    Applies to all producer kinds.  Content without any Hebrew letter is
+    overwhelmingly not relevant to the Israeli enforcement beat and can be
+    dropped as early as possible in the pipeline.
+
+    Returns ``SearchNoiseClassification(reason=NO_HEBREW_CONTENT)`` when
+    neither ``title`` nor ``snippet`` contain at least one Hebrew character
+    (U+05D0–U+05EA).  Returns ``None`` when Hebrew is present (i.e. the
+    candidate should continue to the next filter).
+    """
+    title = discovered.title or ""
+    snippet = discovered.snippet or ""
+    if _HEBREW_RE.search(title) or _HEBREW_RE.search(snippet):
+        return None
+    return SearchNoiseClassification(reason=SearchNoiseReason.NO_HEBREW_CONTENT)

@@ -7,6 +7,7 @@ let state = {
   batchId: '',
   status: 'all',
   q: '',
+  sort: 'stage_b_asc',   // default to Stage B ranking so likely positives surface first
   page: 1,
   total: 0,
   pages: 1,
@@ -22,6 +23,7 @@ const pgInfo      = document.getElementById('pg-info');
 const pgPrev      = document.getElementById('pg-prev');
 const pgNext      = document.getElementById('pg-next');
 const batchSel    = document.getElementById('batch-select');
+const sortSel     = document.getElementById('sort-select');
 const searchEl    = document.getElementById('search');
 const toast       = document.getElementById('toast');
 const statTotal   = document.getElementById('stat-total');
@@ -35,6 +37,7 @@ async function fetchCandidates() {
     status: state.status,
     page: state.page,
     limit: LIMIT,
+    sort: state.sort,
   });
   if (state.batchId) params.set('batch_id', state.batchId);
   if (state.q)       params.set('q', state.q);
@@ -90,6 +93,16 @@ function formatDate(iso) {
   try { return iso.slice(0, 10); } catch { return iso; }
 }
 
+function stageBChip(score) {
+  if (score == null) return '<td></td>';
+  const pct = score.toFixed(4);
+  const cls = score < 0.95  ? 'tier1'
+            : score < 0.99  ? 'tier2'
+            : score < 0.9957 ? 'tier3'
+            : 'tier4';
+  return `<td><span class="sb-score ${cls}" title="Stage B p_negative: ${score.toFixed(6)}">${pct}</span></td>`;
+}
+
 function renderRows() {
   const { items, selectedIdx } = state;
   if (!items.length) {
@@ -123,6 +136,7 @@ function renderRows() {
       <td><div class="title">${title}</div></td>
       <td><div class="snippet">${snippet}</div></td>
       <td><div class="date">${formatDate(c.first_seen_at)}</div></td>
+      ${stageBChip(c.stage_b_score)}
       <td class="actions" style="text-align:left">
         ${badge}
         <div style="display:flex;gap:6px;margin-top:4px">${actionBtns}</div>
@@ -254,6 +268,11 @@ batchSel.addEventListener('change', () => {
   load(true);
 });
 
+sortSel.addEventListener('change', () => {
+  state.sort = sortSel.value;
+  load(true);
+});
+
 let _searchTimer;
 searchEl.addEventListener('input', () => {
   clearTimeout(_searchTimer);
@@ -265,6 +284,8 @@ pgNext.addEventListener('click', () => { if (state.page < state.pages) { state.p
 
 // ── init ──────────────────────────────────────────────────────────────────
 (async () => {
+  // Sync dropdown to match the default state.sort value
+  sortSel.value = state.sort;
   await load(true);
   // Default: select new-batch filter if a batch exists and has candidates
   const stats = await fetchStats();
