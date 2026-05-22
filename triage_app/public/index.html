@@ -67,6 +67,7 @@
     .title { font-size: 13px; font-weight: 500; direction: rtl; }
     .snippet { font-size: 12px; color: var(--muted); direction: rtl; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 480px; }
     .date { font-size: 11px; color: var(--muted); white-space: nowrap; direction: ltr; }
+    .date.old { color: var(--orange); font-weight: 700; }
     .url-link { font-size: 11px; color: var(--accent); word-break: break-all; direction: ltr; }
     .triage-badge { display: inline-block; padding: 3px 9px; border-radius: 99px; font-size: 12px; font-weight: 700; letter-spacing: .01em; }
     .triage-badge.unreviewed  { background: #1e2030; color: var(--muted); }
@@ -124,6 +125,12 @@
     <button class="tab" data-status="excluded">הוחרגו</button>
   </div>
   <div class="spacer"></div>
+  <select id="pub-year-select" title="שנת פרסום">
+    <option value="">כל השנים</option>
+    <option value="2019">לפני 2019</option>
+    <option value="2021">לפני 2021</option>
+    <option value="2023">לפני 2023</option>
+  </select>
   <select id="sort-select" title="מיון">
     <option value="default">מיון: ברירת מחדל</option>
     <option value="stage_b_asc">מיון: Stage B ↑ (סביר ביותר להיות רלוונטי)</option>
@@ -139,7 +146,7 @@
         <th>מקור</th>
         <th>כותרת</th>
         <th>תקציר</th>
-        <th>תאריך</th>
+        <th>פורסם</th>
         <th title="Stage B p_negative — נמוך יותר = סביר יותר להיות רלוונטי">B↑</th>
         <th style="text-align:left">סטטוס / פעולה</th>
       </tr>
