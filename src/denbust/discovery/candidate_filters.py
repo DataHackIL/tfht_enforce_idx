@@ -411,16 +411,20 @@ def classify_search_noise(
 def classify_title_noise(
     discovered: DiscoveredCandidate,
 ) -> SearchNoiseClassification | None:
-    """Classify candidates whose title contains an excluded keyword.
+    """Classify candidates whose title or snippet contains an excluded keyword.
 
     Applies to all producer kinds — this is a pre-scrape cost filter, not
-    a search-result surface filter.  Returns the first matching term.
+    a search-result surface filter.  Both ``title`` and ``snippet`` are
+    searched so that noise terms buried only in the snippet are caught too.
+    Returns the first matching term.
     """
     title = (discovered.title or "").casefold()
-    if not title:
+    snippet = (discovered.snippet or "").casefold()
+    text = title + " " + snippet
+    if not text.strip():
         return None
     for term in sorted(_EXCLUDED_TITLE_TERMS, key=len, reverse=True):
-        if term.casefold() in title:
+        if term.casefold() in text:
             return SearchNoiseClassification(
                 reason=SearchNoiseReason.TITLE_KEYWORD_MATCH,
                 matched_keyword=term,
