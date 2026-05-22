@@ -19,49 +19,7 @@ import pytest
 from denbust.prefilter.cascade import CascadeOrchestrator
 from denbust.prefilter.config import PrefilterConfig
 from denbust.prefilter.models import CandidateView, PassKind, StageScore
-
-# ---------------------------------------------------------------------------
-# Minimal CandidateView
-# ---------------------------------------------------------------------------
-
-
-class _FakeCand:
-    """Minimal object satisfying the CandidateView protocol."""
-
-    def __init__(
-        self,
-        candidate_id: str = "cand-test",
-        domain: str | None = "example.co.il",
-        title: str | None = "עצור חשוד ברצח",
-        snippet: str | None = "המשטרה עצרה חשוד",
-        url: str | None = "https://example.co.il/article/1",
-    ) -> None:
-        self._candidate_id = candidate_id
-        self._domain = domain
-        self._title = title
-        self._snippet = snippet
-        self._url = url
-
-    @property
-    def candidate_id(self) -> str:
-        return self._candidate_id
-
-    @property
-    def domain(self) -> str | None:
-        return self._domain
-
-    @property
-    def title(self) -> str | None:
-        return self._title
-
-    @property
-    def snippet(self) -> str | None:
-        return self._snippet
-
-    @property
-    def url(self) -> str | None:
-        return self._url
-
+from tests.unit.prefilter._helpers import FakeCandidate
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -126,19 +84,19 @@ class TestStageBStubInCascade:
 
     def test_thin_pass_no_b_score_when_no_artifacts(self, tmp_path: Path) -> None:
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=None)
-        decision = orch.evaluate_thin(_FakeCand())
+        decision = orch.evaluate_thin(FakeCandidate())
         b_scores = [s for s in decision.stage_scores if s.stage == "B"]
         assert b_scores == []
 
     def test_thick_pass_no_b_score_when_no_artifacts(self, tmp_path: Path) -> None:
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=None)
-        decision = orch.evaluate_thick(_FakeCand(), body="some article body")
+        decision = orch.evaluate_thick(FakeCandidate(), body="some article body")
         b_scores = [s for s in decision.stage_scores if s.stage == "B"]
         assert b_scores == []
 
     def test_cascade_still_passes_without_b_artifacts(self, tmp_path: Path) -> None:
         orch = _enforce_orchestrator(tmp_path / "decisions", models_dir=None)
-        decision = orch.evaluate_thin(_FakeCand())
+        decision = orch.evaluate_thin(FakeCandidate())
         assert decision.verdict == "pass"
         assert decision.stopped_at_stage == "passed_all"
 
@@ -153,13 +111,15 @@ class TestStageBScoreInCascade:
 
     def test_thin_pass_emits_b_score(self, trained_stage_b_dir: Path, tmp_path: Path) -> None:
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=trained_stage_b_dir)
-        decision = orch.evaluate_thin(_FakeCand())
+        decision = orch.evaluate_thin(FakeCandidate())
         b_scores = [s for s in decision.stage_scores if s.stage == "B"]
         assert len(b_scores) == 1
 
     def test_thick_pass_emits_b_score(self, trained_stage_b_dir: Path, tmp_path: Path) -> None:
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=trained_stage_b_dir)
-        decision = orch.evaluate_thick(_FakeCand(), body="החשוד נעצר לאחר חקירה ממושכת של המשטרה")
+        decision = orch.evaluate_thick(
+            FakeCandidate(), body="החשוד נעצר לאחר חקירה ממושכת של המשטרה"
+        )
         b_scores = [s for s in decision.stage_scores if s.stage == "B"]
         assert len(b_scores) == 1
 
@@ -167,7 +127,7 @@ class TestStageBScoreInCascade:
         self, trained_stage_b_dir: Path, tmp_path: Path
     ) -> None:
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=trained_stage_b_dir)
-        decision = orch.evaluate_thin(_FakeCand())
+        decision = orch.evaluate_thin(FakeCandidate())
         b_score = next(s for s in decision.stage_scores if s.stage == "B")
         assert 0.0 <= b_score.p_negative <= 1.0
 
@@ -175,7 +135,7 @@ class TestStageBScoreInCascade:
         self, trained_stage_b_dir: Path, tmp_path: Path
     ) -> None:
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=trained_stage_b_dir)
-        decision = orch.evaluate_thin(_FakeCand())
+        decision = orch.evaluate_thin(FakeCandidate())
         b_score = next(s for s in decision.stage_scores if s.stage == "B")
         assert len(b_score.model_version) > 0
 
@@ -215,7 +175,7 @@ class TestStageBModeSemanticsInCascade:
         monkeypatch.setattr(_stage_b_mod.StageBScorer, "evaluate", _always_drop)
 
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=trained_stage_b_dir)
-        decision = orch.evaluate_thin(_FakeCand())
+        decision = orch.evaluate_thin(FakeCandidate())
         assert decision.verdict == "pass"
         # stopped_at_stage records where the cascade would have stopped.
         assert decision.stopped_at_stage == "B"
@@ -247,7 +207,7 @@ class TestStageBModeSemanticsInCascade:
         monkeypatch.setattr(_stage_b_mod.StageBScorer, "evaluate", _always_drop)
 
         orch = _enforce_orchestrator(tmp_path / "decisions", models_dir=trained_stage_b_dir)
-        decision = orch.evaluate_thin(_FakeCand())
+        decision = orch.evaluate_thin(FakeCandidate())
         assert decision.verdict == "drop"
         assert decision.stopped_at_stage == "B"
 
@@ -257,7 +217,7 @@ class TestStageBModeSemanticsInCascade:
         """Stage B running must cause a telemetry record to be written."""
         decisions_dir = tmp_path / "decisions"
         orch = _shadow_orchestrator(decisions_dir, models_dir=trained_stage_b_dir)
-        orch.evaluate_thin(_FakeCand())
+        orch.evaluate_thin(FakeCandidate())
         files = list(decisions_dir.glob("*.jsonl"))
         assert len(files) == 1
         lines = files[0].read_text(encoding="utf-8").splitlines()
@@ -268,7 +228,7 @@ class TestStageBModeSemanticsInCascade:
         orch = _shadow_orchestrator(tmp_path / "decisions", models_dir=trained_stage_b_dir)
         # Positive title+snippet, but strongly negative body → thick model score should
         # be higher (more negative) than thin model score.
-        cand = _FakeCand(title="עצור חשוד ברצח", snippet="המשטרה עצרה חשוד")
+        cand = FakeCandidate(title="עצור חשוד ברצח", snippet="המשטרה עצרה חשוד")
         body = "משחקי כדורגל וטניס וכדורסל הם ספורט פנאי"
 
         decision_thin = orch.evaluate_thin(cand)

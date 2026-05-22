@@ -3,59 +3,42 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 import pytest
 
-from denbust.prefilter.labels import LabeledCandidate, write_labels_parquet
+from denbust.prefilter.labels import write_labels_parquet
 from denbust.prefilter.stage_b import train_naive_bayes
 
-# ---------------------------------------------------------------------------
-# Shared label-row builder
-# ---------------------------------------------------------------------------
-
-_LABELED_AT = "2026-01-01T00:00:00+00:00"
-
-
-def make_labeled_row(
-    idx: int,
-    label: Literal["positive", "negative"],
-    split: Literal["train", "val", "test"],
-    title: str,
-    snippet: str,
-    body: str | None = None,
-) -> LabeledCandidate:
-    """Build a minimal :class:`LabeledCandidate` for fixture use."""
-    return LabeledCandidate(
-        candidate_id=f"cand-{idx:04d}",
-        domain="example.co.il",
-        url=f"https://example.co.il/article/{idx}",
-        title=title,
-        snippet=snippet,
-        article_body=body,
-        label=label,
-        label_source="triage_manual",
-        split=split,
-        labeled_at=_LABELED_AT,
-        decision_hash=f"hash{idx:04d}",
-    )
-
+# Re-export FakeCandidate so tests can import it from one place.
+# (Importing from _helpers directly is equally valid.)
+from tests.unit.prefilter._helpers import FakeCandidate as FakeCandidate  # noqa: PLC0414
+from tests.unit.prefilter._helpers import make_labeled_row
 
 # ---------------------------------------------------------------------------
 # Shared trained Stage B fixture
+#
+# scope="module" — one training run per test MODULE, not per test function.
+# The models are read-only after setup; there is no need to retrain for each
+# of the ~35 tests that exercise the scorer.  tmp_path_factory creates a
+# directory that persists for the lifetime of the module.
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
-def trained_stage_b_dir(tmp_path: Path) -> Path:
+@pytest.fixture(scope="module")
+def trained_stage_b_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Train Stage B models on a small fixture dataset; return *models_dir*.
 
     Writes ``labels.parquet`` with 15 train rows per class (positive /
     negative) and 4 val + 4 test rows per class, then calls
     :func:`train_naive_bayes` and returns the ``models_dir`` path.
+
+    The fixture is module-scoped so a single training run is shared across
+    all tests in a module — training is idempotent and the artifacts are
+    purely read-only after setup.
     """
+    base = tmp_path_factory.mktemp("stage_b_trained")
     n_per_class = 15
-    rows: list[LabeledCandidate] = []
+    rows = []
     idx = 0
     for split, count in [("train", n_per_class), ("val", 4), ("test", 4)]:
         for _ in range(count):
@@ -82,8 +65,8 @@ def trained_stage_b_dir(tmp_path: Path) -> Path:
             )
             idx += 1
 
-    labels_path = tmp_path / "labels.parquet"
+    labels_path = base / "labels.parquet"
     write_labels_parquet(rows, labels_path)
-    models_dir = tmp_path / "models"
+    models_dir = base / "models"
     train_naive_bayes(labels_path, models_dir)
     return models_dir

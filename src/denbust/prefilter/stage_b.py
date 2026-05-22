@@ -27,11 +27,16 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
+import shutil
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from denbust.prefilter.models import CandidateView, PassKind, StageScore
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Artifact path constants
@@ -64,6 +69,10 @@ class StageBModelMeta:
         Number of training examples used to fit the models.
     n_val:
         Number of validation examples available at training time.
+    n_thick_with_body:
+        Train rows where the thick model used a real ``article_body`` rather
+        than falling back to title+snippet.  Zero means thick == thin model
+        at training time; increases as more scraped labels accumulate.
     """
 
     model_kind: Literal["naive_bayes"]
@@ -71,6 +80,42 @@ class StageBModelMeta:
     trained_at: str
     n_train: int
     n_val: int
+    n_thick_with_body: int
+
+
+# ---------------------------------------------------------------------------
+# Pipeline builder (module-level so it can be imported and tested directly)
+# ---------------------------------------------------------------------------
+
+
+def _build_nb_pipeline(seed: int) -> Any:
+    """Build a fresh calibrated ComplementNB pipeline.
+
+    Uses lazy sklearn imports so the module stays importable without
+    scikit-learn installed (the scorer falls back to stub mode in that case).
+
+    Parameters
+    ----------
+    seed:
+        Random state for :class:`~sklearn.model_selection.StratifiedKFold`
+        inside :class:`~sklearn.calibration.CalibratedClassifierCV` to make
+        cross-validation fold assignment reproducible.
+    """
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.naive_bayes import ComplementNB
+    from sklearn.pipeline import Pipeline
+
+    vec = TfidfVectorizer(
+        analyzer="char_wb",
+        ngram_range=(3, 5),
+        min_df=2,
+        sublinear_tf=True,
+    )
+    base: Any = Pipeline([("vec", vec), ("clf", ComplementNB())])
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+    return CalibratedClassifierCV(base, method="sigmoid", cv=cv)
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +164,17 @@ class StageBScorer:
 
         import joblib  # lazy — scikit-learn/joblib are optional at import time
 
-        _load: Any = joblib.load
-        self._thin_model = _load(thin_path)
-        self._thick_model = _load(thick_path)
+        self._thin_model = joblib.load(thin_path)
+        self._thick_model = joblib.load(thick_path)
         if meta_path.exists():
             meta_raw = json.loads(meta_path.read_text(encoding="utf-8"))
             self._model_version = str(meta_raw.get("model_version", ""))
+        else:
+            logger.warning(
+                "Stage B: meta.json missing from %s; model_version will be empty "
+                "in telemetry.  Re-run `denbust prefilter retrain --stage b` to fix.",
+                stage_dir,
+            )
 
     # ------------------------------------------------------------------
     # Evaluation
@@ -178,7 +228,7 @@ class StageBScorer:
             p_negative=p_negative,
             threshold=self._threshold,
             dropped=dropped,
-            reason=f"nb={p_negative:.3f}",
+            reason=f"nb/{pass_kind}={p_negative:.3f}",
             model_version=self._model_version,
         )
 
@@ -193,7 +243,7 @@ def train_naive_bayes(
     out_dir: Path,
     *,
     seed: int = 20260521,
-) -> StageBModelMeta:
+) -> tuple[StageBModelMeta, Path]:
     """Train calibrated ComplementNB classifiers and write Stage B artifacts.
 
     Reads *labels_path*, restricts to the ``"train"`` split, then trains:
@@ -201,11 +251,15 @@ def train_naive_bayes(
     - **thin model** on ``title + " " + snippet`` (all train rows)
     - **thick model** on ``article_body`` when present, else title+snippet
 
-    Artifacts written to ``out_dir/stage_b/``:
+    Artifacts written atomically to ``out_dir/stage_b/``:
 
     - ``thin_model.joblib``
     - ``thick_model.joblib``
     - ``meta.json``
+
+    All three files are first written to a temporary sibling directory and
+    then renamed into place as a unit, so a crash mid-write never leaves the
+    ``stage_b/`` directory in a partially-written state.
 
     Parameters
     ----------
@@ -214,13 +268,15 @@ def train_naive_bayes(
     out_dir:
         Parent directory for ``stage_b/`` artifacts.
     seed:
-        Random seed for :class:`~sklearn.calibration.CalibratedClassifierCV`
-        to make cross-validation fold assignment reproducible.
+        Random seed passed to :func:`_build_nb_pipeline` for reproducible
+        cross-validation fold assignment.
 
     Returns
     -------
-    StageBModelMeta
-        Provenance metadata for the written artifacts.
+    tuple[StageBModelMeta, Path]
+        ``(meta, stage_dir)`` — provenance metadata and the path of the
+        written artifact directory.  The caller can use ``stage_dir`` to
+        report artifact locations without re-computing the path.
 
     Raises
     ------
@@ -230,11 +286,6 @@ def train_naive_bayes(
         When ``scikit-learn`` or ``joblib`` are not installed.
     """
     import joblib
-    from sklearn.calibration import CalibratedClassifierCV
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.model_selection import StratifiedKFold
-    from sklearn.naive_bayes import ComplementNB
-    from sklearn.pipeline import Pipeline
 
     from denbust.prefilter.labels import read_labels_parquet
 
@@ -258,53 +309,76 @@ def train_naive_bayes(
     label_to_int = {"negative": 0, "positive": 1}
 
     thin_texts = [(r.title + " " + r.snippet).strip() for r in train_rows]
+
     # Thick model: use article_body when available, fall back to title+snippet.
+    # Track how many rows actually have a real body — zero means thick == thin.
+    n_thick_with_body = sum(1 for r in train_rows if r.article_body is not None)
+    if n_thick_with_body == 0:
+        warnings.warn(
+            f"All {len(train_rows)} train rows have article_body=None; "
+            "the thick model is identical to the thin model at this training. "
+            "Scrape articles and retrain to improve thick-pass accuracy.",
+            UserWarning,
+            stacklevel=2,
+        )
     thick_texts = [(r.article_body or (r.title + " " + r.snippet)).strip() for r in train_rows]
     y_train = [label_to_int[r.label] for r in train_rows]
 
-    def _build_pipeline() -> Any:
-        vec = TfidfVectorizer(
-            analyzer="char_wb",
-            ngram_range=(3, 5),
-            min_df=2,
-            sublinear_tf=True,
-        )
-        base: Any = Pipeline([("vec", vec), ("clf", ComplementNB())])
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
-        return CalibratedClassifierCV(base, method="sigmoid", cv=cv)
-
-    thin_model = _build_pipeline()
+    thin_model = _build_nb_pipeline(seed)
     thin_model.fit(thin_texts, y_train)
 
-    thick_model = _build_pipeline()
+    thick_model = _build_nb_pipeline(seed)
     thick_model.fit(thick_texts, y_train)
 
-    stage_dir = out_dir / _STAGE_B_SUBDIR
-    stage_dir.mkdir(parents=True, exist_ok=True)
+    # Atomic write: write all artifacts to a temp sibling directory, then
+    # rename it into place.  This ensures the stage_b/ directory is either
+    # fully written or the old version survives intact.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    import tempfile
 
-    thin_path = stage_dir / _THIN_MODEL_FILE
-    thick_path = stage_dir / _THICK_MODEL_FILE
-    meta_path = stage_dir / _META_FILE
+    tmp_dir = Path(tempfile.mkdtemp(dir=out_dir, prefix=f"{_STAGE_B_SUBDIR}.tmp."))
+    try:
+        thin_path = tmp_dir / _THIN_MODEL_FILE
+        thick_path = tmp_dir / _THICK_MODEL_FILE
+        meta_path = tmp_dir / _META_FILE
 
-    _dump: Any = joblib.dump
-    _dump(thin_model, thin_path)
-    _dump(thick_model, thick_path)
+        joblib.dump(thin_model, thin_path)
+        joblib.dump(thick_model, thick_path)
 
-    model_version = _sha1_file(thin_path)[:12]
+        model_version = _sha1_file(thin_path)[:12]
 
-    meta = StageBModelMeta(
-        model_kind="naive_bayes",
-        model_version=model_version,
-        trained_at=datetime.now(UTC).isoformat(),
-        n_train=len(train_rows),
-        n_val=len(val_rows),
-    )
-    meta_path.write_text(
-        json.dumps(dataclasses.asdict(meta), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+        meta = StageBModelMeta(
+            model_kind="naive_bayes",
+            model_version=model_version,
+            trained_at=datetime.now(UTC).isoformat(),
+            n_train=len(train_rows),
+            n_val=len(val_rows),
+            n_thick_with_body=n_thick_with_body,
+        )
+        # Serialize only the JSON-safe fields — exclude any future Path-typed fields.
+        meta_dict = {
+            "model_kind": meta.model_kind,
+            "model_version": meta.model_version,
+            "trained_at": meta.trained_at,
+            "n_train": meta.n_train,
+            "n_val": meta.n_val,
+            "n_thick_with_body": meta.n_thick_with_body,
+        }
+        meta_path.write_text(
+            json.dumps(meta_dict, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
-    return meta
+        # Atomic replace: remove old stage_b/ (if any) then rename tmp into place.
+        stage_dir = out_dir / _STAGE_B_SUBDIR
+        if stage_dir.exists():
+            shutil.rmtree(stage_dir)
+        tmp_dir.rename(stage_dir)
+    except Exception:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+
+    return meta, stage_dir
 
 
 # ---------------------------------------------------------------------------

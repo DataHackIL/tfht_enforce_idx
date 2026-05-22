@@ -158,11 +158,10 @@ def retrain_cmd(
         from denbust.prefilter.stage_b import train_naive_bayes
 
         typer.echo(f"Retraining Stage B from {prefilter_paths.labels_path} ...")
-        meta = train_naive_bayes(
+        meta, stage_dir = train_naive_bayes(
             labels_path=prefilter_paths.labels_path,
             out_dir=prefilter_paths.models_dir,
         )
-        stage_dir = prefilter_paths.models_dir / "stage_b"
         typer.echo(f"  thin_model        -> {stage_dir / 'thin_model.joblib'}")
         typer.echo(f"  thick_model       -> {stage_dir / 'thick_model.joblib'}")
         typer.echo(f"  meta.json         -> {stage_dir / 'meta.json'}")

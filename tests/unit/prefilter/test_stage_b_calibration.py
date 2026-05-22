@@ -2,8 +2,12 @@
 
 The calibrated ComplementNB should assign probability estimates that are
 better-calibrated than a naive constant-output baseline.  We evaluate on
-held-out examples drawn from the same text distribution as the training
-fixture (see conftest.py → trained_stage_b_dir).
+held-out candidates whose text is *different* from the training fixture so
+the model must generalise rather than memorise.
+
+Training negatives use "ספורט ופנאי" / "כדורגל ושחמט".
+Training positives use "עצור חשוד ברצח" / "המשטרה עצרה חשוד".
+Val candidates below deliberately use different phrasings.
 """
 
 from __future__ import annotations
@@ -11,44 +15,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from denbust.prefilter.stage_b import StageBScorer
+from tests.unit.prefilter._helpers import FakeCandidate
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-class _FakeCand:
-    """Minimal CandidateView for calibration evaluation."""
-
-    def __init__(
-        self,
-        candidate_id: str,
-        title: str | None,
-        snippet: str | None,
-    ) -> None:
-        self._candidate_id = candidate_id
-        self._title = title
-        self._snippet = snippet
-
-    @property
-    def candidate_id(self) -> str:
-        return self._candidate_id
-
-    @property
-    def domain(self) -> str | None:
-        return "example.co.il"
-
-    @property
-    def title(self) -> str | None:
-        return self._title
-
-    @property
-    def snippet(self) -> str | None:
-        return self._snippet
-
-    @property
-    def url(self) -> str | None:
-        return "https://example.co.il/article/1"
 
 
 def _brier_score(p_positives: list[float], labels: list[int]) -> float:
@@ -58,23 +29,64 @@ def _brier_score(p_positives: list[float], labels: list[int]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Val-split candidates (mirrors conftest._write_fixture val rows)
-# The conftest fixture trains on sports (negative) and crime (positive).
-# These val examples come from the same distribution.
-# y = 0 → negative (sports), y = 1 → positive (crime/arrest).
+# Held-out val candidates — different phrasing from the training fixture.
+#
+# y = 0 → negative (sports); y = 1 → positive (crime/arrest).
+# Text is deliberately *not* identical to training titles/snippets so the
+# model must generalise across surface forms, not just memorise exact n-grams.
 # ---------------------------------------------------------------------------
 
-_VAL_CANDIDATES: list[tuple[_FakeCand, int]] = [
-    # negatives — sports
-    (_FakeCand("v-neg-0", "ספורט ופנאי", "כדורגל ושחמט"), 0),
-    (_FakeCand("v-neg-1", "ספורט ופנאי", "כדורגל ושחמט"), 0),
-    (_FakeCand("v-neg-2", "ספורט ופנאי", "כדורגל ושחמט"), 0),
-    (_FakeCand("v-neg-3", "ספורט ופנאי", "כדורגל ושחמט"), 0),
-    # positives — crime/arrest
-    (_FakeCand("v-pos-0", "עצור חשוד ברצח", "המשטרה עצרה חשוד"), 1),
-    (_FakeCand("v-pos-1", "עצור חשוד ברצח", "המשטרה עצרה חשוד"), 1),
-    (_FakeCand("v-pos-2", "עצור חשוד ברצח", "המשטרה עצרה חשוד"), 1),
-    (_FakeCand("v-pos-3", "עצור חשוד ברצח", "המשטרה עצרה חשוד"), 1),
+_VAL_CANDIDATES: list[tuple[FakeCandidate, int]] = [
+    # negatives — sports, different words from training set
+    (
+        FakeCandidate(
+            candidate_id="v-neg-0", title="ליגת הכדורסל הלאומית", snippet="תוצאות משחקי כדורגל"
+        ),
+        0,
+    ),
+    (
+        FakeCandidate(
+            candidate_id="v-neg-1", title="אליפות הטניס העולמית", snippet="טורניר כדורגל ושחמט"
+        ),
+        0,
+    ),
+    (
+        FakeCandidate(
+            candidate_id="v-neg-2", title="ספורט ופנאי ובידור", snippet="ספורטאים וקבוצות"
+        ),
+        0,
+    ),
+    (
+        FakeCandidate(
+            candidate_id="v-neg-3", title="תוצאות ספורט של השבוע", snippet="כדורגל וכדורסל"
+        ),
+        0,
+    ),
+    # positives — crime/arrest, different words from training set
+    (
+        FakeCandidate(
+            candidate_id="v-pos-0", title="נאשם נעצר על ידי המשטרה", snippet="חשוד ברצח נלכד"
+        ),
+        1,
+    ),
+    (
+        FakeCandidate(
+            candidate_id="v-pos-1", title="מעצר חשוד בעקבות חקירה", snippet="המשטרה עצרה את החשוד"
+        ),
+        1,
+    ),
+    (
+        FakeCandidate(
+            candidate_id="v-pos-2", title="חשוד בפשע נעצר הלילה", snippet="כוחות המשטרה פשטו"
+        ),
+        1,
+    ),
+    (
+        FakeCandidate(
+            candidate_id="v-pos-3", title="עצור בגין חשד לרצח", snippet="נאשם הובא לחקירה"
+        ),
+        1,
+    ),
 ]
 
 
