@@ -18,6 +18,39 @@ from denbust.discovery.models import (
 )
 from denbust.news_items.normalize import canonicalize_news_url
 
+# Brave returns HTTP 422 when the query string grows too long from many -site:
+# operators.  We cap the number of excluded domains and prioritise the highest-
+# traffic ones so the cap never silently drops the most impactful exclusions.
+_BRAVE_MAX_EXCLUDED_DOMAINS: int = 15
+
+# Domains sorted from most to least important to exclude.  Any domain that
+# appears here is promoted to the front of the exclusion list before capping;
+# the remainder are appended alphabetically.
+_BRAVE_EXCLUDED_DOMAIN_PRIORITY: tuple[str, ...] = (
+    "he.wikipedia.org",
+    "themarker.com",
+    "globes.co.il",
+    "calcalist.co.il",
+    "kikar.co.il",
+    "srugim.co.il",
+    "sport1.maariv.co.il",
+    "collab.mako.co.il",
+    "nevo.co.il",
+    "bizportal.co.il",
+    "he.wikiquote.org",
+    "kolzchut.org.il",
+)
+
+
+def _brave_excluded_domains(domains: list[str]) -> list[str]:
+    """Return *domains* sorted by exclusion priority, capped at the Brave limit."""
+    priority_index = {d: i for i, d in enumerate(_BRAVE_EXCLUDED_DOMAIN_PRIORITY)}
+    sorted_domains = sorted(
+        domains,
+        key=lambda d: (priority_index.get(d, len(_BRAVE_EXCLUDED_DOMAIN_PRIORITY)), d),
+    )
+    return sorted_domains[:_BRAVE_MAX_EXCLUDED_DOMAINS]
+
 
 class BraveSearchEngine:
     """Brave Search API adapter for discovery candidates."""
@@ -93,7 +126,8 @@ class BraveSearchEngine:
         # instead.  Only applied when the query is not already scoped to a
         # preferred domain (source-targeted queries don't need it).
         if query.excluded_domains and not query.preferred_domains:
-            parts.extend(f"-site:{domain}" for domain in query.excluded_domains)
+            for domain in _brave_excluded_domains(query.excluded_domains):
+                parts.append(f"-site:{domain}")
         return " ".join(parts)
 
     def _result_to_candidate(

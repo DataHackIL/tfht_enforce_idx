@@ -12,7 +12,7 @@ name: enforcement-news-local-search-brave-exa
 dataset_name: news_items
 job_name: ingest
 days: 21
-max_articles: 30
+max_articles: 100
 
 sources:
   - name: ynet
