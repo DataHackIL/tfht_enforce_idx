@@ -44,7 +44,7 @@ _SOURCE_SCRAPE_PRIORITY: dict[str, int] = {
     "maariv": 10,  # 5.8 % true-positive density
     "walla": 9,  # 5.6 %
     "haaretz": 8,  # 3.5 %
-    "ice": 7,  # 2.9 %
+    "ice": 1,  # celebrity/entertainment mix — low enforcement density; de-prioritised
     "mako": 6,  # 2.0 %
     "ynet": 5,  # 1.4 %
     "israelhayom": 4,
