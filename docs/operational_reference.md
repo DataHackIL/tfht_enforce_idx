@@ -312,7 +312,7 @@ Bootstrap notes:
 - `runs/` and `publication/` directories are created automatically by the workflows when needed
 - `logs/` is created automatically once ingest debug artifacts are written
 - a small `README.md` in the state repo is fine but optional
-- see [docs/discovery_operations.md](docs/discovery_operations.md) for the detailed discover /
+- see [docs/discovery_operations.md](discovery_operations.md) for the detailed discover /
   ingest / backfill runbook and migration checklist
 - the one-time `C-8` catch-up path is a manual 90-day `backfill_discover` plus `backfill_scrape`
   run using the existing 7-day backfill window slicing
@@ -789,13 +789,13 @@ For backup specifically:
 
 ## Documentation
 
-- [Agent Plan](.agent-plan.md) - Current operational priority pointer
-- [Repo Plan Summary](PLAN.md) - Human-friendly map of the main plan and active sub-plans
-- [Discovery Operations](docs/discovery_operations.md) - Local and GitHub Actions runbook for discover/ingest/backfill
-- [Product Definition](docs/product_def.md) - Full project background (Hebrew)
-- [MVP Spec](docs/MVP_SPEC.md) - Phase 1 technical scope
-- [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) - Task breakdown
-- [Discovery Layer Rollout Plan](docs/tfht_discovery_layer_implementation_plan.md) - `DL-PR-*` sequence
+- [Agent Plan](../.agent-plan.md) - Current operational priority pointer
+- [Repo Plan Summary](../PLAN.md) - Human-friendly map of the main plan and active sub-plans
+- [Discovery Operations](discovery_operations.md) - Local and GitHub Actions runbook for discover/ingest/backfill
+- [Product Definition](product_def.md) - Full project background (Hebrew)
+- [MVP Spec](MVP_SPEC.md) - Phase 1 technical scope
+- [Implementation Plan](IMPLEMENTATION_PLAN.md) - Task breakdown
+- [Discovery Layer Rollout Plan](tfht_discovery_layer_implementation_plan.md) - `DL-PR-*` sequence
 
 ## Planning Workflow
 
