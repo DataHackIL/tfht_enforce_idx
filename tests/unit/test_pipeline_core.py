@@ -794,8 +794,10 @@ class TestRunPipelineAsync:
             def close(self) -> None:
                 captured["closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -831,8 +833,10 @@ class TestRunPipelineAsync:
             def close(self) -> None:
                 captured["closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -886,8 +890,10 @@ class TestRunPipelineAsync:
             async def aclose(self) -> None:
                 captured["engine_closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -935,8 +941,10 @@ class TestRunPipelineAsync:
             def close(self) -> None:
                 captured["closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -969,8 +977,10 @@ class TestRunPipelineAsync:
             def close(self) -> None:
                 captured["closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -1022,8 +1032,10 @@ class TestRunPipelineAsync:
             async def aclose(self) -> None:
                 captured["engine_closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -1071,8 +1083,10 @@ class TestRunPipelineAsync:
             def close(self) -> None:
                 captured["closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -1105,8 +1119,10 @@ class TestRunPipelineAsync:
             def close(self) -> None:
                 captured["closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -1150,8 +1166,10 @@ class TestRunPipelineAsync:
             def close(self) -> None:
                 captured["closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
@@ -1209,8 +1227,10 @@ class TestRunPipelineAsync:
             async def aclose(self) -> None:
                 captured["engine_closed"] = True
 
-        def fake_persist_discovered_candidates(*, run, discovered_candidates, persistence):
-            del persistence
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
             captured["run"] = run
             captured["candidates"] = discovered_candidates
             return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])

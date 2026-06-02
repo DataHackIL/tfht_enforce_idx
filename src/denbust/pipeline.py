@@ -43,6 +43,13 @@ from denbust.discovery.backfill import (
     resolve_backfill_request_window,
 )
 from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
+from denbust.discovery.engine_checkpoint import (
+    cache_path as _engine_cache_path,
+)
+from denbust.discovery.engine_checkpoint import (
+    load_cached_candidates,
+    save_cached_candidates,
+)
 from denbust.discovery.engines.brave import BraveSearchEngine
 from denbust.discovery.engines.exa import ExaSearchEngine
 from denbust.discovery.engines.google_cse import GoogleCseSearchEngine
@@ -946,13 +953,19 @@ async def _run_source_native_discovery(
         persistence.close()
 
 
+# Flush accumulated search-engine candidates to the store after this many
+# queries.  Keeps memory bounded and ensures progress is durable even if the
+# process is killed mid-run.
+_DISCOVERY_PERSIST_BATCH: int = 50
+
+
 async def _run_brave_discovery(
     *,
     config: Config,
     run_id: str,
     days: int,
 ) -> PersistedSourceDiscovery:
-    """Run Brave-powered discovery and persist candidates into the durable layer."""
+    """Run Brave-powered discovery with per-query checkpointing and incremental persist."""
     queries = build_discovery_queries(config, days=days)
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -988,22 +1001,40 @@ async def _run_brave_discovery(
         api_key=brave_api_key,
         max_results_per_query=config.discovery.engines.brave.max_results_per_query,
     )
+    context = DiscoveryContext(
+        run_id=run_id,
+        max_results_per_query=config.discovery.engines.brave.max_results_per_query,
+        metadata={"days": days, "engine": "brave"},
+    )
+    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     try:
-        try:
-            discovered_candidates = await engine.discover(
-                queries,
-                context=DiscoveryContext(
-                    run_id=run_id,
-                    max_results_per_query=config.discovery.engines.brave.max_results_per_query,
-                    metadata={"days": days, "engine": "brave"},
-                ),
-            )
-        except Exception as exc:
-            discovery_run.errors.append(f"brave: {type(exc).__name__}: {exc}")
-            discovered_candidates = []
-        return persist_discovered_candidates(
+        batch: list[DiscoveredCandidate] = []
+        last_result: PersistedSourceDiscovery | None = None
+        for i, query in enumerate(queries):
+            is_last = i == len(queries) - 1
+            cp = _engine_cache_path(cache_dir, "brave", query)
+            cached = load_cached_candidates(cp)
+            if cached is not None:
+                batch.extend(cached)
+            else:
+                try:
+                    fresh = await engine.discover([query], context)
+                except Exception as exc:
+                    discovery_run.errors.append(f"brave: {type(exc).__name__}: {exc}")
+                    fresh = []
+                save_cached_candidates(cp, fresh)
+                batch.extend(fresh)
+            if len(batch) >= _DISCOVERY_PERSIST_BATCH or is_last:
+                last_result = persist_discovered_candidates(
+                    run=discovery_run,
+                    discovered_candidates=batch,
+                    persistence=persistence,
+                    finalize=is_last,
+                )
+                batch = []
+        return last_result or persist_discovered_candidates(
             run=discovery_run,
-            discovered_candidates=discovered_candidates,
+            discovered_candidates=[],
             persistence=persistence,
         )
     finally:
@@ -1017,7 +1048,7 @@ async def _run_exa_discovery(
     run_id: str,
     days: int,
 ) -> PersistedSourceDiscovery:
-    """Run Exa-powered discovery and persist candidates into the durable layer."""
+    """Run Exa-powered discovery with per-query checkpointing and incremental persist."""
     queries = build_discovery_queries(config, days=days)
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -1053,26 +1084,44 @@ async def _run_exa_discovery(
         api_key=exa_api_key,
         max_results_per_query=config.discovery.engines.exa.max_results_per_query,
     )
+    context = DiscoveryContext(
+        run_id=run_id,
+        max_results_per_query=config.discovery.engines.exa.max_results_per_query,
+        metadata={
+            "days": days,
+            "engine": "exa",
+            "allow_find_similar": config.discovery.engines.exa.allow_find_similar,
+        },
+    )
+    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     try:
-        try:
-            discovered_candidates = await engine.discover(
-                queries,
-                context=DiscoveryContext(
-                    run_id=run_id,
-                    max_results_per_query=config.discovery.engines.exa.max_results_per_query,
-                    metadata={
-                        "days": days,
-                        "engine": "exa",
-                        "allow_find_similar": config.discovery.engines.exa.allow_find_similar,
-                    },
-                ),
-            )
-        except Exception as exc:
-            discovery_run.errors.append(f"exa: {type(exc).__name__}: {exc}")
-            discovered_candidates = []
-        return persist_discovered_candidates(
+        batch: list[DiscoveredCandidate] = []
+        last_result: PersistedSourceDiscovery | None = None
+        for i, query in enumerate(queries):
+            is_last = i == len(queries) - 1
+            cp = _engine_cache_path(cache_dir, "exa", query)
+            cached = load_cached_candidates(cp)
+            if cached is not None:
+                batch.extend(cached)
+            else:
+                try:
+                    fresh = await engine.discover([query], context)
+                except Exception as exc:
+                    discovery_run.errors.append(f"exa: {type(exc).__name__}: {exc}")
+                    fresh = []
+                save_cached_candidates(cp, fresh)
+                batch.extend(fresh)
+            if len(batch) >= _DISCOVERY_PERSIST_BATCH or is_last:
+                last_result = persist_discovered_candidates(
+                    run=discovery_run,
+                    discovered_candidates=batch,
+                    persistence=persistence,
+                    finalize=is_last,
+                )
+                batch = []
+        return last_result or persist_discovered_candidates(
             run=discovery_run,
-            discovered_candidates=discovered_candidates,
+            discovered_candidates=[],
             persistence=persistence,
         )
     finally:
@@ -1086,7 +1135,7 @@ async def _run_google_cse_discovery(
     run_id: str,
     days: int,
 ) -> PersistedSourceDiscovery:
-    """Run Google CSE-powered discovery and persist candidates into the durable layer."""
+    """Run Google CSE-powered discovery with per-query checkpointing and incremental persist."""
     queries = build_discovery_queries(config, days=days)
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -1134,22 +1183,40 @@ async def _run_google_cse_discovery(
         cse_id=google_cse_id,
         max_results_per_query=config.discovery.engines.google_cse.max_results_per_query,
     )
+    context = DiscoveryContext(
+        run_id=run_id,
+        max_results_per_query=config.discovery.engines.google_cse.max_results_per_query,
+        metadata={"days": days, "engine": "google_cse"},
+    )
+    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     try:
-        try:
-            discovered_candidates = await engine.discover(
-                queries,
-                context=DiscoveryContext(
-                    run_id=run_id,
-                    max_results_per_query=config.discovery.engines.google_cse.max_results_per_query,
-                    metadata={"days": days, "engine": "google_cse"},
-                ),
-            )
-        except Exception as exc:
-            discovery_run.errors.append(f"google_cse: {type(exc).__name__}: {exc}")
-            discovered_candidates = []
-        return persist_discovered_candidates(
+        batch: list[DiscoveredCandidate] = []
+        last_result: PersistedSourceDiscovery | None = None
+        for i, query in enumerate(queries):
+            is_last = i == len(queries) - 1
+            cp = _engine_cache_path(cache_dir, "google_cse", query)
+            cached = load_cached_candidates(cp)
+            if cached is not None:
+                batch.extend(cached)
+            else:
+                try:
+                    fresh = await engine.discover([query], context)
+                except Exception as exc:
+                    discovery_run.errors.append(f"google_cse: {type(exc).__name__}: {exc}")
+                    fresh = []
+                save_cached_candidates(cp, fresh)
+                batch.extend(fresh)
+            if len(batch) >= _DISCOVERY_PERSIST_BATCH or is_last:
+                last_result = persist_discovered_candidates(
+                    run=discovery_run,
+                    discovered_candidates=batch,
+                    persistence=persistence,
+                    finalize=is_last,
+                )
+                batch = []
+        return last_result or persist_discovered_candidates(
             run=discovery_run,
-            discovered_candidates=discovered_candidates,
+            discovered_candidates=[],
             persistence=persistence,
         )
     finally:
