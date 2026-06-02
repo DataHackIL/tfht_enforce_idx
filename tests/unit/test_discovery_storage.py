@@ -834,6 +834,66 @@ def test_composite_discovery_persistence_fans_out_writes_and_reads_from_primary(
     composite.close()
 
 
+def test_state_repo_discovery_persistence_index_stays_consistent_across_upserts(
+    tmp_path: Path,
+) -> None:
+    """In-memory index must stay consistent when upsert_candidates is called multiple times."""
+    paths = resolve_discovery_state_paths(state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS)
+    store = StateRepoDiscoveryPersistence(paths)
+
+    c1 = build_candidate(
+        "c1",
+        canonical_url="https://www.ynet.co.il/news/article/aaa",
+        current_url="https://www.ynet.co.il/news/article/aaa?utm=1",
+    )
+    c2 = build_candidate(
+        "c2",
+        canonical_url="https://www.walla.co.il/item/bbb",
+        current_url="https://www.walla.co.il/item/bbb",
+    )
+    c3 = build_candidate(
+        "c3",
+        canonical_url="https://www.mako.co.il/news/ccc",
+        current_url="https://www.mako.co.il/news/ccc?ref=x",
+    )
+
+    store.upsert_candidates([c1, c2])
+    store.upsert_candidates([c3])
+
+    # All three must be reachable via O(1) URL lookup.
+    assert (
+        store.find_candidate_by_urls(
+            canonical_url="https://www.ynet.co.il/news/article/aaa", current_url=""
+        )
+        is not None
+    )
+    assert (
+        store.find_candidate_by_urls(
+            canonical_url="https://www.walla.co.il/item/bbb", current_url=""
+        )
+        is not None
+    )
+    assert (
+        store.find_candidate_by_urls(
+            canonical_url="https://www.mako.co.il/news/ccc", current_url=""
+        )
+        is not None
+    )
+    assert store.get_candidate("c1") is not None
+    assert store.get_candidate("c3") is not None
+    assert store.count_candidates() == 3
+
+    # A fresh store instance reading the written file must see the same candidates.
+    fresh = StateRepoDiscoveryPersistence(paths)
+    assert fresh.count_candidates() == 3
+    assert (
+        fresh.find_candidate_by_urls(
+            canonical_url="https://www.mako.co.il/news/ccc", current_url=""
+        )
+        is not None
+    )
+
+
 def test_create_discovery_persistence_selects_state_or_composite(
     monkeypatch, tmp_path: Path
 ) -> None:
