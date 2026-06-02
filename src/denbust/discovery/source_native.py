@@ -279,8 +279,16 @@ def persist_discovered_candidates(
     run: DiscoveryRun,
     discovered_candidates: list[DiscoveredCandidate],
     persistence: DiscoveryPersistence,
+    finalize: bool = True,
 ) -> PersistedSourceDiscovery:
-    """Merge, persist, and provenance-track discovered candidates."""
+    """Merge, persist, and provenance-track discovered candidates.
+
+    When *finalize* is ``False`` the run record is written with its current
+    (in-progress) status but ``run.status`` and ``run.finished_at`` are not
+    set — the caller is responsible for making a final call with
+    ``finalize=True`` to close out the run.  Counts accumulate across calls so
+    multi-batch callers get correct totals.
+    """
     merged_candidates: dict[str, PersistentCandidate] = {}
     identity_map: dict[str, str] = {}
     provenance_events: list[CandidateProvenance] = []
@@ -358,8 +366,9 @@ def persist_discovered_candidates(
         )
 
     persisted_candidates = list(merged_candidates.values())
-    run.candidate_count = len(discovered_candidates)
-    run.merged_candidate_count = len(persisted_candidates)
+    # Accumulate counts so multi-batch callers get correct totals.
+    run.candidate_count += len(discovered_candidates)
+    run.merged_candidate_count += len(persisted_candidates)
     run.queued_for_scrape_count = 0
     try:
         persistence.write_run(run)
@@ -372,14 +381,17 @@ def persist_discovered_candidates(
         persistence.write_run(run)
         raise
 
-    if run.errors:
-        run.status = (
-            DiscoveryRunStatus.FAILED if not discovered_candidates else DiscoveryRunStatus.PARTIAL
-        )
-    else:
-        run.status = DiscoveryRunStatus.SUCCEEDED
-    run.finished_at = datetime.now(UTC)
-    persistence.write_run(run)
+    if finalize:
+        if run.errors:
+            run.status = (
+                DiscoveryRunStatus.FAILED
+                if run.candidate_count == 0
+                else DiscoveryRunStatus.PARTIAL
+            )
+        else:
+            run.status = DiscoveryRunStatus.SUCCEEDED
+        run.finished_at = datetime.now(UTC)
+        persistence.write_run(run)
     return PersistedSourceDiscovery(
         run=run,
         candidates=persisted_candidates,

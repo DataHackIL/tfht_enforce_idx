@@ -36,6 +36,7 @@ class DiscoveryStatePaths(BaseModel):
     discovery_diagnostics_latest_path: Path
     source_suggestions_latest_path: Path
     backfill_executed_queries_path: Path
+    engine_query_cache_dir: Path
 
 
 def resolve_discovery_state_paths(
@@ -59,6 +60,7 @@ def resolve_discovery_state_paths(
         candidates_dir=candidates_dir,
         metrics_dir=metrics_dir,
         backfill_batches_dir=backfill_batches_dir,
+        engine_query_cache_dir=candidates_dir / "engine_query_cache",
         latest_candidates_path=candidates_dir / "latest_candidates.jsonl",
         latest_backfill_batches_path=backfill_batches_dir / "latest_backfill_batches.jsonl",
         retry_queue_path=candidates_dir / "retry_queue.jsonl",
