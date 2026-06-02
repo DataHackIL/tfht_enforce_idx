@@ -2429,7 +2429,7 @@ class TestRunPipelineAsync:
         assert batch.selected_candidates == selected_candidates
         assert thin_decisions == []
         assert persistence.closed is True
-        select_mock.assert_called_once_with(persistence, limit=3)
+        select_mock.assert_called_once_with(persistence, limit=3, pub_date_from=None)
         scrape_mock.assert_awaited_once_with(
             config=config,
             candidates=selected_candidates,
@@ -2573,6 +2573,7 @@ class TestRunPipelineAsync:
             sources: list[FakeSource],
             limit: int,
             orchestrator: object = None,  # noqa: ARG001
+            pub_date_from: object = None,  # noqa: ARG001
         ) -> tuple[CandidateScrapeBatch, list[object]]:
             captured["days"] = config.days
             captured["limit"] = limit
@@ -4057,6 +4058,7 @@ class TestRunPipeline:
             "job_name": JobName.INGEST,
             "days_override": 5,
             "operational_store": None,
+            "scrape_pub_date_from": None,
         }
 
     def test_run_job_from_config_passes_operational_store_to_async_runner(

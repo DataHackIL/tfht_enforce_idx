@@ -1417,17 +1417,21 @@ async def _run_candidate_scrape_job(
     sources: list[Source],
     limit: int,
     orchestrator: CascadeOrchestrator | None = None,
+    pub_date_from: datetime | None = None,
 ) -> tuple[CandidateScrapeBatch, list[PrefilterDecision]]:
     """Select queued candidates, apply the thin prefilter, and run the scrape-attempt layer.
 
     Returns ``(scrape_batch, thin_decisions)``.  When *orchestrator* is ``None``
-    the thin pass is skipped and ``thin_decisions`` is empty.
+    the thin pass is skipped and ``thin_decisions`` is empty.  When
+    *pub_date_from* is set only candidates published on or after that date are
+    considered (targeted / recent-only scrape).
     """
     persistence = create_discovery_persistence(config)
     try:
         selected_candidates = select_candidates_for_scrape(
             persistence,
             limit=limit,
+            pub_date_from=pub_date_from,
         )
     finally:
         persistence.close()
@@ -2494,6 +2498,7 @@ async def run_news_scrape_candidates_job(
             sources=sources,
             limit=config.max_articles,
             orchestrator=orchestrator,
+            pub_date_from=config.scrape_pub_date_from,
         )
         result.raw_article_count = len(scrape_batch.raw_articles)
         if scrape_batch.errors:
@@ -3294,6 +3299,7 @@ def _run_job_from_config(
     job_name: JobName | None,
     days_override: int | None = None,
     operational_store: OperationalStore | None = None,
+    scrape_pub_date_from: str | None = None,
 ) -> RunSnapshot:
     """Shared sync wrapper for CLI-triggered job runs."""
     setup_logging()
@@ -3304,6 +3310,14 @@ def _run_job_from_config(
         update["dataset_name"] = DatasetName(dataset_name)
     if job_name is not None:
         update["job_name"] = JobName(job_name)
+    if scrape_pub_date_from is not None:
+        try:
+            update["scrape_pub_date_from"] = datetime.fromisoformat(scrape_pub_date_from).replace(
+                tzinfo=UTC
+            )
+        except ValueError as exc:
+            print(f"Error: --pub-date-from must be an ISO date (YYYY-MM-DD): {exc}")
+            sys.exit(1)
     if update:
         config = config.model_copy(update=update)
 
@@ -3379,6 +3393,7 @@ def run_job(
     job_name: JobName,
     days_override: int | None = None,
     operational_store: OperationalStore | None = None,
+    scrape_pub_date_from: str | None = None,
 ) -> None:
     """Run a dataset/job pair through the generic registry."""
     _run_job_from_config(
@@ -3387,6 +3402,7 @@ def run_job(
         job_name=job_name,
         days_override=days_override,
         operational_store=operational_store,
+        scrape_pub_date_from=scrape_pub_date_from,
     )
 
 

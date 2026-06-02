@@ -65,12 +65,26 @@ def run(
         int | None,
         typer.Option("--days", "-d", help="Days back to search (ingest only)"),
     ] = None,
+    pub_date_from: Annotated[
+        str | None,
+        typer.Option(
+            "--pub-date-from",
+            help="ISO date (YYYY-MM-DD): only scrape candidates published on or after this date"
+            " (scrape_candidates job only).",
+        ),
+    ] = None,
 ) -> None:
     """Run a dataset/job pair through the registry."""
     from denbust.pipeline import run_job
 
     config_path = config or Path("agents/news/local.yaml")
-    run_job(config_path=config_path, dataset_name=dataset, job_name=job, days_override=days)
+    run_job(
+        config_path=config_path,
+        dataset_name=dataset,
+        job_name=job,
+        days_override=days,
+        scrape_pub_date_from=pub_date_from,
+    )
 
 
 @app.command("diagnose-sources")

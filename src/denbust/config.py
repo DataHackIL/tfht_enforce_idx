@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import Mapping
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -435,6 +436,7 @@ class Config(BaseModel):
     job_name: JobName = JobName.INGEST
     days: int = Field(default=3, ge=1)
     max_articles: int = Field(default=30, ge=1)
+    scrape_pub_date_from: datetime | None = None
     keywords: list[str] = Field(default_factory=lambda: DEFAULT_KEYWORDS.copy())
     sources: list[SourceConfig] = Field(default_factory=list)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
