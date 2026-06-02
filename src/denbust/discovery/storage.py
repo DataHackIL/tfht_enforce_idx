@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -176,10 +175,43 @@ class NullDiscoveryPersistence(DiscoveryPersistence):
 
 
 class StateRepoDiscoveryPersistence(DiscoveryPersistence):
-    """State-repo-backed discovery persistence using JSONL files."""
+    """State-repo-backed discovery persistence using JSONL files.
+
+    The candidate store is loaded from disk once (lazily on first access) into
+    two in-memory indexes:
+
+    * ``_by_id``  – candidate_id → PersistentCandidate (the authoritative map)
+    * ``_by_url`` – url string    → candidate_id       (O(1) URL lookups)
+
+    Both indexes are kept in sync on every ``upsert_candidates`` call, so
+    subsequent ``find_candidate_by_urls`` calls are O(1) instead of scanning
+    the full JSONL file on every invocation.
+    """
 
     def __init__(self, paths: DiscoveryStatePaths) -> None:
         self.paths = paths
+        self._by_id: dict[str, PersistentCandidate] = {}
+        self._by_url: dict[str, str] = {}  # url string → candidate_id
+        self._index_loaded: bool = False
+
+    # ------------------------------------------------------------------
+    # Internal index helpers
+    # ------------------------------------------------------------------
+
+    def _ensure_index(self) -> None:
+        """Load the candidate store into memory on first access (lazy)."""
+        if self._index_loaded:
+            return
+        for candidate in self._read_jsonl(self.paths.latest_candidates_path, PersistentCandidate):
+            self._index_candidate(candidate)
+        self._index_loaded = True
+
+    def _index_candidate(self, candidate: PersistentCandidate) -> None:
+        """Register *candidate* in both lookup indexes."""
+        self._by_id[candidate.candidate_id] = candidate
+        if candidate.canonical_url is not None:
+            self._by_url[str(candidate.canonical_url)] = candidate.candidate_id
+        self._by_url[str(candidate.current_url)] = candidate.candidate_id
 
     @property
     def provenance_path(self) -> Path:
@@ -199,12 +231,12 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
     def upsert_candidates(self, candidates: Sequence[PersistentCandidate]) -> None:
         if not candidates:
             return
-        existing = {candidate.candidate_id: candidate for candidate in self.list_candidates()}
+        self._ensure_index()
         for candidate in candidates:
-            existing[candidate.candidate_id] = candidate
+            self._index_candidate(candidate)
 
         all_candidates = sorted(
-            existing.values(),
+            self._by_id.values(),
             key=lambda candidate: (
                 candidate.last_seen_at,
                 candidate.first_seen_at,
@@ -268,10 +300,8 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         return batches
 
     def get_candidate(self, candidate_id: str) -> PersistentCandidate | None:
-        for candidate in self.list_candidates():
-            if candidate.candidate_id == candidate_id:
-                return candidate
-        return None
+        self._ensure_index()
+        return self._by_id.get(candidate_id)
 
     def list_candidates(
         self,
@@ -280,18 +310,17 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         backfill_batch_id: str | None = None,
         limit: int | None = None,
     ) -> list[PersistentCandidate]:
-        candidates = self._read_jsonl(self.paths.latest_candidates_path, PersistentCandidate)
+        self._ensure_index()
+        candidates: list[PersistentCandidate] = list(self._by_id.values())
         if statuses is not None:
             allowed = set(statuses)
-            candidates = [
-                candidate for candidate in candidates if candidate.candidate_status in allowed
-            ]
+            candidates = [c for c in candidates if c.candidate_status in allowed]
         if backfill_batch_id is not None:
-            candidates = [
-                candidate
-                for candidate in candidates
-                if candidate.backfill_batch_id == backfill_batch_id
-            ]
+            candidates = [c for c in candidates if c.backfill_batch_id == backfill_batch_id]
+        candidates.sort(
+            key=lambda c: (c.last_seen_at, c.first_seen_at, c.candidate_id),
+            reverse=True,
+        )
         if limit is not None:
             return candidates[:limit]
         return candidates
@@ -302,33 +331,15 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         statuses: Sequence[CandidateStatus] | None = None,
         backfill_batch_id: str | None = None,
     ) -> int:
-        allowed_statuses = {status.value for status in statuses} if statuses is not None else None
-        candidate_path = (
-            self.paths.backfill_queue_path
-            if backfill_batch_id is not None
-            else self.paths.latest_candidates_path
-        )
-        if not candidate_path.exists():
-            return 0
-
+        self._ensure_index()
+        allowed = set(statuses) if statuses is not None else None
         count = 0
-        with open(candidate_path, encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                if (
-                    backfill_batch_id is not None
-                    and row.get("backfill_batch_id") != backfill_batch_id
-                ):
-                    continue
-                if (
-                    allowed_statuses is not None
-                    and row.get("candidate_status") not in allowed_statuses
-                ):
-                    continue
-                count += 1
+        for candidate in self._by_id.values():
+            if backfill_batch_id is not None and candidate.backfill_batch_id != backfill_batch_id:
+                continue
+            if allowed is not None and candidate.candidate_status not in allowed:
+                continue
+            count += 1
         return count
 
     def count_backfill_batch_candidates(
@@ -337,23 +348,16 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         batch_id: str,
         scrapeable_statuses: Sequence[CandidateStatus],
     ) -> BackfillCandidateCounts:
-        scrapeable_status_values = {status.value for status in scrapeable_statuses}
-        if not self.paths.backfill_queue_path.exists():
-            return BackfillCandidateCounts(merged_candidate_count=0, queued_for_scrape_count=0)
-
+        self._ensure_index()
+        scrapeable_set = set(scrapeable_statuses)
         merged_candidate_count = 0
         queued_for_scrape_count = 0
-        with open(self.paths.backfill_queue_path, encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                if row.get("backfill_batch_id") != batch_id:
-                    continue
-                merged_candidate_count += 1
-                if row.get("candidate_status") in scrapeable_status_values:
-                    queued_for_scrape_count += 1
+        for candidate in self._by_id.values():
+            if candidate.backfill_batch_id != batch_id:
+                continue
+            merged_candidate_count += 1
+            if candidate.candidate_status in scrapeable_set:
+                queued_for_scrape_count += 1
         return BackfillCandidateCounts(
             merged_candidate_count=merged_candidate_count,
             queued_for_scrape_count=queued_for_scrape_count,
@@ -365,11 +369,14 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         canonical_url: str | None,
         current_url: str,
     ) -> PersistentCandidate | None:
-        for candidate in self.list_candidates():
-            if canonical_url is not None and str(candidate.canonical_url or "") == canonical_url:
-                return candidate
-            if str(candidate.current_url) == current_url:
-                return candidate
+        self._ensure_index()
+        if canonical_url is not None:
+            cid = self._by_url.get(canonical_url)
+            if cid is not None:
+                return self._by_id.get(cid)
+        cid = self._by_url.get(current_url)
+        if cid is not None:
+            return self._by_id.get(cid)
         return None
 
     def append_provenance(self, events: Sequence[CandidateProvenance]) -> None:
