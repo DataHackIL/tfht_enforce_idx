@@ -94,10 +94,23 @@ def select_candidates_for_scrape(
     *,
     limit: int,
     now: datetime | None = None,
+    pub_date_from: datetime | None = None,
 ) -> list[PersistentCandidate]:
-    """Return eligible durable candidates for scraping."""
+    """Return eligible durable candidates for scraping.
+
+    When *pub_date_from* is set only candidates whose
+    ``latest_publication_datetime_hint`` is on or after that date are
+    considered.  Candidates with no publication date hint are excluded when the
+    filter is active so the targeted window is strict.
+    """
     current_time = now or datetime.now(UTC)
     candidates = persistence.list_candidates(statuses=SCRAPEABLE_CANDIDATE_STATUSES)
+    if pub_date_from is not None:
+        candidates = [
+            c
+            for c in candidates
+            if (pub := _backfill_publication_datetime(c)) is not None and pub >= pub_date_from
+        ]
     return order_scrape_eligible_candidates(candidates, now=current_time)[:limit]
 
 
