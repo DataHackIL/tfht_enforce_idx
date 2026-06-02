@@ -200,7 +200,17 @@ _EXCLUDED_TITLE_TERMS: frozenset[str] = frozenset(
         "מסים",  # taxes — covers "המסים" substring too
         "המס",  # the tax (shorter form; avoids over-blocking "מסים" in other contexts)
         "תקציב",  # budget — covers "התקציב"
-        "קנס",  # fine — covers "קנסות"
+        # "קנס" (fine) was here but removed — 98% of matched articles were enforcement-relevant
+        # (prostitution-law fines, client-penalisation statistics). Replaced with specific
+        # non-enforcement bigrams below.
+        "קנס חנייה",  # parking fine
+        "קנס תנועה",  # traffic fine
+        "קנס רכב",  # vehicle fine
+        "קנס מנהלי",  # administrative fine (generic regulatory noise)
+        "נקנס המועדון",  # sports club was fined
+        "נקנסה חברת",  # [company name] company was fined (business noise)
+        "קנס פיפא",  # FIFA fine
+        'קנס אופ"א',  # UEFA fine
         "עסקה",  # deal/transaction
         "עסקת",  # deal-of (construct form)
         "זכיינות",  # franchising
