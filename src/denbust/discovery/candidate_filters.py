@@ -235,6 +235,9 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "merriam-webster.com",  # dictionary
         "nziv.net",  # foreign exposé reposts
         "news.un.org",  # UN global reports — not Israeli enforcement events
+        # ── Stage B2 sweep 2026-06 (round 8): escort directories that reached the index ──
+        "sexiaoniu5.com",  # escort/"discreet apartments" directory (SEXIAN)
+        "thediscreetgentleman.com",  # escort directory
     }
 )
 
