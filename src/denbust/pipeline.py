@@ -42,7 +42,12 @@ from denbust.discovery.backfill import (
     plan_backfill_windows,
     resolve_backfill_request_window,
 )
-from denbust.discovery.balanced_selection import candidate_month, plan_balanced_scrape_batch
+from denbust.discovery.balanced_selection import (
+    candidate_month,
+    domain_frequencies,
+    filter_by_domain_frequency,
+    plan_balanced_scrape_batch,
+)
 from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
 from denbust.discovery.engine_checkpoint import (
     cache_path as _engine_cache_path,
@@ -1421,6 +1426,7 @@ async def _run_candidate_scrape_job(
     orchestrator: CascadeOrchestrator | None = None,
     pub_date_from: datetime | None = None,
     balanced_batch_size: int | None = None,
+    min_domain_frequency: int | None = None,
 ) -> tuple[CandidateScrapeBatch, list[PrefilterDecision]]:
     """Select queued candidates, apply the thin prefilter, and run the scrape-attempt layer.
 
@@ -1430,7 +1436,9 @@ async def _run_candidate_scrape_job(
     considered (targeted / recent-only scrape).  When *balanced_batch_size* is
     set the selection is a month-frequency-weighted, source-balanced batch of
     that size drawn from the full prefilter-passing pool (instead of the
-    priority-ordered ``limit`` head).
+    priority-ordered ``limit`` head).  When *min_domain_frequency* is set,
+    candidates on a domain seen fewer than that many times across the store are
+    held back (the domain-frequency gate); curated known outlets are exempt.
     """
     persistence = create_discovery_persistence(config)
     try:
@@ -1445,6 +1453,20 @@ async def _run_candidate_scrape_job(
                     if (month := candidate_month(candidate)) is not None and month >= cutoff_month
                 ]
             passed_pool, thin_decisions = _thin_pass_prefilter(eligible, orchestrator)
+            if min_domain_frequency is not None and min_domain_frequency > 1:
+                frequencies = domain_frequencies(persistence.list_candidates())
+                before = len(passed_pool)
+                passed_pool = filter_by_domain_frequency(
+                    passed_pool,
+                    min_frequency=min_domain_frequency,
+                    frequencies=frequencies,
+                )
+                logger.info(
+                    "Domain-frequency gate (min=%d): %d/%d candidates passed.",
+                    min_domain_frequency,
+                    len(passed_pool),
+                    before,
+                )
             passed_candidates = plan_balanced_scrape_batch(
                 passed_pool,
                 batch_size=balanced_batch_size,
@@ -2524,6 +2546,7 @@ async def run_news_scrape_candidates_job(
             orchestrator=orchestrator,
             pub_date_from=config.scrape_pub_date_from,
             balanced_batch_size=config.scrape_balanced_batch_size,
+            min_domain_frequency=config.scrape_min_domain_frequency,
         )
         result.raw_article_count = len(scrape_batch.raw_articles)
         if scrape_batch.errors:
@@ -3326,6 +3349,7 @@ def _run_job_from_config(
     operational_store: OperationalStore | None = None,
     scrape_pub_date_from: str | None = None,
     scrape_balanced_batch_size: int | None = None,
+    scrape_min_domain_frequency: int | None = None,
 ) -> RunSnapshot:
     """Shared sync wrapper for CLI-triggered job runs."""
     setup_logging()
@@ -3349,6 +3373,11 @@ def _run_job_from_config(
             print("Error: --balanced-batch must be a positive integer")
             sys.exit(1)
         update["scrape_balanced_batch_size"] = scrape_balanced_batch_size
+    if scrape_min_domain_frequency is not None:
+        if scrape_min_domain_frequency < 1:
+            print("Error: --min-domain-frequency must be a positive integer")
+            sys.exit(1)
+        update["scrape_min_domain_frequency"] = scrape_min_domain_frequency
     if update:
         config = config.model_copy(update=update)
 
@@ -3426,6 +3455,7 @@ def run_job(
     operational_store: OperationalStore | None = None,
     scrape_pub_date_from: str | None = None,
     scrape_balanced_batch_size: int | None = None,
+    scrape_min_domain_frequency: int | None = None,
 ) -> None:
     """Run a dataset/job pair through the generic registry."""
     _run_job_from_config(
@@ -3436,6 +3466,7 @@ def run_job(
         operational_store=operational_store,
         scrape_pub_date_from=scrape_pub_date_from,
         scrape_balanced_batch_size=scrape_balanced_batch_size,
+        scrape_min_domain_frequency=scrape_min_domain_frequency,
     )
 
 

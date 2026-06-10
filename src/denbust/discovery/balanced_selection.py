@@ -49,6 +49,10 @@ _DOMAIN_SOURCE_FAMILIES: dict[str, str] = {
     "calcalist.co.il": "calcalist",
 }
 
+#: Canonical family keys for the curated/known outlets. These are always exempt
+#: from the domain-frequency gate (they are trusted regardless of recurrence).
+KNOWN_SOURCE_FAMILIES: frozenset[str] = frozenset(_DOMAIN_SOURCE_FAMILIES.values())
+
 
 def candidate_source_key(candidate: PersistentCandidate) -> str:
     """Return the canonical publication-source key for *candidate*.
@@ -77,6 +81,48 @@ def candidate_month(candidate: PersistentCandidate) -> str | None:
 def _source_key_priority(source_key: str) -> int:
     """Scrape priority for a resolved source-family key (0 when unknown)."""
     return _SOURCE_SCRAPE_PRIORITY.get(source_key, 0)
+
+
+def domain_frequencies(candidates: list[PersistentCandidate]) -> dict[str, int]:
+    """Count how many candidates share each resolved source key.
+
+    Computed over a broad set (ideally the whole candidate store) so the count
+    reflects how often a domain has *recurred* across discovery, which is the
+    junk signal the frequency gate relies on: real outlets recur, one-off spam
+    appears once.
+    """
+    counts: dict[str, int] = defaultdict(int)
+    for candidate in candidates:
+        counts[candidate_source_key(candidate)] += 1
+    return dict(counts)
+
+
+def filter_by_domain_frequency(
+    candidates: list[PersistentCandidate],
+    *,
+    min_frequency: int,
+    frequencies: dict[str, int],
+    exempt_known_families: bool = True,
+) -> list[PersistentCandidate]:
+    """Hold back candidates on domains seen fewer than *min_frequency* times.
+
+    A candidate passes the gate when its domain is a curated/known outlet
+    (always exempt when *exempt_known_families*) or its domain's recurrence
+    count in *frequencies* is at least *min_frequency*.  Nothing is mutated or
+    deleted — held-back candidates simply stay out of this batch and become
+    eligible automatically once their domain recurs.
+
+    ``min_frequency <= 1`` is a no-op (every domain trivially clears it).
+    """
+    if min_frequency <= 1:
+        return list(candidates)
+    kept: list[PersistentCandidate] = []
+    for candidate in candidates:
+        key = candidate_source_key(candidate)
+        is_known = exempt_known_families and key in KNOWN_SOURCE_FAMILIES
+        if is_known or frequencies.get(key, 0) >= min_frequency:
+            kept.append(candidate)
+    return kept
 
 
 def largest_remainder_allocation(weights: dict[str, int], total: int) -> dict[str, int]:

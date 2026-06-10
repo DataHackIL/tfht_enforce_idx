@@ -10,6 +10,8 @@ from pydantic import HttpUrl
 from denbust.discovery.balanced_selection import (
     candidate_month,
     candidate_source_key,
+    domain_frequencies,
+    filter_by_domain_frequency,
     largest_remainder_allocation,
     plan_balanced_scrape_batch,
     select_within_month,
@@ -166,3 +168,46 @@ def test_plan_balanced_scrape_batch_zero_size_is_empty() -> None:
     """A non-positive batch size yields no selection."""
     cands = [make_candidate("a", domain="ynet.co.il", month="2026-01")]
     assert plan_balanced_scrape_batch(cands, batch_size=0) == []
+
+
+def test_domain_frequencies_counts_by_source_key() -> None:
+    """Frequencies are counted per resolved source key, collapsing subdomains."""
+    cands = [
+        make_candidate("a", domain="news.walla.co.il", month="2026-01"),
+        make_candidate("b", domain="walla.co.il", month="2026-02"),
+        make_candidate("c", domain="spam.example", month="2026-01"),
+    ]
+    freqs = domain_frequencies(cands)
+    assert freqs["walla"] == 2  # subdomain + apex collapse to one family
+    assert freqs["spam.example"] == 1
+
+
+def test_frequency_gate_holds_single_shot_keeps_recurring() -> None:
+    """A domain seen once is held; a domain seen >= N passes."""
+    recurring = [make_candidate(f"r{i}", domain="newsru.co.il", month="2026-01") for i in range(3)]
+    one_shot = make_candidate("spam", domain="xmassage.example", month="2026-01")
+    pool = [*recurring, one_shot]
+    freqs = domain_frequencies(pool)
+
+    kept = filter_by_domain_frequency(pool, min_frequency=2, frequencies=freqs)
+
+    assert {c.candidate_id for c in kept} == {"r0", "r1", "r2"}
+    assert all(c.domain != "xmassage.example" for c in kept)
+
+
+def test_frequency_gate_exempts_known_outlets() -> None:
+    """A curated known outlet passes even with a single appearance."""
+    known = make_candidate("k", domain="ynet.co.il", month="2026-01")
+    unknown = make_candidate("u", domain="rando.example", month="2026-01")
+    freqs = domain_frequencies([known, unknown])  # each appears once
+
+    kept = filter_by_domain_frequency([known, unknown], min_frequency=2, frequencies=freqs)
+
+    assert [c.candidate_id for c in kept] == ["k"]
+
+
+def test_frequency_gate_threshold_one_is_noop() -> None:
+    """min_frequency <= 1 lets everything through unchanged."""
+    cands = [make_candidate("a", domain="rando.example", month="2026-01")]
+    freqs = domain_frequencies(cands)
+    assert filter_by_domain_frequency(cands, min_frequency=1, frequencies=freqs) == cands

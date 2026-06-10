@@ -94,6 +94,30 @@ junk; it is a precision tool against spam, not a second relevance judge.
 
 Implementation: `src/denbust/discovery/balanced_selection.py`.
 
+## Domain-frequency gate
+
+Open-web discovery (broad + taxonomy queries) on prostitution/escort/massage
+keywords inherently drags in a long tail of one-off spam domains — escort
+listings and massage ads are SEO-optimised for exactly those terms. The tail is
+unbounded: ~68% of all domains in the store are single-candidate, and a fresh
+batch of new ones appears every run, so a denylist can never keep up.
+
+The **domain-frequency gate** flips the default from "scrape unless blocklisted"
+to "earn your way in by recurring":
+
+```bash
+denbust run --job scrape_candidates --balanced-batch 60 --min-domain-frequency 2
+```
+
+A candidate is held out of the batch unless its domain is a curated known outlet
+(always exempt) **or** its domain has been seen at least N times across the
+store. Real outlets recur and pass; one-off spam appears once and is held back
+(never deleted — it becomes eligible automatically if the domain ever recurs).
+
+This is the primary tool for the single-shot tail; the domain blocklist and
+Stage B2 still handle recurring spam that clears the gate. Implementation:
+`domain_frequencies` + `filter_by_domain_frequency` in `balanced_selection.py`.
+
 ## Outputs of each batch
 
 Every batch run should report:
