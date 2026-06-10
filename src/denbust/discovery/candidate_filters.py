@@ -216,6 +216,25 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "lawandmore.org.il",  # immigration-lawyer SEO
         "liatbaroz.co.il",  # therapy SEO
         "ksharim-center.org",  # sex-addiction clinic
+        # ── Stage B2 sweep 2026-06 (round 7): recurring off-topic past the gate ──
+        "letemsvetemapplem.eu",  # foreign Apple/tech blog
+        "lexology.com",  # foreign legal-analysis aggregator
+        "loshmatem.blogspot.com",  # bankruptcy-notices blog
+        "mabua.org",  # religious-calendar/study site
+        "physiomedical.co.il",  # physiotherapy/massage clinic
+        "podcasts.apple.com",  # podcast directory
+        "praguepoint.co.il",  # luxury-car customs SEO
+        "rhr.org.il",  # Rabbis for Human Rights — parsha pages
+        "rotemcarmi.co.il",  # legal Q&A SEO
+        "mmk.org.il",  # couples/sex counselling
+        "or-gasmic.com",  # tantra/massage SEO
+        "oreateai.com",  # AI adult-entertainment SEO
+        "poenta.co.il",  # religious family-law SEO
+        "rentline.co.il",  # event-venue booking
+        "seres.co.il",  # car sales
+        "merriam-webster.com",  # dictionary
+        "nziv.net",  # foreign exposé reposts
+        "news.un.org",  # UN global reports — not Israeli enforcement events
     }
 )
 
