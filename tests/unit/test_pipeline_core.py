@@ -2574,6 +2574,7 @@ class TestRunPipelineAsync:
             limit: int,
             orchestrator: object = None,  # noqa: ARG001
             pub_date_from: object = None,  # noqa: ARG001
+            balanced_batch_size: object = None,  # noqa: ARG001
         ) -> tuple[CandidateScrapeBatch, list[object]]:
             captured["days"] = config.days
             captured["limit"] = limit
@@ -4059,6 +4060,7 @@ class TestRunPipeline:
             "days_override": 5,
             "operational_store": None,
             "scrape_pub_date_from": None,
+            "scrape_balanced_batch_size": None,
         }
 
     def test_run_job_from_config_passes_operational_store_to_async_runner(

@@ -42,6 +42,7 @@ from denbust.discovery.backfill import (
     plan_backfill_windows,
     resolve_backfill_request_window,
 )
+from denbust.discovery.balanced_selection import candidate_month, plan_balanced_scrape_batch
 from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
 from denbust.discovery.engine_checkpoint import (
     cache_path as _engine_cache_path,
@@ -67,6 +68,7 @@ from denbust.discovery.queries import build_discovery_queries
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     CandidateScrapeBatch,
+    order_scrape_eligible_candidates,
     scrape_candidates,
     select_backfill_candidates_for_scrape,
     select_candidates_for_scrape,
@@ -1418,25 +1420,47 @@ async def _run_candidate_scrape_job(
     limit: int,
     orchestrator: CascadeOrchestrator | None = None,
     pub_date_from: datetime | None = None,
+    balanced_batch_size: int | None = None,
 ) -> tuple[CandidateScrapeBatch, list[PrefilterDecision]]:
     """Select queued candidates, apply the thin prefilter, and run the scrape-attempt layer.
 
     Returns ``(scrape_batch, thin_decisions)``.  When *orchestrator* is ``None``
     the thin pass is skipped and ``thin_decisions`` is empty.  When
     *pub_date_from* is set only candidates published on or after that date are
-    considered (targeted / recent-only scrape).
+    considered (targeted / recent-only scrape).  When *balanced_batch_size* is
+    set the selection is a month-frequency-weighted, source-balanced batch of
+    that size drawn from the full prefilter-passing pool (instead of the
+    priority-ordered ``limit`` head).
     """
     persistence = create_discovery_persistence(config)
     try:
-        selected_candidates = select_candidates_for_scrape(
-            persistence,
-            limit=limit,
-            pub_date_from=pub_date_from,
-        )
+        if balanced_batch_size is not None:
+            pool = persistence.list_candidates(statuses=SCRAPEABLE_CANDIDATE_STATUSES)
+            eligible = order_scrape_eligible_candidates(pool)
+            if pub_date_from is not None:
+                cutoff_month = pub_date_from.strftime("%Y-%m")
+                eligible = [
+                    candidate
+                    for candidate in eligible
+                    if (month := candidate_month(candidate)) is not None and month >= cutoff_month
+                ]
+            passed_pool, thin_decisions = _thin_pass_prefilter(eligible, orchestrator)
+            passed_candidates = plan_balanced_scrape_batch(
+                passed_pool,
+                batch_size=balanced_batch_size,
+            )
+        else:
+            selected_candidates = select_candidates_for_scrape(
+                persistence,
+                limit=limit,
+                pub_date_from=pub_date_from,
+            )
+            passed_candidates, thin_decisions = _thin_pass_prefilter(
+                selected_candidates, orchestrator
+            )
     finally:
         persistence.close()
 
-    passed_candidates, thin_decisions = _thin_pass_prefilter(selected_candidates, orchestrator)
     batch = await _scrape_candidate_batch(
         config=config,
         candidates=passed_candidates,
@@ -2499,6 +2523,7 @@ async def run_news_scrape_candidates_job(
             limit=config.max_articles,
             orchestrator=orchestrator,
             pub_date_from=config.scrape_pub_date_from,
+            balanced_batch_size=config.scrape_balanced_batch_size,
         )
         result.raw_article_count = len(scrape_batch.raw_articles)
         if scrape_batch.errors:
@@ -3300,6 +3325,7 @@ def _run_job_from_config(
     days_override: int | None = None,
     operational_store: OperationalStore | None = None,
     scrape_pub_date_from: str | None = None,
+    scrape_balanced_batch_size: int | None = None,
 ) -> RunSnapshot:
     """Shared sync wrapper for CLI-triggered job runs."""
     setup_logging()
@@ -3318,6 +3344,11 @@ def _run_job_from_config(
         except ValueError as exc:
             print(f"Error: --pub-date-from must be an ISO date (YYYY-MM-DD): {exc}")
             sys.exit(1)
+    if scrape_balanced_batch_size is not None:
+        if scrape_balanced_batch_size < 1:
+            print("Error: --balanced-batch must be a positive integer")
+            sys.exit(1)
+        update["scrape_balanced_batch_size"] = scrape_balanced_batch_size
     if update:
         config = config.model_copy(update=update)
 
@@ -3394,6 +3425,7 @@ def run_job(
     days_override: int | None = None,
     operational_store: OperationalStore | None = None,
     scrape_pub_date_from: str | None = None,
+    scrape_balanced_batch_size: int | None = None,
 ) -> None:
     """Run a dataset/job pair through the generic registry."""
     _run_job_from_config(
@@ -3403,6 +3435,7 @@ def run_job(
         days_override=days_override,
         operational_store=operational_store,
         scrape_pub_date_from=scrape_pub_date_from,
+        scrape_balanced_batch_size=scrape_balanced_batch_size,
     )
 
 
