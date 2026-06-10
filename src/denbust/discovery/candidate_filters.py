@@ -141,6 +141,21 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "nature.com",  # scientific publisher — off-topic
         "jv.dk",  # Danish regional outlet — foreign
         "riksdagen.se",  # Swedish parliament — foreign
+        # ── Stage B2 sweep 2026-06 (round 3): escort + SEO surfaced after round 2 ──
+        "sex4u.co.il",  # escort / sex listing
+        "villa4us.co.il",  # escort listing
+        "2escorts.net",  # escort listing
+        "wallakef.com",  # massage ad
+        "redrta.org",  # AI-porn industry SEO
+        "m-il.co.il",  # therapist directory SEO
+        "noamkurislaw.blogspot.com",  # lawyer blog
+        "adrababooks.co.il",  # bookstore — off-topic commerce
+        "afikinacademia.org",  # academia SEO
+        "allcourse.net",  # online-course SEO
+        "alsa.co.il",  # management-advice SEO
+        "xn--7dbl2a.com",  # "knowledge-production" blog (punycode)
+        "252project.co.il",  # dating/relationship coaching
+        "3cat.cat",  # Catalan broadcaster — foreign
     }
 )
 
