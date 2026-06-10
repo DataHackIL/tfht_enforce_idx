@@ -73,6 +73,14 @@ def run(
             " (scrape_candidates job only).",
         ),
     ] = None,
+    balanced_batch: Annotated[
+        int | None,
+        typer.Option(
+            "--balanced-batch",
+            help="Scrape a month-frequency-weighted, source-balanced batch of this size"
+            " from the full prefilter-passing pool (scrape_candidates job only).",
+        ),
+    ] = None,
 ) -> None:
     """Run a dataset/job pair through the registry."""
     from denbust.pipeline import run_job
@@ -84,6 +92,7 @@ def run(
         job_name=job,
         days_override=days,
         scrape_pub_date_from=pub_date_from,
+        scrape_balanced_batch_size=balanced_batch,
     )
 
 
