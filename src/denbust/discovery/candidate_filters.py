@@ -238,6 +238,25 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         # ── Stage B2 sweep 2026-06 (round 8): escort directories that reached the index ──
         "sexiaoniu5.com",  # escort/"discreet apartments" directory (SEXIAN)
         "thediscreetgentleman.com",  # escort directory
+        # ── Stage B2 sweep 2026-06 (round 9): recurring off-topic + escort past the gate ──
+        "yad69.co.il",  # escort "discreet apartments" directory
+        "web-garage.co.il",  # camgirl-recruitment SEO
+        "workofsex.blogspot.com",  # sex-work opinion blog
+        "wespeakfreely.org",  # foreign libertarian sex-work opinion
+        "thelaw.institute",  # foreign academic policy papers
+        "ybngen.co.il",  # asexuality SEO
+        "nordiceye.co.il",  # PTSD/therapy SEO
+        "nirgo.blogspot.com",  # personal-development blog
+        "notrikon.blogspot.com",  # religious blog
+        "shulchanaruchharav.com",  # Chabad daily-Torah
+        "tora-forum.co.il",  # Torah-study forum
+        "srorlaw.co.il",  # law-firm SEO
+        "verdicts.co.il",  # legal-verdicts directory
+        "theverifier.co.il",  # consumer-tech news
+        "travelnorway.co.il",  # travel content
+        "u-ins.co.il",  # insurance SEO
+        "visionsee.co.il",  # furniture retail
+        "yeshuvnik.net",  # local-community PR
     }
 )
 
