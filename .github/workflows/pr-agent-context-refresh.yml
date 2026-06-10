@@ -24,40 +24,9 @@ run-name: >-
   }}
 
 on:
-  pull_request_review:
-    types: [submitted, edited, dismissed]
-  pull_request_review_comment:
-    types: [created, edited, deleted]
-  check_run:
-    types: [completed]
-  # Some external providers still surface late results as commit statuses rather than check runs.
-  status:
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
-    inputs:
-      pull_request_number:
-        description: Pull request number to refresh explicitly.
-        required: true
-        type: string
-      pull_request_base_sha:
-        description: Base SHA for the explicit refresh target.
-        required: true
-        type: string
-      pull_request_head_sha:
-        description: Head SHA for the explicit refresh target.
-        required: true
-        type: string
-      trigger_event_name:
-        description: Synthetic trigger event name used in rendered metadata.
-        required: false
-        default: workflow_dispatch
-        type: string
-      trigger_event_action:
-        description: Synthetic trigger event action used in rendered metadata.
-        required: false
-        default: ""
-        type: string
-  schedule:
-    - cron: "*/15 * * * *"
 
 concurrency:
   group: >-

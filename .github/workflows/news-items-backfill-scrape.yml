@@ -1,12 +1,9 @@
 name: news-items-backfill-scrape
 
 on:
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
-    inputs:
-      batch_id:
-        description: "Optional durable batch id to constrain the scrape drain"
-        required: false
-        type: string
 
 concurrency:
   group: state-run

@@ -1,10 +1,8 @@
 name: news-items-daily-review
 
 on:
-  # Review the latest daily ingest artifacts after the daily ingest workflow completes.
-  workflow_run:
-    workflows: ["daily-state-run"]
-    types: [completed]
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
 
 concurrency:

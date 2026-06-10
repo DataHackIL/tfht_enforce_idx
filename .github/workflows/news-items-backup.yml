@@ -1,9 +1,8 @@
 name: news-items-backup
 
 on:
-  # Weekly latest-backup upload for the already-built news_items release bundle.
-  schedule:
-    - cron: "45 4 * * 0"
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
 
 concurrency:

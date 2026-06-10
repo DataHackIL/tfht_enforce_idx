@@ -1,20 +1,9 @@
 name: news-items-backfill-discover
 
 on:
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
-    inputs:
-      date_from:
-        description: "Required ISO timestamp for the batch start window"
-        required: true
-        type: string
-      date_to:
-        description: "Required ISO timestamp for the batch end window"
-        required: true
-        type: string
-      batch_id:
-        description: "Optional durable batch id override"
-        required: false
-        type: string
 
 concurrency:
   group: state-run

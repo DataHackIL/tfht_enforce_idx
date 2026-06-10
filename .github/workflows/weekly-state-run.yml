@@ -1,11 +1,8 @@
 name: weekly-state-run
 
 on:
-  # Weekly catch-up candidate-driven ingest for news_items, with manual dispatch for ad hoc reruns.
-  schedule:
-    # Runs at 04:30 UTC every Sunday, which is 06:30 in Israel Standard Time
-    # (UTC+2) and 07:30 during Israel daylight saving time (UTC+3).
-    - cron: "30 4 * * 0"
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
 
 concurrency:

@@ -1,9 +1,8 @@
 name: news-items-release
 
 on:
-  # Weekly publication run for news_items release bundles.
-  schedule:
-    - cron: "15 4 * * 0"
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
 
 concurrency:
