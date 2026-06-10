@@ -177,6 +177,27 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "babynames.com",  # baby-name dictionary
         "ashdods.co.il",  # local animal-cruelty story — off-topic
         "ashkelnayes.co.il",  # local daycare-abuse story — off-vertical
+        # ── Stage B2 sweep 2026-06 (round 5): recurring off-topic past the freq gate ──
+        "cartube.co.il",  # car-deal listings
+        "dh-nadlan.co.il",  # commercial real-estate listings
+        "dmiexpo.com",  # marketing/NSFW-AI expo
+        "discovery.researcher.life",  # foreign academic paper index
+        "fyens.dk",  # Danish regional outlet — foreign
+        "etzion.org.il",  # Torah-study essays
+        "boss-il.blogspot.com",  # reality-TV streaming blog
+        "franchising.org.il",  # franchising directory
+        "esg.co.il",  # management-consulting SEO
+        "gadgety.co.il",  # consumer-gadget reviews
+        "gadish.co.il",  # municipal tender PDFs
+        "eranwaisman.com",  # traffic-ticket lawyer SEO
+        "get.what2do.co.il",  # legal-admin Q&A SEO
+        "giluydaat.co.il",  # kosher-finance opinion
+        "dabullaw.co.il",  # legal SEO
+        "ednakarnaval.com",  # celebrity gossip
+        "father4justice.org",  # custody-advocacy
+        "cinema.co.il",  # film/VOD listings
+        "dvorih.com",  # therapy-clinic SEO
+        "eytanim.co.il",  # sex-myth SEO content
     }
 )
 
