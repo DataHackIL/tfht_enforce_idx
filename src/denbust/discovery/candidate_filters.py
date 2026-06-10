@@ -198,6 +198,24 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "cinema.co.il",  # film/VOD listings
         "dvorih.com",  # therapy-clinic SEO
         "eytanim.co.il",  # sex-myth SEO content
+        # ── Stage B2 sweep 2026-06 (round 6): recurring off-topic + escort past the gate ──
+        "il.freesexchaty.ru",  # sex-cam
+        "issearching.com",  # escort listing
+        "iw.innovando.news",  # foreign tech outlet
+        "holotvoices.co.il",  # earthworks contractor SEO
+        "house4u.co.il",  # real-estate listings
+        "hovala.org.il",  # moving-services SEO
+        "il.investing.com",  # financial-markets data
+        "lifeinisrael.co.il",  # massage ad
+        "malam-payroll.com",  # payroll-software SEO
+        "mall4all.co.il",  # appliance retail
+        "marrymeroy.co.il",  # wedding services
+        "kenes-media.com",  # PR/media SEO
+        "l-w.ac.il",  # infant-development services
+        "law-shmueli.co.il",  # custody-lawyer SEO
+        "lawandmore.org.il",  # immigration-lawyer SEO
+        "liatbaroz.co.il",  # therapy SEO
+        "ksharim-center.org",  # sex-addiction clinic
     }
 )
 
