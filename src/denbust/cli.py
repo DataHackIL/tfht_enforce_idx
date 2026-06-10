@@ -81,6 +81,15 @@ def run(
             " from the full prefilter-passing pool (scrape_candidates job only).",
         ),
     ] = None,
+    min_domain_frequency: Annotated[
+        int | None,
+        typer.Option(
+            "--min-domain-frequency",
+            help="Domain-frequency gate: hold back candidates on a domain seen fewer than N"
+            " times across the store (curated known outlets exempt). Kills the single-shot"
+            " spam tail. Balanced-batch mode only.",
+        ),
+    ] = None,
 ) -> None:
     """Run a dataset/job pair through the registry."""
     from denbust.pipeline import run_job
@@ -93,6 +102,7 @@ def run(
         days_override=days,
         scrape_pub_date_from=pub_date_from,
         scrape_balanced_batch_size=balanced_batch,
+        scrape_min_domain_frequency=min_domain_frequency,
     )
 
 

@@ -72,6 +72,7 @@ class TestCli:
             days_override: int | None = None,
             scrape_pub_date_from: str | None = None,  # noqa: ARG001
             scrape_balanced_batch_size: int | None = None,  # noqa: ARG001
+            scrape_min_domain_frequency: int | None = None,  # noqa: ARG001
         ) -> None:
             captured["config_path"] = config_path
             captured["dataset_name"] = dataset_name
