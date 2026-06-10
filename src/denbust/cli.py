@@ -556,6 +556,65 @@ def live_check(
         raise typer.Exit(code=1)
 
 
+@app.command("candidates-b2-suppress")
+def candidates_b2_suppress(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+    ids: Annotated[
+        str | None,
+        typer.Option("--ids", help="Comma-separated candidate ids to suppress (Stage B2)."),
+    ] = None,
+    domains: Annotated[
+        str | None,
+        typer.Option(
+            "--domains",
+            help="Comma-separated spam domains; suppress all still-scrapeable candidates on them.",
+        ),
+    ] = None,
+    note: Annotated[
+        str | None,
+        typer.Option("--note", help="Optional reason recorded on suppressed candidates."),
+    ] = None,
+) -> None:
+    """Stage B2 — manually suppress clearly-junk candidates before they consume scrape budget.
+
+    Use ``--ids`` for one-off junk on legitimate domains, ``--domains`` for whole
+    spam domains (also add the domain to ``_IRRELEVANT_CONTENT_DOMAINS`` to block
+    future discovery). See ``docs/batch_scraping_protocol.md``.
+    """
+    from denbust.config import load_config
+    from denbust.discovery.manual_filter import (
+        suppress_candidates_b2,
+        suppress_candidates_b2_by_domain,
+    )
+    from denbust.discovery.storage import create_discovery_persistence
+
+    if not ids and not domains:
+        typer.echo("Provide --ids and/or --domains.")
+        raise typer.Exit(code=1)
+
+    config_path = config or Path("agents/news/local.yaml")
+    cfg = load_config(config_path)
+    persistence = create_discovery_persistence(cfg)
+    total = 0
+    try:
+        if ids:
+            id_list = [value.strip() for value in ids.split(",") if value.strip()]
+            suppressed = suppress_candidates_b2(persistence, id_list, note=note)
+            total += len(suppressed)
+            typer.echo(f"Stage B2: suppressed {len(suppressed)} candidate(s) by id.")
+        if domains:
+            domain_list = [value.strip() for value in domains.split(",") if value.strip()]
+            suppressed = suppress_candidates_b2_by_domain(persistence, domain_list, note=note)
+            total += len(suppressed)
+            typer.echo(f"Stage B2: suppressed {len(suppressed)} candidate(s) by domain.")
+    finally:
+        persistence.close()
+    typer.echo(f"Stage B2 total suppressed: {total}")
+
+
 @app.command()
 def version() -> None:
     """Show version information."""
