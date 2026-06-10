@@ -65,6 +65,67 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "todojustice.co.il",  # legal info site — off-topic
         "tomoko.co.il",  # unrelated e-commerce — off-topic
         "polisa.news",  # insurance news site — off-topic
+        # ── Stage B2 sweep 2026-06: escort / massage / webcam sex-service spam ──
+        "healworlds.blogspot.com",  # "women for sale" spam blog
+        "business-ladies.co.il",  # escort listing
+        "serviciosfiat.com",  # massage-ad spam (hijacked domain)
+        "getsdiscreet.com",  # discreet-massage/escort ad
+        "getsmassage.com",  # massage ad
+        "doska777.co.il",  # escort listing board
+        "sharapplus.co.il",  # private-clinic SEO — not news
+        "il.blablacams.com",  # webcam models
+        "escortinisrael.co.il",  # escort listing
+        "swipecherry.com",  # escort listing
+        "il.rulet-18.com",  # sex-cam roulette
+        "il.chat-rulet-18.com",  # sex-cam roulette
+        "il.chatrulet-18.com",  # sex-cam roulette
+        "il.didichat.ru",  # sex-cam
+        "il.nextchat.ru",  # sex-cam
+        "il.russianroulette.su",  # live sex-cam
+        "xmassage.co.il",  # massage ad
+        "alternabe.co.il",  # massage ad
+        "boobpedia.com",  # adult-content wiki / escort agency posts
+        "bigboyztoyz69.com",  # escort listing
+        "shop69.co.il",  # sex-toy shop
+        "opulentcharm.co.il",  # OnlyFans agency SEO
+        "spaplus.co.il",  # spa/massage packages
+        "skdance.co.il",  # cabaret dancers for hire — not news
+        "healthwise.co.il",  # sex/health SEO content
+        # ── Stage B2 sweep 2026-06: off-topic commerce / real-estate / SEO ──
+        "weconnex.co.il",  # office-rental listings
+        "gal-gefen.co.il",  # local PR/advertising site
+        "b144.co.il",  # business directory
+        "rea-me.co.il",  # real-estate listings
+        "astlv.co.il",  # real-estate listings
+        "okyanus.co.il",  # office-rental listings
+        "supply-chain1.co.il",  # logistics directory
+        "rent.org.il",  # equipment-rental listings
+        "nmrk.co.il",  # commercial real-estate
+        "carwiz.co.il",  # car sales
+        "zapcars.co.il",  # car sales
+        "litrom.org.il",  # presentation-design SEO
+        "pc.co.il",  # networking/branding SEO
+        "mivzaklive.co.il",  # fraud-awareness SEO content
+        "shvirega.co.il",  # therapist SEO
+        # ── Stage B2 sweep 2026-06: legal-advice SEO / lawyer directories ──
+        "findlaw.co.il",  # legal Q&A SEO
+        "dobin-law.com",  # immigration-lawyer SEO
+        "din.co.il",  # lawyer directory
+        "ese.co.il",  # fraud-lawyer SEO
+        # ── Stage B2 sweep 2026-06: religious admin / Q&A ──
+        "rabanut.co.il",  # religious-council admin pages
+        "hidabroot.org",  # religious Q&A
+        "be7.co.il",  # B'Sheva religious opinion
+        "bshch.blogspot.com",  # haredi community blog
+        # ── Stage B2 sweep 2026-06: reference / foreign advocacy / off-topic ──
+        "he.wikisource.org",  # source-text wiki
+        "en.wikipedia.org",  # encyclopedia
+        "commons.wikimedia.org",  # media repository
+        "timesofmalta.com",  # foreign outlet — not Israeli enforcement
+        "swopbehindbars.org",  # US sex-worker advocacy
+        "abolition2014.blogspot.com",  # foreign anti-prostitution blog
+        "one.co.il",  # sports outlet — off-topic
+        "tlvtimes.co.il",  # local lifestyle/PR magazine — off-topic
     }
 )
 
