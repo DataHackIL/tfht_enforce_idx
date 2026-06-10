@@ -1,9 +1,8 @@
 name: daily-state-run
 
 on:
-  # Daily scheduled candidate-driven ingest for news_items, with manual dispatch for ad hoc reruns.
-  schedule:
-    - cron: "0 4 * * *"
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
 
 concurrency:

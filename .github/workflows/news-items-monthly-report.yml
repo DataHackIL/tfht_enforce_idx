@@ -1,14 +1,9 @@
 name: news-items-monthly-report
 
 on:
-  schedule:
-    - cron: "15 5 1 * *"
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # To re-enable restore the original schedule/event triggers from git history.
   workflow_dispatch:
-    inputs:
-      month:
-        description: "Optional report month in YYYY-MM; defaults to previous UTC month"
-        required: false
-        type: string
 
 concurrency:
   group: state-run
