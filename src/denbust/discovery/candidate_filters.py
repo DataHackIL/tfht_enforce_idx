@@ -156,6 +156,27 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "xn--7dbl2a.com",  # "knowledge-production" blog (punycode)
         "252project.co.il",  # dating/relationship coaching
         "3cat.cat",  # Catalan broadcaster — foreign
+        # ── Stage B2 sweep 2026-06 (round 4): foreign-policy + local SEO/junk ──
+        "ben54.jp",  # Japanese legal news — foreign
+        "tagesschau.de",  # German broadcaster — foreign
+        "askoy24.no",  # Norwegian outlet — foreign
+        "amsterdamredlightdistricttour.com",  # tourism / foreign opinion
+        "avivbar.com",  # personal business card
+        "bhklita.blogspot.com",  # kibbutz blog
+        "bizzness.net",  # consumer-pricing SEO
+        "bosmetic.co.il",  # cosmetics store
+        "90fm.co.il",  # radio show listings
+        "aig.co.il",  # insurance / compliance marketing
+        "allpallets.it",  # hijacked-domain SEO spam
+        "amit.org.il",  # education NGO
+        "allmarketing.co.il",  # marketing-news SEO
+        "ashdodnews.co.il",  # appliance ads
+        "askezra.co.il",  # health Q&A SEO
+        "b7net.co.il",  # local early-childhood PR
+        "behance.net",  # design portfolios
+        "babynames.com",  # baby-name dictionary
+        "ashdods.co.il",  # local animal-cruelty story — off-topic
+        "ashkelnayes.co.il",  # local daycare-abuse story — off-vertical
     }
 )
 
