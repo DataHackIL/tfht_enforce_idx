@@ -126,6 +126,21 @@ _IRRELEVANT_CONTENT_DOMAINS: frozenset[str] = frozenset(
         "abolition2014.blogspot.com",  # foreign anti-prostitution blog
         "one.co.il",  # sports outlet — off-topic
         "tlvtimes.co.il",  # local lifestyle/PR magazine — off-topic
+        # ── Stage B2 sweep 2026-06 (round 2): escort + off-topic surfaced after round 1 ──
+        "chvv.net",  # escort / discreet-apartment portal
+        "coupleschoice.com",  # escort listing
+        "eliteisraelescort.com",  # escort listing
+        "arnontl.com",  # regulatory-consultancy SEO
+        "daniels-assets.com",  # real-estate project marketing
+        "nadlangroup.co.il",  # commercial real-estate listings
+        "dinaerlich.co.il",  # lawyer SEO (statute reprints)
+        "doo-lev.co.il",  # matchmaking guide SEO
+        "daattorah.blogspot.com",  # religious-identity blog
+        "habitualvision.blogspot.com",  # Torah-study blog
+        "blogs.timesofisrael.com",  # personal opinion blogs — not enforcement events
+        "nature.com",  # scientific publisher — off-topic
+        "jv.dk",  # Danish regional outlet — foreign
+        "riksdagen.se",  # Swedish parliament — foreign
     }
 )
 
