@@ -112,6 +112,24 @@ denbust backup --dataset news_items --config agents/backup/news_items.yaml
 - Normalize Mako URLs before deduplication or seen-state writes so query params do not fork duplicate records.
 - Do not fabricate article details or inferred facts beyond what exists in the source text and structured model outputs.
 
+## Batch Scraping Protocol (mandatory)
+
+Scraping runs against the backlog go through fixed-size batches under a limited
+scraping budget. Full protocol: `docs/batch_scraping_protocol.md`.
+
+- Select batches with `denbust run --job scrape_candidates --balanced-batch N`
+  (month-frequency-weighted, source-balanced selection).
+- **Stage B2 — manual LLM filtering is mandatory before scraping a batch.** The
+  operating agent reviews the planned batch's titles/snippets/domains and
+  removes clear junk/spam (escort/massage listings, ad pages, SEO bait) that
+  passed the statistical Stage B prefilter, *before* spending scrape budget.
+- Suppress B2-removed candidates so they never re-enter a batch:
+  `denbust candidates-b2-suppress --ids …` (one-off junk) or `--domains …`
+  (whole spam domains; also add the domain to `_IRRELEVANT_CONTENT_DOMAINS`).
+- Re-plan after suppression so the batch tops up with clean candidates, then run.
+- Report each batch: month×source allocation, Stage B2 removals, scrape
+  outcomes, classification outcomes, and any domains added to the blocklist.
+
 ## Config And Secrets
 
 - Keep durable personal config outside the repo, for example under `~/.config/denbust/`.

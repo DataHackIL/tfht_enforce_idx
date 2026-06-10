@@ -64,6 +64,13 @@ Insertion point: **between `scrape_candidates` and `ingest`**, conceptually:
 discover → triage → scrape_candidates → [local_prefilter (NEW)] → ingest (Claude) → release
 ```
 
+> **Stage B2 (manual LLM filtering).** In addition to the statistical stages
+> below, the batch scraping protocol adds a **Stage B2** judgment pass performed
+> by the operating agent on the selected batch before scraping: it removes the
+> keyword-rich spam (escort/massage listings, ad/SEO pages) that the NaiveBayes
+> Stage B cannot reliably catch. See `docs/batch_scraping_protocol.md` and
+> `src/denbust/discovery/manual_filter.py`.
+
 Two questions follow:
 
 1. **Pre-scrape or post-scrape?** Pre-scrape we have only title, snippet, domain, URL, and the search query that found the candidate. Post-scrape we additionally have the full article text. We will run the cascade in **both** positions: a "thin" pass on pre-scrape signals (Stages A + B) inside the existing scrape-queue selection, and a "thick" pass on full article text (Stages C + D) after a successful scrape. Pre-scrape filtering also saves scrape bandwidth and queue capacity; post-scrape filtering catches noise that title/snippet hide.
