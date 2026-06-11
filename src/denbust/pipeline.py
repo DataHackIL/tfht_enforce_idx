@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypedDict
@@ -72,6 +72,7 @@ from denbust.discovery.models import (
     PersistentCandidate,
 )
 from denbust.discovery.queries import build_discovery_queries, select_run_queries
+from denbust.discovery.query_yield import QueryYieldStore
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     CandidateScrapeBatch,
@@ -972,15 +973,28 @@ async def _run_source_native_discovery(
 _DISCOVERY_PERSIST_BATCH: int = 50
 
 
+def _query_yield_callback(config: Config) -> Callable[[DiscoveryQuery], int] | None:
+    """Return a yield lookup from the cached query-yield map, or None if empty."""
+    yield_map = QueryYieldStore(config.discovery_state_paths.query_yield_path).load()
+    if not yield_map:
+        return None
+    return lambda query: yield_map.get(query.query_text, 0)
+
+
 def _guard_search_budget(
-    config: Config, *, engine: str, queries: list[DiscoveryQuery], cache_dir: Path
+    config: Config,
+    *,
+    engine: str,
+    queries: list[DiscoveryQuery],
+    cache_dir: Path,
+    yield_of: Callable[[DiscoveryQuery], int] | None = None,
 ) -> list[DiscoveryQuery]:
     """Cap *queries* to what the engine's remaining monthly budget can afford.
 
     No-op when the engine has no ``monthly_budget_usd``. When the budget is
-    partly spent, keeps the highest-priority queries that fit (avoids the 402),
-    rotating within a tier by least-recently-run so successive capped runs
-    refresh different slices of the pool.
+    partly spent, keeps the best queries that fit (highest yield, then kind
+    priority, then least-recently-run rotation) so the spend goes to the most
+    productive queries and successive runs refresh different slices.
     """
     engine_cfg = getattr(config.discovery.engines, engine, None)
     budget = getattr(engine_cfg, "monthly_budget_usd", None)
@@ -1008,6 +1022,7 @@ def _guard_search_budget(
             queries,
             affordable,
             last_run_at=lambda query: query_last_run_at(cache_dir, engine, query),
+            yield_of=yield_of,
         )
     return queries
 
@@ -1029,13 +1044,18 @@ async def _run_brave_discovery(
 ) -> PersistedSourceDiscovery:
     """Run Brave-powered discovery with per-query checkpointing and incremental persist."""
     cache_dir = config.discovery_state_paths.engine_query_cache_dir
+    yield_of = _query_yield_callback(config)
     queries = _guard_search_budget(
         config,
         engine="brave",
         queries=build_discovery_queries(
-            config, days=days, last_run_at=lambda q: query_last_run_at(cache_dir, "brave", q)
+            config,
+            days=days,
+            last_run_at=lambda q: query_last_run_at(cache_dir, "brave", q),
+            yield_of=yield_of,
         ),
         cache_dir=cache_dir,
+        yield_of=yield_of,
     )
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -1122,13 +1142,18 @@ async def _run_exa_discovery(
 ) -> PersistedSourceDiscovery:
     """Run Exa-powered discovery with per-query checkpointing and incremental persist."""
     cache_dir = config.discovery_state_paths.engine_query_cache_dir
+    yield_of = _query_yield_callback(config)
     queries = _guard_search_budget(
         config,
         engine="exa",
         queries=build_discovery_queries(
-            config, days=days, last_run_at=lambda q: query_last_run_at(cache_dir, "exa", q)
+            config,
+            days=days,
+            last_run_at=lambda q: query_last_run_at(cache_dir, "exa", q),
+            yield_of=yield_of,
         ),
         cache_dir=cache_dir,
+        yield_of=yield_of,
     )
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -1219,13 +1244,18 @@ async def _run_google_cse_discovery(
 ) -> PersistedSourceDiscovery:
     """Run Google CSE-powered discovery with per-query checkpointing and incremental persist."""
     cache_dir = config.discovery_state_paths.engine_query_cache_dir
+    yield_of = _query_yield_callback(config)
     queries = _guard_search_budget(
         config,
         engine="google_cse",
         queries=build_discovery_queries(
-            config, days=days, last_run_at=lambda q: query_last_run_at(cache_dir, "google_cse", q)
+            config,
+            days=days,
+            last_run_at=lambda q: query_last_run_at(cache_dir, "google_cse", q),
+            yield_of=yield_of,
         ),
         cache_dir=cache_dir,
+        yield_of=yield_of,
     )
     discovery_run = DiscoveryRun(
         run_id=run_id,

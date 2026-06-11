@@ -39,6 +39,7 @@ class DiscoveryStatePaths(BaseModel):
     engine_query_cache_dir: Path
     domain_verdicts_path: Path
     search_budget_path: Path
+    query_yield_path: Path
 
 
 def resolve_discovery_state_paths(
@@ -65,6 +66,7 @@ def resolve_discovery_state_paths(
         engine_query_cache_dir=candidates_dir / "engine_query_cache",
         domain_verdicts_path=candidates_dir / "domain_verdicts.jsonl",
         search_budget_path=candidates_dir / "search_budget.jsonl",
+        query_yield_path=candidates_dir / "query_yield.json",
         latest_candidates_path=candidates_dir / "latest_candidates.jsonl",
         latest_backfill_batches_path=backfill_batches_dir / "latest_backfill_batches.jsonl",
         retry_queue_path=candidates_dir / "retry_queue.jsonl",
