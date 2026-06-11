@@ -991,32 +991,35 @@ def _guard_search_budget(
 ) -> list[DiscoveryQuery]:
     """Cap *queries* to what the engine's remaining monthly budget can afford.
 
-    No-op when the engine has no ``monthly_budget_usd``. When the budget is
-    partly spent, keeps the best queries that fit (highest yield, then kind
-    priority, then least-recently-run rotation) so the spend goes to the most
-    productive queries and successive runs refresh different slices.
+    No-op when the engine has no free allowance and no budget. Otherwise spends
+    the free monthly allowance first, then the paid budget, keeping the best
+    queries that fit (highest yield, then kind priority, then least-recently-run
+    rotation) so the spend goes to the most productive queries.
     """
     engine_cfg = getattr(config.discovery.engines, engine, None)
     budget = getattr(engine_cfg, "monthly_budget_usd", None)
-    if budget is None or not queries:
+    free = getattr(engine_cfg, "monthly_free_queries", 0)
+    if (budget is None and free <= 0) or not queries:
         return queries
     ledger = SearchBudgetLedger(config.discovery_state_paths.search_budget_path)
     now = datetime.now(UTC)
-    _, spent = ledger.month_spend(year_month=now.strftime("%Y-%m"), engine=engine)
+    spent_queries, _ = ledger.month_spend(year_month=now.strftime("%Y-%m"), engine=engine)
     affordable = affordable_query_count(
         engine=engine,
         requested=len(queries),
-        spent_usd=spent,
+        queries_spent=spent_queries,
         monthly_budget_usd=budget,
+        monthly_free_queries=free,
     )
     if affordable < len(queries):
         logger.warning(
-            "%s budget guard: capping %d -> %d queries ($%.2f of $%.2f spent this month).",
+            "%s budget guard: capping %d -> %d queries (%d used this month; free=%d, budget=%s).",
             engine,
             len(queries),
             affordable,
-            spent,
-            budget,
+            spent_queries,
+            free,
+            f"${budget:.2f}" if budget is not None else "none",
         )
         queries = select_run_queries(
             queries,

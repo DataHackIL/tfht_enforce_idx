@@ -73,16 +73,30 @@ dedup:
 discovery:
   enabled: true
   persist_candidates: true
+  # Search-budget plan (daily discovery, mostly free):
+  # - Source-targeted search on native sources is dropped by default, so a run
+  #   issues only ~67 open-web queries/engine (broad + taxonomy + social).
+  # - max_queries_per_run caps each run to the 35 highest-yield/priority queries;
+  #   rotation refreshes the rest of the ~67 pool across subsequent runs.
+  # - Daily cadence ≈ 35 x 30 = 1,050 queries/engine/month.
+  # - Each engine's first 1,000/month are free; monthly_budget_usd is REAL money
+  #   beyond that. At ~1,050/mo the paid overage is ~50 queries:
+  #   Brave ~$0.25, Exa ~$0.35 — well under the caps below.
+  max_queries_per_run: 35
   engines:
     brave:
       enabled: true
       api_key_env: DENBUST_BRAVE_SEARCH_API_KEY
       max_results_per_query: 20
+      monthly_free_queries: 1000     # Brave Search free tier ($5 credit / $5 per 1k)
+      monthly_budget_usd: 1.00       # allow up to ~200 paid queries of overage
     exa:
       enabled: true
       api_key_env: DENBUST_EXA_API_KEY
       max_results_per_query: 20
       allow_find_similar: true
+      monthly_free_queries: 1000     # Exa free tier (1,000 requests/month)
+      monthly_budget_usd: 5.00       # the $5 Exa plan: ~714 paid queries of headroom
     google_cse:
       enabled: false
       api_key_env: DENBUST_GOOGLE_CSE_API_KEY

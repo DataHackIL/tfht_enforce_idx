@@ -9,9 +9,19 @@ from denbust.discovery.search_budget import (
     ENGINE_REQUEST_USD,
     SearchBudgetLedger,
     affordable_query_count,
+    billed_cost_usd,
     engine_request_usd,
     month_to_date_summary,
 )
+
+
+def test_billed_cost_usd_after_free_allowance() -> None:
+    """Real cost bills only queries beyond the free allowance."""
+    assert billed_cost_usd("brave", queries=900, monthly_free_queries=1000) == 0.0
+    assert billed_cost_usd("brave", queries=1200, monthly_free_queries=1000) == round(
+        200 * 0.005, 6
+    )
+    assert billed_cost_usd("exa", queries=1100, monthly_free_queries=1000) == round(100 * 0.007, 6)
 
 
 def test_record_and_month_spend_round_trip(tmp_path: Path) -> None:
@@ -37,32 +47,75 @@ def test_record_and_month_spend_round_trip(tmp_path: Path) -> None:
 
 
 def test_affordable_query_count() -> None:
-    """The guard caps requested queries to what the remaining budget affords."""
-    # Brave $0.005/q; $1 budget, $0.50 spent → $0.50 left → 100 queries.
+    """The guard spends the free allowance first, then the paid budget."""
+    # No free, brave $0.005/q; $1 budget, 100 spent ($0.50) → $0.50 left → 100 more.
     assert (
         affordable_query_count(
-            engine="brave", requested=435, spent_usd=0.50, monthly_budget_usd=1.00
+            engine="brave", requested=435, queries_spent=100, monthly_budget_usd=1.00
         )
         == 100
     )
-    # Budget already exhausted → 0.
+    # Budget exhausted (200 spent = $1.00 of $1.00) → 0.
     assert (
         affordable_query_count(
-            engine="brave", requested=435, spent_usd=1.00, monthly_budget_usd=1.00
+            engine="brave", requested=435, queries_spent=200, monthly_budget_usd=1.00
         )
         == 0
     )
-    # Fewer requested than affordable → unchanged.
-    assert (
-        affordable_query_count(engine="exa", requested=20, spent_usd=0.0, monthly_budget_usd=100.0)
-        == 20
-    )
-    # No budget set → unchanged.
+    # Neither free nor budget → unchanged.
     assert (
         affordable_query_count(
-            engine="brave", requested=435, spent_usd=999.0, monthly_budget_usd=None
+            engine="brave", requested=435, queries_spent=999, monthly_budget_usd=None
         )
         == 435
+    )
+
+
+def test_affordable_query_count_free_allowance() -> None:
+    """The free monthly allowance is spent before any paid budget."""
+    # 1,000 free, no paid budget: 600 used → 400 free left.
+    assert (
+        affordable_query_count(
+            engine="brave",
+            requested=435,
+            queries_spent=600,
+            monthly_budget_usd=None,
+            monthly_free_queries=1000,
+        )
+        == 400
+    )
+    # Free exhausted, no paid budget → 0.
+    assert (
+        affordable_query_count(
+            engine="exa",
+            requested=67,
+            queries_spent=1000,
+            monthly_budget_usd=None,
+            monthly_free_queries=1000,
+        )
+        == 0
+    )
+    # 1,000 free + $5 budget on exa ($0.007/q → 714 paid): 1,000 used → 0 free + 714 paid.
+    assert (
+        affordable_query_count(
+            engine="exa",
+            requested=999,
+            queries_spent=1000,
+            monthly_budget_usd=5.00,
+            monthly_free_queries=1000,
+        )
+        == 714
+    )
+    # Well within free → full request.
+    assert (
+        affordable_query_count(
+            engine="brave",
+            requested=35,
+            queries_spent=100,
+            monthly_budget_usd=1.00,
+            monthly_free_queries=1000,
+        )
+        == 35
     )
 
 
