@@ -49,6 +49,7 @@ from denbust.discovery.balanced_selection import (
     plan_balanced_scrape_batch,
 )
 from denbust.discovery.base import DiscoveryContext, SourceDiscoveryContext
+from denbust.discovery.domain_verdicts import DomainVerdictStore, filter_by_domain_verdict
 from denbust.discovery.engine_checkpoint import (
     cache_path as _engine_cache_path,
 )
@@ -1427,6 +1428,7 @@ async def _run_candidate_scrape_job(
     pub_date_from: datetime | None = None,
     balanced_batch_size: int | None = None,
     min_domain_frequency: int | None = None,
+    use_domain_verdicts: bool = False,
 ) -> tuple[CandidateScrapeBatch, list[PrefilterDecision]]:
     """Select queued candidates, apply the thin prefilter, and run the scrape-attempt layer.
 
@@ -1466,6 +1468,19 @@ async def _run_candidate_scrape_job(
                     min_domain_frequency,
                     len(passed_pool),
                     before,
+                )
+            if use_domain_verdicts:
+                verdict_store = DomainVerdictStore(
+                    config.discovery_state_paths.domain_verdicts_path
+                )
+                verdicts = verdict_store.load()
+                before = len(passed_pool)
+                passed_pool = filter_by_domain_verdict(passed_pool, verdicts=verdicts)
+                logger.info(
+                    "Domain-verdict gate: %d/%d candidates passed (%d cached verdicts).",
+                    len(passed_pool),
+                    before,
+                    len(verdicts),
                 )
             passed_candidates = plan_balanced_scrape_batch(
                 passed_pool,
@@ -2547,6 +2562,7 @@ async def run_news_scrape_candidates_job(
             pub_date_from=config.scrape_pub_date_from,
             balanced_batch_size=config.scrape_balanced_batch_size,
             min_domain_frequency=config.scrape_min_domain_frequency,
+            use_domain_verdicts=config.scrape_use_domain_verdicts,
         )
         result.raw_article_count = len(scrape_batch.raw_articles)
         if scrape_batch.errors:
@@ -3350,6 +3366,7 @@ def _run_job_from_config(
     scrape_pub_date_from: str | None = None,
     scrape_balanced_batch_size: int | None = None,
     scrape_min_domain_frequency: int | None = None,
+    scrape_use_domain_verdicts: bool = False,
 ) -> RunSnapshot:
     """Shared sync wrapper for CLI-triggered job runs."""
     setup_logging()
@@ -3378,6 +3395,8 @@ def _run_job_from_config(
             print("Error: --min-domain-frequency must be a positive integer")
             sys.exit(1)
         update["scrape_min_domain_frequency"] = scrape_min_domain_frequency
+    if scrape_use_domain_verdicts:
+        update["scrape_use_domain_verdicts"] = True
     if update:
         config = config.model_copy(update=update)
 
@@ -3456,6 +3475,7 @@ def run_job(
     scrape_pub_date_from: str | None = None,
     scrape_balanced_batch_size: int | None = None,
     scrape_min_domain_frequency: int | None = None,
+    scrape_use_domain_verdicts: bool = False,
 ) -> None:
     """Run a dataset/job pair through the generic registry."""
     _run_job_from_config(
@@ -3467,6 +3487,7 @@ def run_job(
         scrape_pub_date_from=scrape_pub_date_from,
         scrape_balanced_batch_size=scrape_balanced_batch_size,
         scrape_min_domain_frequency=scrape_min_domain_frequency,
+        scrape_use_domain_verdicts=scrape_use_domain_verdicts,
     )
 
 

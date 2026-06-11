@@ -90,6 +90,14 @@ def run(
             " spam tail. Balanced-batch mode only.",
         ),
     ] = None,
+    use_domain_verdicts: Annotated[
+        bool,
+        typer.Option(
+            "--use-domain-verdicts",
+            help="Apply the cached per-domain LLM verdict gate (drop 'block' domains)."
+            " Populate the cache first with `denbust classify-domains`. Balanced-batch mode only.",
+        ),
+    ] = False,
 ) -> None:
     """Run a dataset/job pair through the registry."""
     from denbust.pipeline import run_job
@@ -103,6 +111,7 @@ def run(
         scrape_pub_date_from=pub_date_from,
         scrape_balanced_batch_size=balanced_batch,
         scrape_min_domain_frequency=min_domain_frequency,
+        scrape_use_domain_verdicts=use_domain_verdicts,
     )
 
 
@@ -623,6 +632,69 @@ def candidates_b2_suppress(
     finally:
         persistence.close()
     typer.echo(f"Stage B2 total suppressed: {total}")
+
+
+@app.command("classify-domains")
+def classify_domains(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Max number of new domains to classify this run."),
+    ] = None,
+    suppress: Annotated[
+        bool,
+        typer.Option("--suppress", help="Stage-B2-suppress candidates on 'block'-verdict domains."),
+    ] = False,
+) -> None:
+    """Classify not-yet-judged candidate domains with the per-domain LLM verdict gate.
+
+    Populates the durable verdict cache (``domain_verdicts.jsonl``). The automated
+    successor to manual blocklist rounds: each new domain is judged once and
+    cached. With ``--suppress``, candidates on ``block`` domains are removed from
+    the scrapeable pool immediately. See ``docs/batch_scraping_protocol.md``.
+    """
+    from denbust.config import load_config
+    from denbust.discovery.candidate_filters import globally_excluded_search_domains
+    from denbust.discovery.domain_verdicts import (
+        DomainClassifier,
+        DomainVerdictStore,
+        blocked_domains,
+        classify_pool_domains,
+    )
+    from denbust.discovery.manual_filter import suppress_candidates_b2_by_domain
+    from denbust.discovery.scrape_queue import SCRAPEABLE_CANDIDATE_STATUSES
+    from denbust.discovery.storage import create_discovery_persistence
+
+    cfg = load_config(config or Path("agents/news/local.yaml"))
+    if not cfg.anthropic_api_key:
+        typer.echo("ANTHROPIC_API_KEY not set.")
+        raise typer.Exit(code=1)
+
+    store = DomainVerdictStore(cfg.discovery_state_paths.domain_verdicts_path)
+    classifier = DomainClassifier(api_key=cfg.anthropic_api_key, model=cfg.classifier.model)
+    persistence = create_discovery_persistence(cfg)
+    try:
+        pool = persistence.list_candidates(statuses=SCRAPEABLE_CANDIDATE_STATUSES)
+        new_verdicts = classify_pool_domains(
+            pool,
+            store=store,
+            classifier=classifier,
+            static_blocklist=frozenset(globally_excluded_search_domains()),
+            limit=limit,
+        )
+        allow = sum(1 for v in new_verdicts if v.decision == "allow")
+        block = sum(1 for v in new_verdicts if v.decision == "block")
+        typer.echo(f"Classified {len(new_verdicts)} new domain(s): {allow} allow, {block} block.")
+        if suppress:
+            suppressed = suppress_candidates_b2_by_domain(
+                persistence, blocked_domains(store), note="domain-verdict gate: block"
+            )
+            typer.echo(f"Suppressed {len(suppressed)} candidate(s) on block-verdict domains.")
+    finally:
+        persistence.close()
 
 
 @app.command()
