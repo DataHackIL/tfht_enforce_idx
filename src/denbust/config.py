@@ -280,6 +280,10 @@ class DiscoveryEngineConfig(BaseModel):
     enabled: bool = False
     api_key_env: str | None = None
     max_results_per_query: int = Field(default=20, ge=1)
+    # Optional monthly USD budget for this engine's search requests. When set,
+    # the budget guard caps a run to the queries that fit the remaining
+    # month-to-date budget (highest-priority kinds first) instead of overspending.
+    monthly_budget_usd: float | None = Field(default=None, ge=0)
 
 
 class ExaDiscoveryEngineConfig(DiscoveryEngineConfig):

@@ -111,7 +111,7 @@ _QUERY_KIND_PRIORITY: dict[DiscoveryQueryKind, int] = {
 }
 
 
-def _apply_query_budget(
+def apply_query_budget(
     queries: list[DiscoveryQuery], max_queries: int | None
 ) -> list[DiscoveryQuery]:
     """Cap *queries* to *max_queries*, keeping the highest-priority kinds first."""
@@ -260,4 +260,4 @@ def build_discovery_queries(
                     seen_keys.add(taxonomy_source_key)
 
     budget = max_queries if max_queries is not None else config.discovery.max_queries_per_run
-    return _apply_query_budget(queries, budget)
+    return apply_query_budget(queries, budget)

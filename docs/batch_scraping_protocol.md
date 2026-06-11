@@ -164,6 +164,22 @@ queries/engine, exhausting the budget in ~2–3 runs. Two levers cut this:
 Implementation: `build_discovery_queries` + `source_targeted_search_domains` in
 `src/denbust/discovery/queries.py`.
 
+### Budget ledger + guard
+
+Every discovery run records its live (non-cached) search requests per engine to
+`search_budget.jsonl`. Set a monthly cap per engine via
+`discovery.engines.<engine>.monthly_budget_usd`; the **guard** then truncates a
+run to the queries that fit the remaining month-to-date budget (highest-priority
+kinds first) instead of overspending into a `402`. Brave ($5/1k) is cheaper than
+Exa ($7/1k), so the same dollar cap pushes more queries through Brave — the
+routing preference. Inspect spend with:
+
+```bash
+denbust search-budget --config <cfg>          # month-to-date queries + $ per engine
+```
+
+Implementation: `src/denbust/discovery/search_budget.py`.
+
 ## Outputs of each batch
 
 Every batch run should report:
