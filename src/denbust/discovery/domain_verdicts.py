@@ -185,6 +185,11 @@ def _domain_samples(
     return samples
 
 
+#: Flush the verdict cache to disk every this many classifications, so a long
+#: run killed mid-way keeps its progress (re-running resumes from the cache).
+_CLASSIFY_FLUSH_EVERY = 10
+
+
 def classify_pool_domains(
     candidates: Sequence[PersistentCandidate],
     *,
@@ -193,11 +198,14 @@ def classify_pool_domains(
     static_blocklist: frozenset[str] = frozenset(),
     limit: int | None = None,
     sample_size: int = _DEFAULT_SAMPLE_SIZE,
+    flush_every: int = _CLASSIFY_FLUSH_EVERY,
 ) -> list[DomainVerdict]:
     """Classify and cache verdicts for not-yet-judged domains in the pool.
 
     Domains that are known families, already in *static_blocklist*, or already
-    cached are skipped. Returns the newly written verdicts.
+    cached are skipped. Verdicts are flushed to the store every *flush_every*
+    classifications (and once at the end), so a long run killed mid-way keeps
+    its progress and a re-run resumes from the cache. Returns the new verdicts.
     """
     already = set(store.load()) | set(static_blocklist)
     samples = _domain_samples(candidates, skip=frozenset(already), sample_size=sample_size)
@@ -205,11 +213,17 @@ def classify_pool_domains(
     if limit is not None:
         domains = domains[:limit]
     new_verdicts: list[DomainVerdict] = []
+    pending: list[DomainVerdict] = []
     for domain in domains:
         verdict = classifier.classify(domain, samples[domain])
         if verdict is not None:
             new_verdicts.append(verdict)
-    store.upsert(new_verdicts)
+            pending.append(verdict)
+        if len(pending) >= flush_every:
+            store.upsert(pending)
+            pending = []
+    if pending:
+        store.upsert(pending)
     return new_verdicts
 
 
