@@ -123,6 +123,34 @@ def test_classify_pool_domains_skips_known_static_and_cached(tmp_path: Path) -> 
     }
 
 
+def test_classify_pool_domains_flushes_incrementally(tmp_path: Path) -> None:
+    """Verdicts are persisted mid-run so a kill keeps progress."""
+    path = tmp_path / "v.jsonl"
+    pool = [_cand(f"c{i}", domain=f"d{i}.example") for i in range(7)]
+    decisions = {f"d{i}.example": "block" for i in range(7)}
+
+    flushes: list[int] = []
+
+    class CountingClassifier(FakeClassifier):
+        def classify(self, domain: str, sample_titles: list[str]) -> DomainVerdict | None:
+            # After each classification, record how many verdicts are on disk.
+            result = super().classify(domain, sample_titles)
+            flushes.append(len(DomainVerdictStore(path).load()))
+            return result
+
+    classify_pool_domains(
+        pool,
+        store=DomainVerdictStore(path),
+        classifier=CountingClassifier(decisions),
+        flush_every=3,
+    )
+
+    # After the 3rd and 6th classification the cache on disk should be non-empty
+    # (flushed at 3 and 6), proving progress survives a mid-run interruption.
+    assert max(flushes) >= 3
+    assert len(DomainVerdictStore(path).load()) == 7
+
+
 def test_classify_pool_domains_limit(tmp_path: Path) -> None:
     """The limit caps how many new domains are classified per run."""
     store = DomainVerdictStore(tmp_path / "v.jsonl")
