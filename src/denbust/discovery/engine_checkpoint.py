@@ -57,6 +57,18 @@ def cache_path(cache_dir: Path, engine: str, query: DiscoveryQuery) -> Path:
     return cache_dir / engine / f"{_query_cache_key(engine, query)}.jsonl"
 
 
+def query_last_run_at(cache_dir: Path, engine: str, query: DiscoveryQuery) -> datetime | None:
+    """Return when *query* was last issued live on *engine*, or None if never.
+
+    The checkpoint file's mtime is written each time the query hits the API, so
+    it doubles as a per-query last-run timestamp for cross-run rotation.
+    """
+    path = cache_path(cache_dir, engine, query)
+    if not path.exists():
+        return None
+    return datetime.fromtimestamp(path.stat().st_mtime, UTC)
+
+
 def load_cached_candidates(
     path: Path,
     *,

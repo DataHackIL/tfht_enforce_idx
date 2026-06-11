@@ -55,6 +55,7 @@ from denbust.discovery.engine_checkpoint import (
 )
 from denbust.discovery.engine_checkpoint import (
     load_cached_candidates,
+    query_last_run_at,
     save_cached_candidates,
 )
 from denbust.discovery.engines.brave import BraveSearchEngine
@@ -70,7 +71,7 @@ from denbust.discovery.models import (
     ExecutedBackfillQuery,
     PersistentCandidate,
 )
-from denbust.discovery.queries import apply_query_budget, build_discovery_queries
+from denbust.discovery.queries import build_discovery_queries, select_run_queries
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     CandidateScrapeBatch,
@@ -972,12 +973,14 @@ _DISCOVERY_PERSIST_BATCH: int = 50
 
 
 def _guard_search_budget(
-    config: Config, *, engine: str, queries: list[DiscoveryQuery]
+    config: Config, *, engine: str, queries: list[DiscoveryQuery], cache_dir: Path
 ) -> list[DiscoveryQuery]:
     """Cap *queries* to what the engine's remaining monthly budget can afford.
 
     No-op when the engine has no ``monthly_budget_usd``. When the budget is
-    partly spent, keeps the highest-priority queries that fit (avoids the 402).
+    partly spent, keeps the highest-priority queries that fit (avoids the 402),
+    rotating within a tier by least-recently-run so successive capped runs
+    refresh different slices of the pool.
     """
     engine_cfg = getattr(config.discovery.engines, engine, None)
     budget = getattr(engine_cfg, "monthly_budget_usd", None)
@@ -1001,7 +1004,11 @@ def _guard_search_budget(
             spent,
             budget,
         )
-        queries = apply_query_budget(queries, affordable)
+        queries = select_run_queries(
+            queries,
+            affordable,
+            last_run_at=lambda query: query_last_run_at(cache_dir, engine, query),
+        )
     return queries
 
 
@@ -1021,8 +1028,14 @@ async def _run_brave_discovery(
     days: int,
 ) -> PersistedSourceDiscovery:
     """Run Brave-powered discovery with per-query checkpointing and incremental persist."""
+    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     queries = _guard_search_budget(
-        config, engine="brave", queries=build_discovery_queries(config, days=days)
+        config,
+        engine="brave",
+        queries=build_discovery_queries(
+            config, days=days, last_run_at=lambda q: query_last_run_at(cache_dir, "brave", q)
+        ),
+        cache_dir=cache_dir,
     )
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -1063,7 +1076,6 @@ async def _run_brave_discovery(
         max_results_per_query=config.discovery.engines.brave.max_results_per_query,
         metadata={"days": days, "engine": "brave"},
     )
-    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     live_queries = 0
     try:
         batch: list[DiscoveredCandidate] = []
@@ -1109,8 +1121,14 @@ async def _run_exa_discovery(
     days: int,
 ) -> PersistedSourceDiscovery:
     """Run Exa-powered discovery with per-query checkpointing and incremental persist."""
+    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     queries = _guard_search_budget(
-        config, engine="exa", queries=build_discovery_queries(config, days=days)
+        config,
+        engine="exa",
+        queries=build_discovery_queries(
+            config, days=days, last_run_at=lambda q: query_last_run_at(cache_dir, "exa", q)
+        ),
+        cache_dir=cache_dir,
     )
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -1155,7 +1173,6 @@ async def _run_exa_discovery(
             "allow_find_similar": config.discovery.engines.exa.allow_find_similar,
         },
     )
-    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     live_queries = 0
     try:
         batch: list[DiscoveredCandidate] = []
@@ -1201,8 +1218,14 @@ async def _run_google_cse_discovery(
     days: int,
 ) -> PersistedSourceDiscovery:
     """Run Google CSE-powered discovery with per-query checkpointing and incremental persist."""
+    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     queries = _guard_search_budget(
-        config, engine="google_cse", queries=build_discovery_queries(config, days=days)
+        config,
+        engine="google_cse",
+        queries=build_discovery_queries(
+            config, days=days, last_run_at=lambda q: query_last_run_at(cache_dir, "google_cse", q)
+        ),
+        cache_dir=cache_dir,
     )
     discovery_run = DiscoveryRun(
         run_id=run_id,
@@ -1255,7 +1278,6 @@ async def _run_google_cse_discovery(
         max_results_per_query=config.discovery.engines.google_cse.max_results_per_query,
         metadata={"days": days, "engine": "google_cse"},
     )
-    cache_dir = config.discovery_state_paths.engine_query_cache_dir
     live_queries = 0
     try:
         batch: list[DiscoveredCandidate] = []
