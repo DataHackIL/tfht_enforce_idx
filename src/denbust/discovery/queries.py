@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
@@ -111,17 +111,40 @@ _QUERY_KIND_PRIORITY: dict[DiscoveryQueryKind, int] = {
 }
 
 
+def select_run_queries(
+    queries: list[DiscoveryQuery],
+    max_queries: int | None,
+    *,
+    last_run_at: Callable[[DiscoveryQuery], datetime | None] | None = None,
+) -> list[DiscoveryQuery]:
+    """Cap *queries* to *max_queries*, highest-priority kinds first.
+
+    When *last_run_at* is supplied, ties within a priority tier are broken by
+    **least-recently-run first** (never-run queries first, then oldest), so a
+    budget-capped run refreshes a different slice of the pool each time
+    (cross-run rotation) instead of re-issuing the same head every run.
+    """
+    if max_queries is None or len(queries) <= max_queries:
+        return queries
+
+    def sort_key(pair: tuple[int, DiscoveryQuery]) -> tuple[object, ...]:
+        index, query = pair
+        priority = _QUERY_KIND_PRIORITY.get(query.query_kind, 99)
+        if last_run_at is None:
+            return (priority, index)
+        ran_at = last_run_at(query)
+        recency = (0, 0.0) if ran_at is None else (1, ran_at.timestamp())
+        return (priority, recency, index)
+
+    ordered = sorted(enumerate(queries), key=sort_key)
+    return [query for _, query in ordered[:max_queries]]
+
+
 def apply_query_budget(
     queries: list[DiscoveryQuery], max_queries: int | None
 ) -> list[DiscoveryQuery]:
-    """Cap *queries* to *max_queries*, keeping the highest-priority kinds first."""
-    if max_queries is None or len(queries) <= max_queries:
-        return queries
-    ordered = sorted(
-        enumerate(queries),
-        key=lambda pair: (_QUERY_KIND_PRIORITY.get(pair[1].query_kind, 99), pair[0]),
-    )
-    return [query for _, query in ordered[:max_queries]]
+    """Priority-only cap (no rotation). Thin wrapper over ``select_run_queries``."""
+    return select_run_queries(queries, max_queries)
 
 
 def _taxonomy_query_specs() -> list[tuple[str, list[str]]]:
@@ -141,13 +164,15 @@ def build_discovery_queries(
     days: int,
     now: datetime | None = None,
     max_queries: int | None = None,
+    last_run_at: Callable[[DiscoveryQuery], datetime | None] | None = None,
 ) -> list[DiscoveryQuery]:
     """Build normalized discovery queries for enabled discovery engines.
 
     Source-targeted queries cover only ``source_targeted_search_domains`` —
     natively-crawled and blocklisted domains are dropped to save search budget.
     When *max_queries* (or ``config.discovery.max_queries_per_run``) is set, the
-    result is capped to that many queries, keeping the highest-priority kinds.
+    result is capped to that many queries, keeping the highest-priority kinds;
+    *last_run_at* additionally rotates within a tier (least-recently-run first).
     """
     keywords = _normalize_keywords(config.keywords)
     taxonomy_enabled = DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds
@@ -260,4 +285,4 @@ def build_discovery_queries(
                     seen_keys.add(taxonomy_source_key)
 
     budget = max_queries if max_queries is not None else config.discovery.max_queries_per_run
-    return apply_query_budget(queries, budget)
+    return select_run_queries(queries, budget, last_run_at=last_run_at)

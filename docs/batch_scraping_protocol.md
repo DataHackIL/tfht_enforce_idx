@@ -180,6 +180,16 @@ denbust search-budget --config <cfg>          # month-to-date queries + $ per en
 
 Implementation: `src/denbust/discovery/search_budget.py`.
 
+### Query rotation across runs
+
+When a budget cap truncates a run, the kept queries are ordered
+**least-recently-run first** (never-run queries, then oldest) within each
+priority tier. The per-query checkpoint file's mtime is the last-run timestamp,
+so successive capped runs spend their budget refreshing *different* slices of
+the query pool instead of re-issuing the same head every run — maximising fresh
+coverage per dollar. Implementation: `select_run_queries` (queries.py) +
+`query_last_run_at` (engine_checkpoint.py).
+
 ## Outputs of each batch
 
 Every batch run should report:

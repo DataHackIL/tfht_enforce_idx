@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from denbust.config import Config, SourceConfig, SourceType
-from denbust.discovery.models import DiscoveryQueryKind
+from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
 from denbust.discovery.queries import (
     build_discovery_queries,
     enabled_discovery_domains,
@@ -365,6 +365,42 @@ def test_build_discovery_queries_query_budget_keeps_highest_priority_kinds() -> 
     assert len(capped) == 3
     # The 3 broad (open-web) queries outrank source-targeted and social.
     assert all(q.query_kind is DiscoveryQueryKind.BROAD for q in capped)
+
+
+def test_select_run_queries_rotates_by_least_recently_run() -> None:
+    """With a recency map, a capped run keeps least-recently-run queries first."""
+    from denbust.discovery.queries import select_run_queries
+
+    config = Config(
+        keywords=["זנות", "בית בושת", "סרסור"],
+        sources=[],
+        discovery={"default_query_kinds": ["broad"]},
+    )
+    queries = build_discovery_queries(config, days=3)
+    assert len(queries) == 3
+    texts = [q.query_text for q in queries]
+
+    # Pretend the first two were run recently; the third never ran.
+    recent = {
+        texts[0]: datetime(2026, 6, 11, tzinfo=UTC),
+        texts[1]: datetime(2026, 6, 10, tzinfo=UTC),
+    }
+
+    def last_run_at(q: DiscoveryQuery) -> datetime | None:
+        return recent.get(q.query_text)
+
+    capped = select_run_queries(queries, 1, last_run_at=last_run_at)
+    # Never-run query (texts[2]) wins the single slot over the recently-run ones.
+    assert [q.query_text for q in capped] == [texts[2]]
+
+    # Next, with all run but texts[1] oldest:
+    recent2 = {
+        texts[0]: datetime(2026, 6, 11, tzinfo=UTC),
+        texts[1]: datetime(2026, 6, 1, tzinfo=UTC),
+        texts[2]: datetime(2026, 6, 9, tzinfo=UTC),
+    }
+    capped2 = select_run_queries(queries, 1, last_run_at=lambda q: recent2[q.query_text])
+    assert [q.query_text for q in capped2] == [texts[1]]  # oldest first
 
 
 def test_build_discovery_queries_query_budget_from_config() -> None:
