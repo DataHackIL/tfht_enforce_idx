@@ -4065,6 +4065,7 @@ class TestRunPipeline:
             "scrape_balanced_batch_size": None,
             "scrape_min_domain_frequency": None,
             "scrape_use_domain_verdicts": False,
+            "query_budget": None,
         }
 
     def test_run_job_from_config_passes_operational_store_to_async_runner(

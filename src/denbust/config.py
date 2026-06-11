@@ -337,6 +337,15 @@ class DiscoveryConfig(BaseModel):
             DiscoveryQueryKind.SOCIAL_TARGETED,
         ]
     )
+    # Source-targeted search on natively-crawled sources (ynet/mako/maariv/…)
+    # is redundant with the source-native adapters that already fetch them, so
+    # by default those domains are dropped from source-targeted search queries
+    # to save search-engine budget. Set True to restore the old behaviour.
+    search_native_source_domains: bool = False
+    # Optional hard cap on the number of queries issued per engine per run.
+    # When set, the highest-priority query kinds (broad/taxonomy open-web first)
+    # are kept up to this many queries; the rest are dropped.
+    max_queries_per_run: int | None = Field(default=None, ge=1)
 
 
 class SourceDiscoveryProducerConfig(BaseModel):

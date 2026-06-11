@@ -145,6 +145,25 @@ This is the scalable successor to manual Stage B2 blocklist rounds: instead of a
 human enumerating bad domains forever, the model judges each domain once and the
 decision compounds. Implementation: `src/denbust/discovery/domain_verdicts.py`.
 
+## Search-budget discipline (Brave / Exa)
+
+Brave and Exa each give ~1,000 free queries/month; a naive run issued 435
+queries/engine, exhausting the budget in ~2–3 runs. Two levers cut this:
+
+1. **Drop source-targeted search for natively-crawled sources** (default). The
+   source-native adapters already fetch ynet/mako/maariv/haaretz/walla/ice, so
+   paying search budget to re-find their articles is redundant. Source-targeted
+   queries now cover only non-native, non-blocklisted domains — in practice this
+   takes a run from **435 → 67 queries/engine** (broad + taxonomy + social only,
+   the open-web queries that find off-list outlets like newsru/mignews). Set
+   `discovery.search_native_source_domains: true` to restore the old behaviour.
+2. **Per-run query budget cap** — `discovery.max_queries_per_run` or
+   `denbust run --job discover --query-budget N` keeps the highest-priority kinds
+   (open-web broad/taxonomy first) up to N queries and drops the rest.
+
+Implementation: `build_discovery_queries` + `source_targeted_search_domains` in
+`src/denbust/discovery/queries.py`.
+
 ## Outputs of each batch
 
 Every batch run should report:

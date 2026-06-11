@@ -3367,6 +3367,7 @@ def _run_job_from_config(
     scrape_balanced_batch_size: int | None = None,
     scrape_min_domain_frequency: int | None = None,
     scrape_use_domain_verdicts: bool = False,
+    query_budget: int | None = None,
 ) -> RunSnapshot:
     """Shared sync wrapper for CLI-triggered job runs."""
     setup_logging()
@@ -3377,6 +3378,13 @@ def _run_job_from_config(
         update["dataset_name"] = DatasetName(dataset_name)
     if job_name is not None:
         update["job_name"] = JobName(job_name)
+    if query_budget is not None:
+        if query_budget < 1:
+            print("Error: --query-budget must be a positive integer")
+            sys.exit(1)
+        update["discovery"] = config.discovery.model_copy(
+            update={"max_queries_per_run": query_budget}
+        )
     if scrape_pub_date_from is not None:
         try:
             update["scrape_pub_date_from"] = datetime.fromisoformat(scrape_pub_date_from).replace(
@@ -3476,6 +3484,7 @@ def run_job(
     scrape_balanced_batch_size: int | None = None,
     scrape_min_domain_frequency: int | None = None,
     scrape_use_domain_verdicts: bool = False,
+    query_budget: int | None = None,
 ) -> None:
     """Run a dataset/job pair through the generic registry."""
     _run_job_from_config(
@@ -3488,6 +3497,7 @@ def run_job(
         scrape_balanced_batch_size=scrape_balanced_batch_size,
         scrape_min_domain_frequency=scrape_min_domain_frequency,
         scrape_use_domain_verdicts=scrape_use_domain_verdicts,
+        query_budget=query_budget,
     )
 
 
