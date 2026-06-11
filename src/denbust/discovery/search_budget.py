@@ -98,24 +98,38 @@ class SearchBudgetLedger:
         return queries, round(usd, 6)
 
 
+def billed_cost_usd(engine: str, *, queries: int, monthly_free_queries: int = 0) -> float:
+    """Real USD for *queries* this month after the free allowance is consumed."""
+    paid = max(0, queries - monthly_free_queries)
+    return round(paid * engine_request_usd(engine), 6)
+
+
 def affordable_query_count(
     *,
     engine: str,
     requested: int,
-    spent_usd: float,
+    queries_spent: int,
     monthly_budget_usd: float | None,
+    monthly_free_queries: int = 0,
 ) -> int:
-    """How many of *requested* queries fit the remaining monthly budget.
+    """How many of *requested* queries fit the remaining monthly allowance.
 
-    Returns *requested* unchanged when no budget is set. Never negative.
+    Spends the free monthly allowance first, then the paid *monthly_budget_usd*.
+    Returns *requested* unchanged when neither a free allowance nor a budget is
+    set. Never negative.
     """
+    free_remaining = max(0, monthly_free_queries - queries_spent)
     if monthly_budget_usd is None:
-        return requested
-    remaining = max(0.0, monthly_budget_usd - spent_usd)
+        if monthly_free_queries <= 0:
+            return requested
+        return min(requested, free_remaining)
     price = engine_request_usd(engine)
     if price <= 0:
         return requested
-    return max(0, min(requested, int(remaining / price)))
+    paid_spent = max(0, queries_spent - monthly_free_queries)
+    paid_budget_remaining = max(0.0, monthly_budget_usd - paid_spent * price)
+    paid_affordable = int(paid_budget_remaining / price)
+    return max(0, min(requested, free_remaining + paid_affordable))
 
 
 def month_to_date_summary(

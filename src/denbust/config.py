@@ -280,9 +280,13 @@ class DiscoveryEngineConfig(BaseModel):
     enabled: bool = False
     api_key_env: str | None = None
     max_results_per_query: int = Field(default=20, ge=1)
-    # Optional monthly USD budget for this engine's search requests. When set,
-    # the budget guard caps a run to the queries that fit the remaining
-    # month-to-date budget (highest-priority kinds first) instead of overspending.
+    # Free search requests included per month (Brave/Exa each give ~1,000). The
+    # budget guard spends these before billing anything, so monthly_budget_usd
+    # is real money beyond the free tier — not a list-price ceiling.
+    monthly_free_queries: int = Field(default=0, ge=0)
+    # Optional monthly USD budget for PAID requests (beyond monthly_free_queries).
+    # The guard caps a run to free-remaining + what this budget can still buy
+    # (highest-yield/priority queries first) instead of overspending into a 402.
     monthly_budget_usd: float | None = Field(default=None, ge=0)
 
 

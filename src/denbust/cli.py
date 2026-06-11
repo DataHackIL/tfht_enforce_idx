@@ -721,7 +721,11 @@ def search_budget(
     from datetime import UTC, datetime
 
     from denbust.config import load_config
-    from denbust.discovery.search_budget import SearchBudgetLedger, month_to_date_summary
+    from denbust.discovery.search_budget import (
+        SearchBudgetLedger,
+        billed_cost_usd,
+        month_to_date_summary,
+    )
 
     cfg = load_config(config or Path("agents/news/local.yaml"))
     year_month = month or datetime.now(UTC).strftime("%Y-%m")
@@ -729,13 +733,15 @@ def search_budget(
     engines = ("brave", "exa", "google_cse")
     summary = month_to_date_summary(ledger, year_month=year_month, engines=engines)
 
-    typer.echo(f"Search budget — {year_month}")
+    typer.echo(f"Search budget — {year_month}  (queries used / free | real $ spent / budget)")
     for engine in engines:
-        queries, usd = summary[engine]
+        queries, _ = summary[engine]
         engine_cfg = getattr(cfg.discovery.engines, engine, None)
         budget = getattr(engine_cfg, "monthly_budget_usd", None)
-        cap = f" / ${budget:.2f}" if budget is not None else " (no cap)"
-        typer.echo(f"  {engine:<11} {queries:>6} queries  ${usd:>7.3f}{cap}")
+        free = getattr(engine_cfg, "monthly_free_queries", 0)
+        spent = billed_cost_usd(engine, queries=queries, monthly_free_queries=free)
+        budget_str = f"${budget:.2f}" if budget is not None else "—"
+        typer.echo(f"  {engine:<11} {queries:>5}/{free:<5} queries   ${spent:>6.3f} / {budget_str}")
 
 
 @app.command("query-yield")
