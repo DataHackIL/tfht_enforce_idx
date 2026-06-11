@@ -706,6 +706,38 @@ def classify_domains(
         persistence.close()
 
 
+@app.command("search-budget")
+def search_budget(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+    month: Annotated[
+        str | None,
+        typer.Option("--month", help="Month to report as YYYY-MM (defaults to current UTC month)."),
+    ] = None,
+) -> None:
+    """Show month-to-date Brave/Exa/Google-CSE search spend vs configured budgets."""
+    from datetime import UTC, datetime
+
+    from denbust.config import load_config
+    from denbust.discovery.search_budget import SearchBudgetLedger, month_to_date_summary
+
+    cfg = load_config(config or Path("agents/news/local.yaml"))
+    year_month = month or datetime.now(UTC).strftime("%Y-%m")
+    ledger = SearchBudgetLedger(cfg.discovery_state_paths.search_budget_path)
+    engines = ("brave", "exa", "google_cse")
+    summary = month_to_date_summary(ledger, year_month=year_month, engines=engines)
+
+    typer.echo(f"Search budget — {year_month}")
+    for engine in engines:
+        queries, usd = summary[engine]
+        engine_cfg = getattr(cfg.discovery.engines, engine, None)
+        budget = getattr(engine_cfg, "monthly_budget_usd", None)
+        cap = f" / ${budget:.2f}" if budget is not None else " (no cap)"
+        typer.echo(f"  {engine:<11} {queries:>6} queries  ${usd:>7.3f}{cap}")
+
+
 @app.command()
 def version() -> None:
     """Show version information."""

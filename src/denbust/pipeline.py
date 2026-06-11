@@ -70,7 +70,7 @@ from denbust.discovery.models import (
     ExecutedBackfillQuery,
     PersistentCandidate,
 )
-from denbust.discovery.queries import build_discovery_queries
+from denbust.discovery.queries import apply_query_budget, build_discovery_queries
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     CandidateScrapeBatch,
@@ -78,6 +78,10 @@ from denbust.discovery.scrape_queue import (
     scrape_candidates,
     select_backfill_candidates_for_scrape,
     select_candidates_for_scrape,
+)
+from denbust.discovery.search_budget import (
+    SearchBudgetLedger,
+    affordable_query_count,
 )
 from denbust.discovery.source_native import (
     PersistedSourceDiscovery,
@@ -967,6 +971,49 @@ async def _run_source_native_discovery(
 _DISCOVERY_PERSIST_BATCH: int = 50
 
 
+def _guard_search_budget(
+    config: Config, *, engine: str, queries: list[DiscoveryQuery]
+) -> list[DiscoveryQuery]:
+    """Cap *queries* to what the engine's remaining monthly budget can afford.
+
+    No-op when the engine has no ``monthly_budget_usd``. When the budget is
+    partly spent, keeps the highest-priority queries that fit (avoids the 402).
+    """
+    engine_cfg = getattr(config.discovery.engines, engine, None)
+    budget = getattr(engine_cfg, "monthly_budget_usd", None)
+    if budget is None or not queries:
+        return queries
+    ledger = SearchBudgetLedger(config.discovery_state_paths.search_budget_path)
+    now = datetime.now(UTC)
+    _, spent = ledger.month_spend(year_month=now.strftime("%Y-%m"), engine=engine)
+    affordable = affordable_query_count(
+        engine=engine,
+        requested=len(queries),
+        spent_usd=spent,
+        monthly_budget_usd=budget,
+    )
+    if affordable < len(queries):
+        logger.warning(
+            "%s budget guard: capping %d -> %d queries ($%.2f of $%.2f spent this month).",
+            engine,
+            len(queries),
+            affordable,
+            spent,
+            budget,
+        )
+        queries = apply_query_budget(queries, affordable)
+    return queries
+
+
+def _record_search_spend(config: Config, *, engine: str, run_id: str, live_queries: int) -> None:
+    """Record the live (non-cached) search requests this run issued on *engine*."""
+    if live_queries <= 0:
+        return
+    SearchBudgetLedger(config.discovery_state_paths.search_budget_path).record(
+        engine=engine, queries=live_queries, run_id=run_id, now=datetime.now(UTC)
+    )
+
+
 async def _run_brave_discovery(
     *,
     config: Config,
@@ -974,7 +1021,9 @@ async def _run_brave_discovery(
     days: int,
 ) -> PersistedSourceDiscovery:
     """Run Brave-powered discovery with per-query checkpointing and incremental persist."""
-    queries = build_discovery_queries(config, days=days)
+    queries = _guard_search_budget(
+        config, engine="brave", queries=build_discovery_queries(config, days=days)
+    )
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
@@ -1015,6 +1064,7 @@ async def _run_brave_discovery(
         metadata={"days": days, "engine": "brave"},
     )
     cache_dir = config.discovery_state_paths.engine_query_cache_dir
+    live_queries = 0
     try:
         batch: list[DiscoveredCandidate] = []
         last_result: PersistedSourceDiscovery | None = None
@@ -1025,6 +1075,7 @@ async def _run_brave_discovery(
             if cached is not None:
                 batch.extend(cached)
             else:
+                live_queries += 1
                 try:
                     fresh = await engine.discover([query], context)
                 except Exception as exc:
@@ -1048,6 +1099,7 @@ async def _run_brave_discovery(
     finally:
         await engine.aclose()
         persistence.close()
+        _record_search_spend(config, engine="brave", run_id=run_id, live_queries=live_queries)
 
 
 async def _run_exa_discovery(
@@ -1057,7 +1109,9 @@ async def _run_exa_discovery(
     days: int,
 ) -> PersistedSourceDiscovery:
     """Run Exa-powered discovery with per-query checkpointing and incremental persist."""
-    queries = build_discovery_queries(config, days=days)
+    queries = _guard_search_budget(
+        config, engine="exa", queries=build_discovery_queries(config, days=days)
+    )
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
@@ -1102,6 +1156,7 @@ async def _run_exa_discovery(
         },
     )
     cache_dir = config.discovery_state_paths.engine_query_cache_dir
+    live_queries = 0
     try:
         batch: list[DiscoveredCandidate] = []
         last_result: PersistedSourceDiscovery | None = None
@@ -1112,6 +1167,7 @@ async def _run_exa_discovery(
             if cached is not None:
                 batch.extend(cached)
             else:
+                live_queries += 1
                 try:
                     fresh = await engine.discover([query], context)
                 except Exception as exc:
@@ -1135,6 +1191,7 @@ async def _run_exa_discovery(
     finally:
         await engine.aclose()
         persistence.close()
+        _record_search_spend(config, engine="exa", run_id=run_id, live_queries=live_queries)
 
 
 async def _run_google_cse_discovery(
@@ -1144,7 +1201,9 @@ async def _run_google_cse_discovery(
     days: int,
 ) -> PersistedSourceDiscovery:
     """Run Google CSE-powered discovery with per-query checkpointing and incremental persist."""
-    queries = build_discovery_queries(config, days=days)
+    queries = _guard_search_budget(
+        config, engine="google_cse", queries=build_discovery_queries(config, days=days)
+    )
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
@@ -1197,6 +1256,7 @@ async def _run_google_cse_discovery(
         metadata={"days": days, "engine": "google_cse"},
     )
     cache_dir = config.discovery_state_paths.engine_query_cache_dir
+    live_queries = 0
     try:
         batch: list[DiscoveredCandidate] = []
         last_result: PersistedSourceDiscovery | None = None
@@ -1207,6 +1267,7 @@ async def _run_google_cse_discovery(
             if cached is not None:
                 batch.extend(cached)
             else:
+                live_queries += 1
                 try:
                     fresh = await engine.discover([query], context)
                 except Exception as exc:
@@ -1230,6 +1291,7 @@ async def _run_google_cse_discovery(
     finally:
         await engine.aclose()
         persistence.close()
+        _record_search_spend(config, engine="google_cse", run_id=run_id, live_queries=live_queries)
 
 
 def _backfill_query_execution_key(engine: str, query: DiscoveryQuery) -> tuple[str, ...]:
