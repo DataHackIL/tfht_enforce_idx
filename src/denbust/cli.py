@@ -738,6 +738,52 @@ def search_budget(
         typer.echo(f"  {engine:<11} {queries:>6} queries  ${usd:>7.3f}{cap}")
 
 
+@app.command("query-yield")
+def query_yield(
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to YAML config file"),
+    ] = None,
+    top: Annotated[
+        int,
+        typer.Option("--top", help="How many top-yield query texts to print."),
+    ] = 20,
+) -> None:
+    """Compute and cache per-keyword yield (index-relevant records discovered).
+
+    Walks the record → candidate → query chain, writes ``query_yield.json``, and
+    prints the highest-yield query texts. Discovery then spends its query budget
+    on proven keywords first. See ``docs/batch_scraping_protocol.md``.
+    """
+    from denbust.config import load_config
+    from denbust.discovery.query_yield import QueryYieldStore, compute_query_yield
+    from denbust.discovery.storage import create_discovery_persistence
+    from denbust.ops.factory import create_operational_store
+
+    cfg = load_config(config or Path("agents/news/local.yaml"))
+    store = create_operational_store(cfg)
+    persistence = create_discovery_persistence(cfg)
+    try:
+        rows = store.fetch_records(cfg.dataset_name)
+        candidate_queries = {
+            candidate.candidate_id: candidate.discovery_queries
+            for candidate in persistence.list_candidates()
+        }
+    finally:
+        persistence.close()
+        store.close()
+
+    yield_map = compute_query_yield(rows, candidate_queries)
+    QueryYieldStore(cfg.discovery_state_paths.query_yield_path).save(yield_map)
+
+    relevant = sum(1 for r in rows if r.get("index_relevant"))
+    typer.echo(f"Query yield from {relevant} index-relevant record(s):")
+    for text, score in sorted(yield_map.items(), key=lambda kv: (-kv[1], kv[0]))[:top]:
+        typer.echo(f"  {score:>3}  {text}")
+    if not yield_map:
+        typer.echo("  (no yielding queries yet)")
+
+
 @app.command()
 def version() -> None:
     """Show version information."""

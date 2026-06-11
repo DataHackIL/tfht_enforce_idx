@@ -190,6 +190,22 @@ the query pool instead of re-issuing the same head every run — maximising fres
 coverage per dollar. Implementation: `select_run_queries` (queries.py) +
 `query_last_run_at` (engine_checkpoint.py).
 
+### Yield-weighted prioritization
+
+Within a budget cap the **highest-yield query texts go first** — keywords/terms
+that have actually produced index-relevant records win the budget over noisy
+ones. Yield is measured along the record -> candidate -> query chain (a relevant
+record's `event_candidate_ids` -> each candidate's `discovery_queries`) and
+cached:
+
+```bash
+denbust query-yield --config <cfg>   # compute + cache query_yield.json, print top keywords
+```
+
+The budget cap then orders queries by **(yield, kind priority, recency)**, so
+proven enforcement-law terms are refreshed before low-yield generic keywords.
+Implementation: `src/denbust/discovery/query_yield.py`.
+
 ## Outputs of each batch
 
 Every batch run should report:
