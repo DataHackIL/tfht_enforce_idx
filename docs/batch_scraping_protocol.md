@@ -118,6 +118,33 @@ This is the primary tool for the single-shot tail; the domain blocklist and
 Stage B2 still handle recurring spam that clears the gate. Implementation:
 `domain_frequencies` + `filter_by_domain_frequency` in `balanced_selection.py`.
 
+## Automated per-domain LLM verdict gate
+
+The frequency gate kills the single-shot tail, but **recurring** off-topic
+domains (real-estate/finance/escort sites seen 2+ times) still need judgment —
+previously a manual blocklist PR per batch. The verdict gate automates that:
+
+```bash
+# 1. Classify not-yet-judged domains once; cache the verdicts (and optionally
+#    suppress candidates on block-verdict domains immediately):
+denbust classify-domains --config <cfg> --suppress
+
+# 2. Apply the cached verdicts as a gate at scrape-selection time:
+denbust run --job scrape_candidates --balanced-batch 60 \
+            --min-domain-frequency 2 --use-domain-verdicts
+```
+
+Each new domain is sent to the LLM **once** with a few sample titles and judged
+`allow` (a plausible Israeli enforcement-news source — including niche/Russian/
+English Israeli outlets) or `block` (escort/SEO/foreign/off-topic). The verdict
+is cached durably in `domain_verdicts.jsonl`, so the cost is one cheap call per
+*new* domain, never per batch. Known outlets are exempt; the static
+`_IRRELEVANT_CONTENT_DOMAINS` blocklist is honoured as an always-block set.
+
+This is the scalable successor to manual Stage B2 blocklist rounds: instead of a
+human enumerating bad domains forever, the model judges each domain once and the
+decision compounds. Implementation: `src/denbust/discovery/domain_verdicts.py`.
+
 ## Outputs of each batch
 
 Every batch run should report:

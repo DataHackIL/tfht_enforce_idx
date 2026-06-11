@@ -439,6 +439,7 @@ class Config(BaseModel):
     scrape_pub_date_from: datetime | None = None
     scrape_balanced_batch_size: int | None = Field(default=None, ge=1)
     scrape_min_domain_frequency: int | None = Field(default=None, ge=1)
+    scrape_use_domain_verdicts: bool = False
     keywords: list[str] = Field(default_factory=lambda: DEFAULT_KEYWORDS.copy())
     sources: list[SourceConfig] = Field(default_factory=list)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)

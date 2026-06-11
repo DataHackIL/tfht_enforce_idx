@@ -126,6 +126,11 @@ scraping budget. Full protocol: `docs/batch_scraping_protocol.md`.
 - Suppress B2-removed candidates so they never re-enter a batch:
   `denbust candidates-b2-suppress --ids …` (one-off junk) or `--domains …`
   (whole spam domains; also add the domain to `_IRRELEVANT_CONTENT_DOMAINS`).
+- Prefer the **automated per-domain LLM verdict gate** over manual blocklist
+  rounds: `denbust classify-domains --suppress` judges each new domain once and
+  caches it; `denbust run --job scrape_candidates --use-domain-verdicts` applies
+  the cache. Reserve manual `_IRRELEVANT_CONTENT_DOMAINS` edits for confirmed
+  always-block cases.
 - Re-plan after suppression so the batch tops up with clean candidates, then run.
 - Report each batch: month×source allocation, Stage B2 removals, scrape
   outcomes, classification outcomes, and any domains added to the blocklist.
