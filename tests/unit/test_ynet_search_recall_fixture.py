@@ -104,7 +104,10 @@ async def test_ynet_source_targeted_taxonomy_search_result_fallback_reaches_clas
                 url="https://www.ynet.co.il/Integration/StoryRss2.xml",
             )
         ],
-        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+        discovery={
+            "search_native_source_domains": True,
+            "default_query_kinds": ["source_targeted", "taxonomy_targeted"],
+        },
         store={"state_root": tmp_path},
     )
 

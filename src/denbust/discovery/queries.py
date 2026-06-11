@@ -7,7 +7,11 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
 from denbust.config import Config, SourceConfig, SourceType
-from denbust.discovery.candidate_filters import globally_excluded_search_domains
+from denbust.discovery.candidate_filters import (
+    globally_excluded_search_domains,
+    match_domain,
+    normalize_domain,
+)
 from denbust.discovery.models import DiscoveryQuery, DiscoveryQueryKind
 from denbust.discovery.source_families import generic_fetch_source_domains
 from denbust.taxonomy import default_taxonomy
@@ -69,6 +73,57 @@ def enabled_discovery_domains(config: Config) -> list[tuple[str, str]]:
     return source_domains
 
 
+def source_targeted_search_domains(config: Config) -> list[tuple[str, str]]:
+    """Return the domains worth issuing source-targeted *search* queries for.
+
+    Natively-crawled sources (ynet/mako/maariv/haaretz/walla/ice) are excluded
+    by default — the source-native adapters already fetch them, so paying search
+    budget to re-find their articles is redundant. Blocklisted domains are also
+    excluded (search would only surface candidates we immediately suppress).
+    Set ``discovery.search_native_source_domains`` to re-include native sources.
+    """
+    excluded = globally_excluded_search_domains()
+    candidates: list[tuple[str, str]] = []
+    if config.discovery.search_native_source_domains:
+        candidates.extend(enabled_source_domains(config))
+    candidates.extend(generic_fetch_source_domains())
+    result: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for source_name, domain in candidates:
+        key = (source_name, domain)
+        if key in seen:
+            continue
+        seen.add(key)
+        if match_domain(normalize_domain(domain), excluded) is not None:
+            continue
+        result.append(key)
+    return result
+
+
+# Query kinds in descending budget priority: open-web broad/taxonomy first
+# (they find off-list outlets that the source-native crawl cannot), then
+# source-targeted, then social. Used when ``max_queries_per_run`` caps a run.
+_QUERY_KIND_PRIORITY: dict[DiscoveryQueryKind, int] = {
+    DiscoveryQueryKind.BROAD: 0,
+    DiscoveryQueryKind.TAXONOMY_TARGETED: 1,
+    DiscoveryQueryKind.SOURCE_TARGETED: 2,
+    DiscoveryQueryKind.SOCIAL_TARGETED: 3,
+}
+
+
+def _apply_query_budget(
+    queries: list[DiscoveryQuery], max_queries: int | None
+) -> list[DiscoveryQuery]:
+    """Cap *queries* to *max_queries*, keeping the highest-priority kinds first."""
+    if max_queries is None or len(queries) <= max_queries:
+        return queries
+    ordered = sorted(
+        enumerate(queries),
+        key=lambda pair: (_QUERY_KIND_PRIORITY.get(pair[1].query_kind, 99), pair[0]),
+    )
+    return [query for _, query in ordered[:max_queries]]
+
+
 def _taxonomy_query_specs() -> list[tuple[str, list[str]]]:
     specs_by_term: dict[str, set[str]] = {}
     for category_id, subcategory_id, term in default_taxonomy().discovery_terms():
@@ -85,8 +140,15 @@ def build_discovery_queries(
     *,
     days: int,
     now: datetime | None = None,
+    max_queries: int | None = None,
 ) -> list[DiscoveryQuery]:
-    """Build normalized discovery queries for enabled discovery engines."""
+    """Build normalized discovery queries for enabled discovery engines.
+
+    Source-targeted queries cover only ``source_targeted_search_domains`` —
+    natively-crawled and blocklisted domains are dropped to save search budget.
+    When *max_queries* (or ``config.discovery.max_queries_per_run``) is set, the
+    result is capped to that many queries, keeping the highest-priority kinds.
+    """
     keywords = _normalize_keywords(config.keywords)
     taxonomy_enabled = DiscoveryQueryKind.TAXONOMY_TARGETED in config.discovery.default_query_kinds
     if not keywords and not taxonomy_enabled:
@@ -97,7 +159,7 @@ def build_discovery_queries(
     date_to = current_time
     queries: list[DiscoveryQuery] = []
     seen_keys: set[tuple[object, ...]] = set()
-    source_domains = enabled_discovery_domains(config)
+    source_domains = source_targeted_search_domains(config)
     # Domains that are structurally off-topic — excluded from every broad and
     # taxonomy query to avoid wasting search-engine quota and classifier credits.
     # Source-targeted queries are already scoped to a single preferred domain, so
@@ -197,4 +259,5 @@ def build_discovery_queries(
                     )
                     seen_keys.add(taxonomy_source_key)
 
-    return queries
+    budget = max_queries if max_queries is not None else config.discovery.max_queries_per_run
+    return _apply_query_budget(queries, budget)

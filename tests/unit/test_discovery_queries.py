@@ -16,6 +16,9 @@ from denbust.taxonomy import default_taxonomy
 
 def test_build_discovery_queries_creates_all_default_query_types() -> None:
     """Query construction should include broad, source-targeted, taxonomy-targeted, and social-targeted variants."""
+    # search_native_source_domains=True restores native sources in source-targeted
+    # (default drops them as redundant with the source-native crawl). globes/themarker
+    # stay dropped because they are blocklisted.
     config = Config(
         keywords=["בית בושת", "זנות"],
         sources=[
@@ -26,7 +29,7 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
             ),
             SourceConfig(name="mako", type=SourceType.SCRAPER),
         ],
-        discovery={"enabled": True},
+        discovery={"enabled": True, "search_native_source_domains": True},
     )
 
     queries = build_discovery_queries(
@@ -51,8 +54,9 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
     taxonomy_targeted_source_queries = [
         query for query in targeted_queries if "taxonomy" in query.tags
     ]
-    assert len(keyword_targeted_queries) == 8
-    assert len(taxonomy_targeted_source_queries) == len(taxonomy_queries) * 4
+    # 2 keywords x 2 native sources (globes/themarker dropped as blocklisted).
+    assert len(keyword_targeted_queries) == 4
+    assert len(taxonomy_targeted_source_queries) == len(taxonomy_queries) * 2
     assert len(taxonomy_queries) == len(
         {term for _, _, term in default_taxonomy().discovery_terms()}
     )
@@ -63,8 +67,6 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
     } == {
         ("ynet", ("www.ynet.co.il",)),
         ("mako", ("www.mako.co.il",)),
-        ("globes", ("www.globes.co.il",)),
-        ("themarker", ("www.themarker.com",)),
     }
     assert all(not query.preferred_domains for query in taxonomy_queries)
     assert {
@@ -73,8 +75,6 @@ def test_build_discovery_queries_creates_all_default_query_types() -> None:
     } == {
         ("ynet", ("www.ynet.co.il",)),
         ("mako", ("www.mako.co.il",)),
-        ("globes", ("www.globes.co.il",)),
-        ("themarker", ("www.themarker.com",)),
     }
     assert any(
         query.query_text == "נישואין בכפייה"
@@ -103,13 +103,15 @@ def test_build_discovery_queries_respects_enabled_query_kinds() -> None:
         sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
         discovery={
             "enabled": True,
+            "search_native_source_domains": True,
             "default_query_kinds": [DiscoveryQueryKind.SOURCE_TARGETED],
         },
     )
 
     queries = build_discovery_queries(config, days=3)
 
-    assert [query.source_hint for query in queries] == ["mako", "globes", "themarker"]
+    # Native mako kept (flag on); globes/themarker dropped as blocklisted.
+    assert [query.source_hint for query in queries] == ["mako"]
     assert all(query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED for query in queries)
 
 
@@ -138,7 +140,10 @@ def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
     config = Config(
         keywords=["זנות"],
         sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
-        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+        discovery={
+            "search_native_source_domains": True,
+            "default_query_kinds": ["source_targeted", "taxonomy_targeted"],
+        },
     )
 
     queries = build_discovery_queries(
@@ -157,8 +162,6 @@ def test_build_discovery_queries_emits_source_targeted_taxonomy_terms(
         (query.source_hint, tuple(query.preferred_domains)) for query in taxonomy_source_queries
     } == {
         ("mako", ("www.mako.co.il",)),
-        ("globes", ("www.globes.co.il",)),
-        ("themarker", ("www.themarker.com",)),
     }
     assert all(
         query.date_from == datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
@@ -182,7 +185,10 @@ def test_build_discovery_queries_keeps_taxonomy_source_provenance_for_keyword_ov
     config = Config(
         keywords=["זנות"],
         sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
-        discovery={"default_query_kinds": ["source_targeted", "taxonomy_targeted"]},
+        discovery={
+            "search_native_source_domains": True,
+            "default_query_kinds": ["source_targeted", "taxonomy_targeted"],
+        },
     )
 
     queries = build_discovery_queries(config, days=3)
@@ -192,15 +198,9 @@ def test_build_discovery_queries_keeps_taxonomy_source_provenance_for_keyword_ov
         for query in queries
         if query.query_kind is DiscoveryQueryKind.SOURCE_TARGETED and query.query_text == "זנות"
     ]
-    assert len(source_queries) == 6
-    assert sorted("taxonomy" in query.tags for query in source_queries) == [
-        False,
-        False,
-        False,
-        True,
-        True,
-        True,
-    ]
+    # Only native mako (globes/themarker blocklisted): one keyword + one taxonomy query.
+    assert len(source_queries) == 2
+    assert sorted("taxonomy" in query.tags for query in source_queries) == [False, True]
 
 
 def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() -> None:
@@ -213,7 +213,7 @@ def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() 
             SourceConfig(name="rss-no-url", type=SourceType.RSS),
             SourceConfig(name="mako", type=SourceType.SCRAPER),
         ],
-        discovery={"enabled": True},
+        discovery={"enabled": True, "search_native_source_domains": True},
     )
 
     queries = build_discovery_queries(config, days=3)
@@ -225,13 +225,10 @@ def test_build_discovery_queries_filters_blank_duplicate_and_unusable_sources() 
     keyword_targeted_queries = [query for query in targeted_queries if "taxonomy" not in query.tags]
 
     assert len(broad_queries) == 1
-    assert len(keyword_targeted_queries) == 3
+    # Only native mako survives (unknown source has no domain; globes/themarker blocklisted).
+    assert len(keyword_targeted_queries) == 1
     assert broad_queries[0].query_text == "זנות"
-    assert {query.source_hint for query in keyword_targeted_queries} == {
-        "mako",
-        "globes",
-        "themarker",
-    }
+    assert {query.source_hint for query in keyword_targeted_queries} == {"mako"}
 
 
 def test_build_discovery_queries_returns_taxonomy_queries_for_empty_keyword_set() -> None:
@@ -239,7 +236,7 @@ def test_build_discovery_queries_returns_taxonomy_queries_for_empty_keyword_set(
     config = Config(
         keywords=["", "   "],
         sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
-        discovery={"enabled": True},
+        discovery={"enabled": True, "search_native_source_domains": True},
     )
 
     queries = build_discovery_queries(config, days=3)
@@ -264,7 +261,7 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
                 url="https://www.ynet.co.il/another-feed.xml",
             ),
         ],
-        discovery={"enabled": True},
+        discovery={"enabled": True, "search_native_source_domains": True},
     )
 
     queries = build_discovery_queries(config, days=3)
@@ -277,8 +274,6 @@ def test_build_discovery_queries_avoids_duplicate_source_targeted_entries() -> N
         (query.source_hint, tuple(query.preferred_domains)) for query in keyword_targeted_queries
     } == {
         ("ynet", ("www.ynet.co.il",)),
-        ("globes", ("www.globes.co.il",)),
-        ("themarker", ("www.themarker.com",)),
     }
 
 
@@ -321,7 +316,10 @@ def test_build_discovery_queries_source_targeted_queries_have_no_excluded_domain
     config = Config(
         keywords=["בית בושת"],
         sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
-        discovery={"default_query_kinds": ["source_targeted"]},
+        discovery={
+            "search_native_source_domains": True,
+            "default_query_kinds": ["source_targeted"],
+        },
     )
 
     queries = build_discovery_queries(config, days=3)
@@ -332,6 +330,51 @@ def test_build_discovery_queries_source_targeted_queries_have_no_excluded_domain
     assert source_queries
     for query in source_queries:
         assert not query.excluded_domains
+
+
+def test_build_discovery_queries_drops_native_source_targeted_by_default() -> None:
+    """By default, natively-crawled sources get no source-targeted search queries."""
+    config = Config(
+        keywords=["זנות"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["broad", "source_targeted"]},
+    )
+
+    queries = build_discovery_queries(config, days=3)
+
+    # mako is native (dropped); globes/themarker are blocklisted (dropped) → none left.
+    assert [q for q in queries if q.query_kind is DiscoveryQueryKind.SOURCE_TARGETED] == []
+    assert [q.query_kind for q in queries] == [DiscoveryQueryKind.BROAD]
+
+
+def test_build_discovery_queries_query_budget_keeps_highest_priority_kinds() -> None:
+    """A query budget keeps open-web (broad/taxonomy) kinds first, dropping the rest."""
+    config = Config(
+        keywords=["זנות", "בית בושת", "סרסור"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={
+            "search_native_source_domains": True,
+            "default_query_kinds": ["broad", "source_targeted", "social_targeted"],
+        },
+    )
+
+    full = build_discovery_queries(config, days=3)
+    assert len(full) > 3  # broad + source-targeted + social present
+
+    capped = build_discovery_queries(config, days=3, max_queries=3)
+    assert len(capped) == 3
+    # The 3 broad (open-web) queries outrank source-targeted and social.
+    assert all(q.query_kind is DiscoveryQueryKind.BROAD for q in capped)
+
+
+def test_build_discovery_queries_query_budget_from_config() -> None:
+    """The cap can come from config.discovery.max_queries_per_run."""
+    config = Config(
+        keywords=["זנות", "בית בושת"],
+        sources=[SourceConfig(name="mako", type=SourceType.SCRAPER)],
+        discovery={"default_query_kinds": ["broad"], "max_queries_per_run": 1},
+    )
+    assert len(build_discovery_queries(config, days=3)) == 1
 
 
 def test_build_discovery_queries_can_disable_social_targeted_generation() -> None:

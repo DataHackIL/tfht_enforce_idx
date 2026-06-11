@@ -98,6 +98,14 @@ def run(
             " Populate the cache first with `denbust classify-domains`. Balanced-batch mode only.",
         ),
     ] = False,
+    query_budget: Annotated[
+        int | None,
+        typer.Option(
+            "--query-budget",
+            help="Cap discovery to this many queries per engine per run (highest-priority"
+            " open-web kinds kept first). Saves Brave/Exa search budget. Discover job only.",
+        ),
+    ] = None,
 ) -> None:
     """Run a dataset/job pair through the registry."""
     from denbust.pipeline import run_job
@@ -112,6 +120,7 @@ def run(
         scrape_balanced_batch_size=balanced_batch,
         scrape_min_domain_frequency=min_domain_frequency,
         scrape_use_domain_verdicts=use_domain_verdicts,
+        query_budget=query_budget,
     )
 
 
