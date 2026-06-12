@@ -43,14 +43,13 @@ jobs:
           python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run backup job
+      - name: Run backup job and persist state
         # Target activation is env-driven:
         # - DENBUST_DRIVE_FOLDER_ID activates Google Drive backup
         # - DENBUST_OBJECT_STORE_BUCKET activates object-storage backup
         # If neither destination is configured, the job completes with no uploaded targets.
         # If a target is active but its auth secret is missing, the backup job fails.
         env:
-          DENBUST_STATE_ROOT: state_repo
           DENBUST_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DENBUST_DRIVE_SERVICE_ACCOUNT_JSON }}
           DENBUST_DRIVE_FOLDER_ID: ${{ secrets.DENBUST_DRIVE_FOLDER_ID }}
           DENBUST_OBJECT_STORE_BUCKET: ${{ secrets.DENBUST_OBJECT_STORE_BUCKET }}
@@ -58,30 +57,9 @@ jobs:
           DENBUST_OBJECT_STORE_ENDPOINT_URL: ${{ secrets.DENBUST_OBJECT_STORE_ENDPOINT_URL }}
           DENBUST_OBJECT_STORE_ACCESS_KEY_ID: ${{ secrets.DENBUST_OBJECT_STORE_ACCESS_KEY_ID }}
           DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY: ${{ secrets.DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY }}
-        run: denbust backup --dataset ${{ env.DATASET_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
-
-      - name: Commit and push backup state changes
-        if: ${{ always() }}
         run: |
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo config user.name "github-actions[bot]"
-          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs"
-          fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/publication" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication"
-          fi
-
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No staged state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo commit -m "chore(state): update news_items backup outputs"
-          git -C state_repo push
+          bash scripts/state-run.sh \
+            --message "chore(state): update news_items backup outputs" \
+            --subtree "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs" \
+            --subtree "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication" \
+            -- denbust backup --dataset "${{ env.DATASET_NAME }}" --config "${{ env.JOB_CONFIG_PATH }}"

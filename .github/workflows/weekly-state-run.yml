@@ -45,7 +45,7 @@ jobs:
           install-playwright: "true"
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run weekly ingest job
+      - name: Run weekly ingest job and persist state
         # Required secrets:
         # - ANTHROPIC_API_KEY
         # - DENBUST_SUPABASE_URL
@@ -64,37 +64,11 @@ jobs:
           DENBUST_EMAIL_TO: ${{ secrets.DENBUST_EMAIL_TO }}
           DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
           DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
-          DENBUST_STATE_ROOT: state_repo
-        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }} --overlay ${{ env.JOB_CONFIG_OVERLAY }}
-
-      - name: Commit and push state changes
-        if: ${{ always() }}
         run: |
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo config user.name "github-actions[bot]"
-          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [[ -f "${{ env.STATE_JOB_DIR }}/seen.json" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/seen.json"
-          fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs"
-          fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/logs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/logs"
-          fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/publication" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication"
-          fi
-
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No staged state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo commit -m "chore(state): update weekly seen store and run snapshot"
-          git -C state_repo push
+          bash scripts/state-run.sh \
+            --message "chore(state): update weekly seen store and run snapshot" \
+            --subtree "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/seen.json" \
+            --subtree "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/runs" \
+            --subtree "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/logs" \
+            --subtree "${{ env.DATASET_NAME }}/${{ env.JOB_NAME }}/publication" \
+            -- denbust run --dataset "${{ env.DATASET_NAME }}" --job "${{ env.JOB_NAME }}" --config "${{ env.JOB_CONFIG_PATH }}" --overlay "${{ env.JOB_CONFIG_OVERLAY }}"
