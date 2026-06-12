@@ -264,7 +264,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date-from", type=_parse_date, default=date(2026, 1, 1))
     parser.add_argument("--date-to", type=_parse_date, default=date(2026, 5, 15))
-    parser.add_argument("--config", type=Path, default=Path("agents/news/github.yaml"))
+    parser.add_argument(
+        "--config", type=Path, default=Path("agents/news/local_search_brave_exa.yaml")
+    )
     parser.add_argument(
         "--release-config",
         type=Path,

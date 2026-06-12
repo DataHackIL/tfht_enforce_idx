@@ -17,7 +17,9 @@ env:
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
   DATASET_NAME: news_items
   JOB_NAME: backfill_scrape
-  JOB_CONFIG_PATH: agents/news/github.yaml
+  JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
+  DENBUST_OPERATIONAL_PROVIDER: supabase
+  DENBUST_OUTPUT_FORMATS: cli,email
   STATE_JOB_DIR: state_repo/news_items/discover
   DISCOVERY_STATE_DIR: state_repo/news_items/discover
   INGEST_STATE_DIR: state_repo/news_items/ingest

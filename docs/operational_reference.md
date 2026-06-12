@@ -229,7 +229,9 @@ The workflow family:
 - checks out this repo
 - checks out the state repo into `state_repo/`
 - sets dataset/job env such as `DATASET_NAME=news_items` and `JOB_NAME=discover` or `ingest`
-- runs `denbust run --dataset news_items --job <job> --config agents/news/github.yaml`
+- runs `denbust run --dataset news_items --job <job> --config agents/news/local_search_brave_exa.yaml`
+  (the single canonical config; CI selects the Supabase store and email output via
+  `DENBUST_OPERATIONAL_PROVIDER=supabase` and `DENBUST_OUTPUT_FORMATS=cli,email`)
 - points persistence at the checked-out state repo via `DENBUST_STATE_ROOT=state_repo`
 - commits and pushes the updated namespaced state files only if files changed
 
@@ -751,9 +753,11 @@ To run release locally without Supabase, either:
 
 ### GitHub operational mode
 
-The checked-in GitHub ingest config uses the Supabase operational store:
+GitHub ingest reuses the single canonical config and selects the Supabase operational
+store at runtime via the `DENBUST_OPERATIONAL_PROVIDER=supabase` env override (with
+`DENBUST_OUTPUT_FORMATS=cli,email` for the emailed report):
 
-- `agents/news/github.yaml`
+- `agents/news/local_search_brave_exa.yaml`
 
 Release and backup jobs rely on dedicated configs:
 

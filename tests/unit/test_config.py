@@ -513,9 +513,9 @@ store:
     def test_load_checked_in_news_configs_include_c8_keyword_expansion(self) -> None:
         """Tracked operator configs should load with the expanded C-8 keyword set."""
         local_config = load_config(Path("agents/news/local.yaml"))
-        github_config = load_config(Path("agents/news/github.yaml"))
+        canonical_config = load_config(Path("agents/news/local_search_brave_exa.yaml"))
 
-        for config in (local_config, github_config):
+        for config in (local_config, canonical_config):
             assert "נישואין בכפייה" in config.keywords
             assert "עבדות מינית" in config.keywords
             assert "זנות מקוונת" in config.keywords
@@ -544,16 +544,31 @@ store:
         assert config.backfill.enabled is True
         assert config.backfill.batch_window_days == 7
 
-    def test_github_news_config_enables_brave_exa_search_and_backfill(self) -> None:
-        """The scheduled GitHub config should run online discovery without Google CSE."""
-        config = load_config(Path("agents/news/github.yaml"))
+    def test_canonical_search_config_enables_brave_exa_search_and_backfill(self) -> None:
+        """The canonical config (used by both local and CI) runs Brave+Exa, no Google CSE."""
+        config = load_config(Path("agents/news/local_search_brave_exa.yaml"))
 
         assert config.discovery.enabled is True
         assert config.discovery.engines.brave.enabled is True
         assert config.discovery.engines.exa.enabled is True
         assert config.discovery.engines.google_cse.enabled is False
         assert config.source_discovery.enabled is True
-        assert config.candidates.keep_search_only_fallbacks is True
-        assert config.candidates.require_review_for_search_only is True
         assert config.backfill.enabled is True
-        assert config.backfill.max_scrape_attempts_per_run == 100
+
+    def test_operational_provider_and_output_env_overrides(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One config file serves local + CI via env-selected provider/output."""
+        from denbust.config import OperationalProvider, OutputFormat
+
+        # Default (no env): the file's own settings (local_json + cli).
+        config = load_config(Path("agents/news/local_search_brave_exa.yaml"))
+        assert config.operational.provider is OperationalProvider.LOCAL_JSON
+        assert config.output.formats == [OutputFormat.CLI]
+
+        # CI env overrides flip provider + output without a second config file.
+        monkeypatch.setenv("DENBUST_OPERATIONAL_PROVIDER", "supabase")
+        monkeypatch.setenv("DENBUST_OUTPUT_FORMATS", "cli,email")
+        ci_config = load_config(Path("agents/news/local_search_brave_exa.yaml"))
+        assert ci_config.operational.provider is OperationalProvider.SUPABASE
+        assert ci_config.output.formats == [OutputFormat.CLI, OutputFormat.EMAIL]

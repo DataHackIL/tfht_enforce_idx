@@ -81,7 +81,7 @@ src/denbust/
 ## Config, Workflows, And Migrations
 
 - Package/tooling config: `pyproject.toml`
-- Example/news job configs: `agents/news/local.yaml`, `agents/news/github.yaml`, `agents/news.yaml`
+- Example/news job configs: `agents/news/local.yaml`, `agents/news/local_search_brave_exa.yaml` (canonical local+CI config), `agents/news.yaml`
 - Release config: `agents/release/news_items.yaml`
 - Backup config: `agents/backup/news_items.yaml`
 - Validation variants: `agents/validation/classifier_variants.yaml`

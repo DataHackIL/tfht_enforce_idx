@@ -1,4 +1,11 @@
-# Explicit local Brave+Exa search configuration for enforcement news experiments.
+# Canonical Brave+Exa enforcement-news config — the single source of truth for
+# BOTH local operator runs and GitHub Actions. There is no separate github.yaml:
+# CI reuses this file and selects its deployment-specific behaviour at runtime via
+# environment overrides on the shared config, avoiding config drift between the two
+# surfaces:
+#   - DENBUST_OPERATIONAL_PROVIDER=supabase  -> operational.provider (CI mirror store)
+#   - DENBUST_OUTPUT_FORMATS=cli,email       -> output.formats (CI emailed report)
+# Both are honoured by before-validator env overrides in src/denbust/config.py.
 #
 # Keep this file in sync with local_search.yaml except for `name` and
 # `discovery.engines.google_cse.enabled`. The duplication is intentional because

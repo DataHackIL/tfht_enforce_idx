@@ -96,6 +96,24 @@ class OutputConfig(BaseModel):
     format: OutputFormat = OutputFormat.CLI
     formats: list[OutputFormat] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_env_overrides(cls, data: object) -> object:
+        """Override output formats from ``DENBUST_OUTPUT_FORMATS`` (comma-separated)."""
+        if data is None:
+            normalized: dict[str, object] = {}
+        elif isinstance(data, dict):
+            normalized = dict(data)
+        else:
+            return data
+        env_formats = os.environ.get("DENBUST_OUTPUT_FORMATS")
+        if env_formats:
+            formats = [value.strip() for value in env_formats.split(",") if value.strip()]
+            if formats:
+                normalized["format"] = formats[0]
+                normalized["formats"] = formats
+        return normalized
+
     @model_validator(mode="after")
     def _normalize_formats(self) -> "OutputConfig":
         """Normalize legacy single-format config into a de-duplicated formats list."""
@@ -161,6 +179,26 @@ class OperationalConfig(BaseModel):
 
     provider: OperationalProvider = OperationalProvider.NONE
     root_dir: Path | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_env_overrides(cls, data: object) -> object:
+        """Override the persistence provider from ``DENBUST_OPERATIONAL_PROVIDER``.
+
+        Lets one config file serve both local (``local_json``) and CI
+        (``supabase``) without duplicating the file.
+        """
+        if data is None:
+            normalized: dict[str, object] = {}
+        elif isinstance(data, dict):
+            normalized = dict(data)
+        else:
+            return data
+        env_provider = os.environ.get("DENBUST_OPERATIONAL_PROVIDER")
+        if env_provider:
+            normalized["provider"] = env_provider
+        return normalized
+
     supabase_schema: str = "public"
     news_items_table: str = "news_items"
     ingestion_runs_table: str = "ingestion_runs"

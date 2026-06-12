@@ -853,7 +853,8 @@ Use `DENBUST_BACKFILL_BATCH_ID` only if operators want to drain one batch explic
    - `news-items-discover`
    - `news-items-backfill-discover`
    - `news-items-backfill-scrape`
-4. Confirm `daily-state-run` and `weekly-state-run` still point at `agents/news/github.yaml`.
+4. Confirm `daily-state-run` and `weekly-state-run` point at the single canonical config
+   `agents/news/local_search_brave_exa.yaml` with `DENBUST_OPERATIONAL_PROVIDER=supabase`.
 5. Run one manual `news-items-discover` dispatch to verify `news_items/discover/` state is written.
 6. If historical recovery is needed, launch `news-items-backfill-discover` with an explicit window,
    then drain it with `news-items-backfill-scrape`.
