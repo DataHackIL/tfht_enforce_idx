@@ -56,6 +56,7 @@ def _run_wrapper(
     subtrees: Sequence[str] = (),
     message: str | None = None,
     offline: bool = False,
+    no_fetch: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     args: list[str] = ["bash", str(WRAPPER)]
     for subtree in subtrees:
@@ -64,6 +65,8 @@ def _run_wrapper(
         args += ["--message", message]
     if offline:
         args.append("--offline")
+    if no_fetch:
+        args.append("--no-fetch")
     args += ["--", *command]
     env = {
         **os.environ,
@@ -211,6 +214,42 @@ def test_fetches_canonical_state_before_running(tmp_path: Path) -> None:
         ],
     )
     assert result.returncode == 0, result.stderr
+    assert _remote_commit_count(remote) == 3
+    assert _remote_file(remote, "news_items/discover/other.jsonl") == "other"  # not clobbered
+    assert _remote_file(remote, "news_items/discover/mine.jsonl") == "mine"
+
+
+def test_rejected_push_recovers_via_refetch_rebase(tmp_path: Path) -> None:
+    """When a push is rejected (a writer raced in after our fetch), the wrapper
+    refetches, rebases its commit onto the new tip, and retries — never clobbering."""
+    remote = _make_remote(tmp_path)
+    work = tmp_path / "work"
+    # Clone the work dir at the current tip (commit 1).
+    subprocess.run(["git", "clone", "-q", remote.as_uri(), str(work)], check=True)
+    # A concurrent writer advances the remote (commit 2) AFTER we are positioned.
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", remote.as_uri(), str(other)], check=True)
+    _git(other, "config", "user.email", "other@example.com")
+    _git(other, "config", "user.name", "other")
+    (other / "news_items" / "discover" / "other.jsonl").write_text("other\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-qm", "concurrent")
+    _git(other, "push", "-q", "origin", "main")
+    # --no-fetch skips the pre-run realign, so our commit lands on the now-stale
+    # base and the FIRST push is rejected — exercising the refetch+rebase retry.
+    result = _run_wrapper(
+        work=work,
+        remote=remote,
+        no_fetch=True,
+        subtrees=["news_items/discover"],
+        command=[
+            "bash",
+            "-c",
+            'echo mine > "$DENBUST_STATE_ROOT/news_items/discover/mine.jsonl"',
+        ],
+    )
+    assert result.returncode == 0, result.stderr
+    assert "push rejected" in result.stderr  # the retry path actually fired
     assert _remote_commit_count(remote) == 3
     assert _remote_file(remote, "news_items/discover/other.jsonl") == "other"  # not clobbered
     assert _remote_file(remote, "news_items/discover/mine.jsonl") == "mine"
