@@ -1,0 +1,31 @@
+# GitHub Actions overlay for enforcement-news runs.
+#
+# This is the SINGLE, auditable place where CI differs from local operator runs.
+# It is deep-merged onto the shared base config (agents/news/local_search_brave_exa.yaml)
+# via `denbust run --config <base> --overlay agents/news/ci.overlay.yaml`. Only the
+# keys below override the base; everything else (sources, keywords, budget caps,
+# the search-budget ledger, and the prefilter cascade) is inherited unchanged, so
+# the two runtimes cannot drift on shared settings.
+#
+# Why each key differs in CI:
+operational:
+  # Local runs persist to the git state repo as local JSON; CI additionally mirrors
+  # operational records into Supabase. (Deployment identity, not a tuning knob.)
+  provider: supabase
+
+output:
+  # Local runs print to the CLI; CI also emails the run report.
+  formats:
+    - cli
+    - email
+
+# Cost-surface guards: keep CI's historically lean reach until the planned GH/local
+# partition (UNIFY-PR-04) deliberately retunes it. The base config is broader on
+# purpose for local operator coverage, where the budget ledger gates spend.
+max_articles: 30
+backfill:
+  # Restrict CI backfill discovery to source-targeted queries on native domains,
+  # matching the pre-unification GitHub config. The base config inherits the
+  # four-kind default (broad/source/taxonomy/social) for local coverage.
+  query_kinds:
+    - source_targeted

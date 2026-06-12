@@ -17,7 +17,8 @@ env:
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
   DATASET_NAME: news_items
   JOB_NAME: discover
-  JOB_CONFIG_PATH: agents/news/github.yaml
+  JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
+  JOB_CONFIG_OVERLAY: agents/news/ci.overlay.yaml
   STATE_JOB_DIR: state_repo/news_items/discover
 
 jobs:
@@ -54,7 +55,7 @@ jobs:
           DENBUST_GOOGLE_CSE_API_KEY: ${{ secrets.DENBUST_GOOGLE_CSE_API_KEY }}
           DENBUST_GOOGLE_CSE_ID: ${{ secrets.DENBUST_GOOGLE_CSE_ID }}
           DENBUST_STATE_ROOT: state_repo
-        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }} --overlay ${{ env.JOB_CONFIG_OVERLAY }}
 
       - name: Commit and push discovery state changes
         if: ${{ always() }}

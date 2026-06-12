@@ -513,9 +513,9 @@ store:
     def test_load_checked_in_news_configs_include_c8_keyword_expansion(self) -> None:
         """Tracked operator configs should load with the expanded C-8 keyword set."""
         local_config = load_config(Path("agents/news/local.yaml"))
-        github_config = load_config(Path("agents/news/github.yaml"))
+        canonical_config = load_config(Path("agents/news/local_search_brave_exa.yaml"))
 
-        for config in (local_config, github_config):
+        for config in (local_config, canonical_config):
             assert "נישואין בכפייה" in config.keywords
             assert "עבדות מינית" in config.keywords
             assert "זנות מקוונת" in config.keywords
@@ -544,16 +544,76 @@ store:
         assert config.backfill.enabled is True
         assert config.backfill.batch_window_days == 7
 
-    def test_github_news_config_enables_brave_exa_search_and_backfill(self) -> None:
-        """The scheduled GitHub config should run online discovery without Google CSE."""
-        config = load_config(Path("agents/news/github.yaml"))
+    def test_canonical_search_config_enables_brave_exa_search_and_backfill(self) -> None:
+        """The canonical config (used by both local and CI) runs Brave+Exa, no Google CSE."""
+        config = load_config(Path("agents/news/local_search_brave_exa.yaml"))
 
         assert config.discovery.enabled is True
         assert config.discovery.engines.brave.enabled is True
         assert config.discovery.engines.exa.enabled is True
         assert config.discovery.engines.google_cse.enabled is False
         assert config.source_discovery.enabled is True
-        assert config.candidates.keep_search_only_fallbacks is True
-        assert config.candidates.require_review_for_search_only is True
         assert config.backfill.enabled is True
-        assert config.backfill.max_scrape_attempts_per_run == 100
+
+    def test_ci_overlay_expresses_the_full_local_to_ci_delta(self) -> None:
+        """The CI overlay is the single, auditable place where CI differs from local.
+
+        Loading the base config alone gives the local runtime; deep-merging the CI
+        overlay flips exactly the keys CI needs (Supabase store, emailed report) and
+        pins CI's leaner cost surface, while inheriting everything else unchanged.
+        """
+        from denbust.config import DiscoveryQueryKind, OperationalProvider, OutputFormat
+
+        base_path = Path("agents/news/local_search_brave_exa.yaml")
+        overlay_path = Path("agents/news/ci.overlay.yaml")
+
+        # Local runtime: the base config's own settings.
+        local = load_config(base_path)
+        assert local.operational.provider is OperationalProvider.LOCAL_JSON
+        assert local.output.formats == [OutputFormat.CLI]
+        assert local.max_articles == 100
+        assert local.backfill.query_kinds is None  # falls back to the 4-kind default
+
+        # CI runtime: base + overlay, merged before validation.
+        ci = load_config(base_path, overlay_path=overlay_path)
+        assert ci.operational.provider is OperationalProvider.SUPABASE
+        assert ci.output.formats == [OutputFormat.CLI, OutputFormat.EMAIL]
+        assert ci.max_articles == 30
+        assert ci.backfill.query_kinds == [DiscoveryQueryKind.SOURCE_TARGETED]
+
+        # Shared keys are inherited unchanged — the two runtimes cannot drift on them.
+        assert ci.discovery.engines.brave.enabled is True
+        assert ci.discovery.engines.google_cse.enabled is False
+        assert ci.prefilter.mode == local.prefilter.mode
+        assert ci.discovery.max_queries_per_run == local.discovery.max_queries_per_run
+
+    def test_load_config_overlay_deep_merges_without_dropping_sibling_keys(
+        self, tmp_path: Path
+    ) -> None:
+        """A nested overlay key merges into its parent instead of replacing the parent."""
+        from denbust.config import OperationalProvider
+
+        base = tmp_path / "base.yaml"
+        base.write_text(
+            "name: t\n"
+            "dataset_name: news_items\n"
+            "job_name: ingest\n"
+            "operational:\n"
+            "  provider: local_json\n"
+            "  supabase_schema: custom\n",
+            encoding="utf-8",
+        )
+        overlay = tmp_path / "overlay.yaml"
+        overlay.write_text("operational:\n  provider: supabase\n", encoding="utf-8")
+
+        merged = load_config(base, overlay_path=overlay)
+        assert merged.operational.provider is OperationalProvider.SUPABASE
+        # The sibling key from the base survives the nested merge.
+        assert merged.operational.supabase_schema == "custom"
+
+    def test_load_config_missing_overlay_raises(self, tmp_path: Path) -> None:
+        """A missing overlay path is reported explicitly, not silently ignored."""
+        base = tmp_path / "base.yaml"
+        base.write_text("name: t\ndataset_name: news_items\njob_name: ingest\n", encoding="utf-8")
+        with pytest.raises(FileNotFoundError, match="overlay"):
+            load_config(base, overlay_path=tmp_path / "nope.yaml")

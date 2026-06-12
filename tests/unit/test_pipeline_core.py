@@ -3665,7 +3665,7 @@ class TestRunPipeline:
         monkeypatch.setattr("denbust.pipeline.output_items", MagicMock(return_value=[]))
 
         result = _run_job_from_config(
-            config_path=Path("agents/news/github.yaml"),
+            config_path=Path("agents/news/local_search_brave_exa.yaml"),
             dataset_name=DatasetName.NEWS_ITEMS,
             job_name=JobName.INGEST,
         )
@@ -3720,7 +3720,7 @@ class TestRunPipeline:
         )
 
         result = _run_job_from_config(
-            config_path=Path("agents/news/github.yaml"),
+            config_path=Path("agents/news/local_search_brave_exa.yaml"),
             dataset_name=DatasetName.NEWS_ITEMS,
             job_name=JobName.INGEST,
         )
@@ -4059,6 +4059,7 @@ class TestRunPipeline:
             "config_path": Path("agents/news/local.yaml"),
             "dataset_name": DatasetName.NEWS_ITEMS,
             "job_name": JobName.INGEST,
+            "config_overlay_path": None,
             "days_override": 5,
             "operational_store": None,
             "scrape_pub_date_from": None,

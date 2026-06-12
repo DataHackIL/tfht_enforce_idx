@@ -1,4 +1,9 @@
-# Explicit local Brave+Exa search configuration for enforcement news experiments.
+# Canonical Brave+Exa enforcement-news config — the shared base for BOTH local
+# operator runs and GitHub Actions. There is no separate github.yaml: CI runs this
+# same file with a small deployment overlay merged on top
+# (`--overlay agents/news/ci.overlay.yaml`), which holds the only keys where CI
+# differs (Supabase store, emailed report, leaner reach). See that overlay for the
+# full, auditable CI delta.
 #
 # Keep this file in sync with local_search.yaml except for `name` and
 # `discovery.engines.google_cse.enabled`. The duplication is intentional because
