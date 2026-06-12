@@ -1,0 +1,43 @@
+name: state-repo-squash
+
+on:
+  # Disabled — automated data/ops jobs are run locally or triggered manually.
+  # Intended cadence once enabled: weekly. To re-enable add a `schedule:` trigger.
+  workflow_dispatch:
+
+# Share the state-run concurrency group so a squash never overlaps a state-writing
+# run in CI (the history rewrite and a normal push must not interleave).
+concurrency:
+  group: state-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.11"
+  STATE_REPO: DataHackIL/tfht_enforce_idx_state
+  STATE_REPO_BRANCH: main
+
+jobs:
+  squash-state-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@v6
+
+      - name: Checkout state repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.STATE_REPO }}
+          token: ${{ secrets.STATE_REPO_PAT }}
+          path: state_repo
+
+      - name: Orphan-squash state history
+        env:
+          STATE_REPO_BRANCH: ${{ env.STATE_REPO_BRANCH }}
+        run: |
+          bash scripts/state-squash.sh \
+            --message "chore(state): squash history ($(date -u +%Y-%m-%d))"
