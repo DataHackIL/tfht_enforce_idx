@@ -1,9 +1,11 @@
 """Unit tests for discovery-layer state path helpers."""
 
+import gzip
 import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from denbust.discovery.jsonl_io import iter_jsonl_lines
 from denbust.discovery.models import BackfillBatch, PersistentCandidate
 from denbust.discovery.state_paths import (
     discovery_snapshot_filename,
@@ -27,13 +29,13 @@ def test_resolve_discovery_state_paths_uses_discover_namespace() -> None:
     assert paths.namespace_dir == Path("state_repo/news_items/discover")
     assert paths.runs_dir == Path("state_repo/news_items/discover/runs")
     assert paths.latest_candidates_path == Path(
-        "state_repo/news_items/discover/candidates/latest_candidates.jsonl"
+        "state_repo/news_items/discover/candidates/latest_candidates.jsonl.gz"
     )
     assert paths.latest_backfill_batches_path == Path(
-        "state_repo/news_items/discover/backfill_batches/latest_backfill_batches.jsonl"
+        "state_repo/news_items/discover/backfill_batches/latest_backfill_batches.jsonl.gz"
     )
     assert paths.scrape_attempts_path == Path(
-        "state_repo/news_items/discover/candidates/scrape_attempts.jsonl"
+        "state_repo/news_items/discover/candidates/scrape_attempts.jsonl.gz"
     )
     assert paths.engine_overlap_latest_path == Path(
         "state_repo/news_items/discover/metrics/engine_overlap_latest.json"
@@ -90,7 +92,12 @@ def test_write_discovery_layer_artifacts(tmp_path: Path) -> None:
     assert metrics_path.exists()
     assert snapshot_path.exists()
     assert json.loads(metrics_path.read_text(encoding="utf-8")) == {"brave": 3}
-    candidate_lines = candidates_path.read_text(encoding="utf-8").splitlines()
+    # The candidate store is gzip-compressed; read it back through the gz-aware reader.
+    candidate_lines = list(iter_jsonl_lines(candidates_path))
     assert len(candidate_lines) == 1
     candidate_record = json.loads(candidate_lines[0])
     assert candidate_record["current_url"] == "https://www.ynet.co.il/item"
+    # The physical file really is gzip, not plain text.
+    assert candidates_path.suffix == ".gz"
+    with gzip.open(candidates_path, "rt", encoding="utf-8") as handle:
+        assert handle.read().strip() != ""

@@ -65,7 +65,7 @@ class TestConfig:
         assert config.state_paths.publication_dir == Path("data/news_items/ingest/publication")
         assert config.discovery_state_paths.namespace_dir == Path("data/news_items/discover")
         assert config.discovery_state_paths.latest_candidates_path == Path(
-            "data/news_items/discover/candidates/latest_candidates.jsonl"
+            "data/news_items/discover/candidates/latest_candidates.jsonl.gz"
         )
 
     def test_custom_days(self) -> None:

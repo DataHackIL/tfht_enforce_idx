@@ -441,8 +441,8 @@ def test_state_repo_discovery_persistence_round_trips(tmp_path: Path) -> None:
     store.append_provenance([build_provenance("queued"), build_provenance("backfill")])
     store.append_attempts([build_attempt("queued"), build_attempt("backfill")])
 
-    assert store.provenance_path == paths.candidates_dir / "candidate_provenance.jsonl"
-    assert store.attempts_path == paths.candidates_dir / "scrape_attempts.jsonl"
+    assert store.provenance_path == paths.candidates_dir / "candidate_provenance.jsonl.gz"
+    assert store.attempts_path == paths.candidates_dir / "scrape_attempts.jsonl.gz"
     assert store.get_candidate("queued") is not None
     assert store.get_candidate("missing") is None
     assert len(store.list_candidates()) == 2
@@ -496,11 +496,13 @@ def test_state_repo_discovery_persistence_handles_missing_and_blank_jsonl(tmp_pa
 
     assert store.list_candidates() == []
 
+    # Blank lines are written to the legacy uncompressed *.jsonl siblings, which
+    # also exercises the gz reader's fallback to pre-existing uncompressed state.
     paths.latest_candidates_path.parent.mkdir(parents=True, exist_ok=True)
     paths.latest_backfill_batches_path.parent.mkdir(parents=True, exist_ok=True)
-    paths.latest_candidates_path.write_text("\n\n", encoding="utf-8")
-    paths.backfill_queue_path.write_text("\n\n", encoding="utf-8")
-    paths.latest_backfill_batches_path.write_text("\n\n", encoding="utf-8")
+    paths.latest_candidates_path.with_suffix("").write_text("\n\n", encoding="utf-8")
+    paths.backfill_queue_path.with_suffix("").write_text("\n\n", encoding="utf-8")
+    paths.latest_backfill_batches_path.with_suffix("").write_text("\n\n", encoding="utf-8")
     store.append_provenance([])
     store.append_attempts([])
     store.upsert_candidates([])

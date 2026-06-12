@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from denbust.config import Config, OperationalProvider
+from denbust.discovery import jsonl_io
 from denbust.discovery.models import (
     BackfillBatch,
     BackfillBatchStatus,
@@ -426,25 +427,10 @@ class StateRepoDiscoveryPersistence(DiscoveryPersistence):
         return None
 
     def _append_jsonl(self, path: Path, rows: Sequence[Any]) -> None:
-        if not rows:
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as handle:
-            for row in rows:
-                handle.write(row.model_dump_json())
-                handle.write("\n")
+        jsonl_io.append_models(path, rows)
 
     def _read_jsonl(self, path: Path, model: type[Any]) -> list[Any]:
-        if not path.exists():
-            return []
-        rows: list[Any] = []
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                rows.append(model.model_validate_json(line))
-        return rows
+        return jsonl_io.read_models(path, model)
 
 
 class SupabaseDiscoveryPersistence(DiscoveryPersistence):

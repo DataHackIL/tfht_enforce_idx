@@ -295,18 +295,28 @@ tfht_enforce_idx_state/
     └── discover/
         ├── runs/
         ├── candidates/
-        │   ├── backfill_queue.jsonl
-        │   ├── latest_candidates.jsonl
-        │   ├── retry_queue.jsonl
-        │   └── scrape_attempts.jsonl
+        │   ├── backfill_queue.jsonl.gz
+        │   ├── latest_candidates.jsonl.gz
+        │   ├── retry_queue.jsonl.gz
+        │   ├── scrape_attempts.jsonl.gz
+        │   ├── candidate_provenance.jsonl.gz
+        │   ├── domain_verdicts.jsonl
+        │   └── search_budget.jsonl
         ├── backfill_batches/
-        │   ├── latest_backfill_batches.jsonl
+        │   ├── latest_backfill_batches.jsonl.gz
+        │   ├── executed_queries.jsonl.gz
         │   └── <batch-id>.json
         └── metrics/
             ├── engine_overlap_latest.json
             ├── discovery_diagnostics_latest.json
             └── source_suggestions_latest.json
 ```
+
+The big rewrite-per-run and append-only discovery files are stored gzip-compressed
+(`*.jsonl.gz`) to keep the git state repo bounded; readers transparently fall back to
+a legacy uncompressed `*.jsonl` sibling, so pre-existing state needs no migration.
+The small append-only audit ledgers (`domain_verdicts.jsonl`, `search_budget.jsonl`)
+stay uncompressed.
 
 Bootstrap notes:
 

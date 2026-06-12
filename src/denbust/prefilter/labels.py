@@ -25,6 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from denbust.discovery import jsonl_io
 from denbust.discovery.state_paths import DiscoveryStatePaths
 
 if TYPE_CHECKING:
@@ -246,22 +247,16 @@ def _triage_label(
 
 
 def _load_candidates(candidates_path: Path) -> dict[str, dict[str, object]]:
-    """Return ``{candidate_id: record}`` from a ``latest_candidates.jsonl`` file."""
+    """Return ``{candidate_id: record}`` from a ``latest_candidates.jsonl(.gz)`` file."""
     candidates: dict[str, dict[str, object]] = {}
-    if not candidates_path.exists():
-        return candidates
-    with candidates_path.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row: dict[str, object] = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            cid = row.get("candidate_id")
-            if cid:
-                candidates[str(cid)] = row
+    for line in jsonl_io.iter_jsonl_lines(candidates_path):
+        try:
+            row: dict[str, object] = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        cid = row.get("candidate_id")
+        if cid:
+            candidates[str(cid)] = row
     return candidates
 
 

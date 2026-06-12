@@ -24,6 +24,7 @@ from denbust.data_models import (
     SubCategory,
     UnifiedItem,
 )
+from denbust.discovery import jsonl_io
 from denbust.discovery.models import (
     CandidateStatus,
     ContentBasis,
@@ -3871,10 +3872,9 @@ class TestRunPipeline:
         assert result.raw_article_count == 1
         assert result.unified_item_count == 1
         assert result.fatal is False
-        candidate_lines = (
-            config.discovery_state_paths.latest_candidates_path.read_text(encoding="utf-8")
-            .strip()
-            .splitlines()
+        # The candidate store is gzip-compressed; read it via the gz-aware reader.
+        candidate_lines = list(
+            jsonl_io.iter_jsonl_lines(config.discovery_state_paths.latest_candidates_path)
         )
         assert len(candidate_lines) == 1
 

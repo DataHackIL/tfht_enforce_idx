@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from denbust.config import Config, OperationalProvider, load_config
+from denbust.discovery import jsonl_io
 from denbust.discovery.models import (
     CandidateProvenance,
     CandidateStatus,
@@ -737,16 +738,9 @@ def _read_jsonl(
     path: Path,
     model: type[PersistentCandidate] | type[ScrapeAttempt] | type[CandidateProvenance],
 ) -> list[Any]:
-    if not path.exists():
-        return []
-    rows: list[Any] = []
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            rows.append(model.model_validate_json(line))
-    return rows
+    # Gzip-aware with a legacy uncompressed read fallback; see
+    # ``denbust.discovery.jsonl_io``.
+    return jsonl_io.read_models(path, model)
 
 
 def _is_search_engine_candidate(candidate: PersistentCandidate) -> bool:

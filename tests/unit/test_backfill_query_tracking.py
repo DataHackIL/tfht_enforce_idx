@@ -149,5 +149,5 @@ class TestStateRepoExecutedQueryPersistence:
             state_root=tmp_path, dataset_name=DatasetName.NEWS_ITEMS
         )
         assert paths.backfill_executed_queries_path == (
-            tmp_path / "news_items" / "discover" / "backfill_batches" / "executed_queries.jsonl"
+            tmp_path / "news_items" / "discover" / "backfill_batches" / "executed_queries.jsonl.gz"
         )

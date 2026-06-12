@@ -32,6 +32,7 @@ from denbust.diagnostics.discovery import (
     build_discovery_diagnostic_report,
     persist_discovery_diagnostic_artifacts,
 )
+from denbust.discovery import jsonl_io
 from denbust.discovery.backfill import (
     BACKFILL_BATCH_ID_ENV,
     BACKFILL_DATE_FROM_ENV,
@@ -728,8 +729,12 @@ def _write_discovery_diagnostic_artifacts(
     overlap_candidates: list[PersistentCandidate],
 ) -> None:
     """Persist the latest discovery diagnostics and overlap artifacts."""
-    persisted_candidates_available = config.discovery_state_paths.latest_candidates_path.exists()
-    persisted_attempts_available = config.discovery_state_paths.scrape_attempts_path.exists()
+    persisted_candidates_available = jsonl_io.state_file_exists(
+        config.discovery_state_paths.latest_candidates_path
+    )
+    persisted_attempts_available = jsonl_io.state_file_exists(
+        config.discovery_state_paths.scrape_attempts_path
+    )
     if persisted_candidates_available or persisted_attempts_available:
         report = build_discovery_diagnostic_report(
             config=config,
