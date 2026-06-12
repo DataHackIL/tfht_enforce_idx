@@ -20,7 +20,6 @@ env:
   JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
   JOB_CONFIG_OVERLAY: agents/news/ci.overlay.yaml
   STATE_JOB_DIR: state_repo/news_items/discover
-  BACKFILL_DISCOVER_STATE_DIR: state_repo/news_items/backfill_discover
 
 jobs:
   run-backfill-discover:
@@ -46,7 +45,7 @@ jobs:
           install-playwright: "true"
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run backfill discover job
+      - name: Run backfill discover job and persist state
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
@@ -55,46 +54,16 @@ jobs:
           DENBUST_EXA_API_KEY: ${{ secrets.DENBUST_EXA_API_KEY }}
           DENBUST_GOOGLE_CSE_API_KEY: ${{ secrets.DENBUST_GOOGLE_CSE_API_KEY }}
           DENBUST_GOOGLE_CSE_ID: ${{ secrets.DENBUST_GOOGLE_CSE_ID }}
-          DENBUST_STATE_ROOT: state_repo
           DENBUST_BACKFILL_DATE_FROM: ${{ inputs.date_from }}
           DENBUST_BACKFILL_DATE_TO: ${{ inputs.date_to }}
           DENBUST_BACKFILL_BATCH_ID: ${{ inputs.batch_id }}
-        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }} --overlay ${{ env.JOB_CONFIG_OVERLAY }}
-
-      - name: Commit and push backfill discovery state changes
-        if: ${{ always() }}
         run: |
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo config user.name "github-actions[bot]"
-          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [[ -d "${{ env.STATE_JOB_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/runs"
-          fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/candidates" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/candidates"
-          fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/metrics" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/metrics"
-          fi
-          if [[ -d "${{ env.STATE_JOB_DIR }}/backfill_batches" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/backfill_batches"
-          fi
-          if [[ -d "${{ env.BACKFILL_DISCOVER_STATE_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_discover/runs"
-          fi
-          if [[ -d "${{ env.BACKFILL_DISCOVER_STATE_DIR }}/logs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_discover/logs"
-          fi
-
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No staged state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo commit -m "chore(state): update news_items backfill discovery state"
-          git -C state_repo push
+          bash scripts/state-run.sh \
+            --message "chore(state): update news_items backfill discovery state" \
+            --subtree "${{ env.DATASET_NAME }}/discover/runs" \
+            --subtree "${{ env.DATASET_NAME }}/discover/candidates" \
+            --subtree "${{ env.DATASET_NAME }}/discover/metrics" \
+            --subtree "${{ env.DATASET_NAME }}/discover/backfill_batches" \
+            --subtree "${{ env.DATASET_NAME }}/backfill_discover/runs" \
+            --subtree "${{ env.DATASET_NAME }}/backfill_discover/logs" \
+            -- denbust run --dataset "${{ env.DATASET_NAME }}" --job "${{ env.JOB_NAME }}" --config "${{ env.JOB_CONFIG_PATH }}" --overlay "${{ env.JOB_CONFIG_OVERLAY }}"

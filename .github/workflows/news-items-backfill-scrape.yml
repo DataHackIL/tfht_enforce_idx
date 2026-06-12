@@ -20,9 +20,6 @@ env:
   JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
   JOB_CONFIG_OVERLAY: agents/news/ci.overlay.yaml
   STATE_JOB_DIR: state_repo/news_items/discover
-  DISCOVERY_STATE_DIR: state_repo/news_items/discover
-  INGEST_STATE_DIR: state_repo/news_items/ingest
-  BACKFILL_SCRAPE_STATE_DIR: state_repo/news_items/backfill_scrape
 
 jobs:
   run-backfill-scrape:
@@ -48,7 +45,7 @@ jobs:
           install-playwright: "true"
           state-job-dir: ${{ env.STATE_JOB_DIR }}
 
-      - name: Run backfill scrape job
+      - name: Run backfill scrape job and persist state
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
@@ -61,59 +58,19 @@ jobs:
           DENBUST_EMAIL_TO: ${{ secrets.DENBUST_EMAIL_TO }}
           DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
           DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
-          DENBUST_STATE_ROOT: state_repo
           DENBUST_BACKFILL_BATCH_ID: ${{ inputs.batch_id }}
-        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }} --overlay ${{ env.JOB_CONFIG_OVERLAY }}
-
-      - name: Commit and push backfill scrape state changes
-        if: ${{ always() }}
         run: |
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo config user.name "github-actions[bot]"
-          git -C state_repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/runs"
-          fi
-          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/candidates" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/candidates"
-          fi
-          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/metrics" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/metrics"
-          fi
-          if [[ -d "${{ env.DISCOVERY_STATE_DIR }}/backfill_batches" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/discover/backfill_batches"
-          fi
-          if [[ -d "${{ env.INGEST_STATE_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/runs"
-          fi
-          if [[ -f "${{ env.INGEST_STATE_DIR }}/seen.json" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/seen.json"
-          fi
-          if [[ -d "${{ env.INGEST_STATE_DIR }}/logs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/logs"
-          fi
-          if [[ -d "${{ env.INGEST_STATE_DIR }}/publication" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/ingest/publication"
-          fi
-          if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/runs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/runs"
-          fi
-          if [[ -f "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/seen.json" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/seen.json"
-          fi
-          if [[ -d "${{ env.BACKFILL_SCRAPE_STATE_DIR }}/logs" ]]; then
-            git -C state_repo add -- "${{ env.DATASET_NAME }}/backfill_scrape/logs"
-          fi
-
-          if [[ -z "$(git -C state_repo status --short)" ]]; then
-            echo "No staged state changes to commit."
-            exit 0
-          fi
-
-          git -C state_repo commit -m "chore(state): update news_items backfill scrape state"
-          git -C state_repo push
+          bash scripts/state-run.sh \
+            --message "chore(state): update news_items backfill scrape state" \
+            --subtree "${{ env.DATASET_NAME }}/discover/runs" \
+            --subtree "${{ env.DATASET_NAME }}/discover/candidates" \
+            --subtree "${{ env.DATASET_NAME }}/discover/metrics" \
+            --subtree "${{ env.DATASET_NAME }}/discover/backfill_batches" \
+            --subtree "${{ env.DATASET_NAME }}/ingest/runs" \
+            --subtree "${{ env.DATASET_NAME }}/ingest/seen.json" \
+            --subtree "${{ env.DATASET_NAME }}/ingest/logs" \
+            --subtree "${{ env.DATASET_NAME }}/ingest/publication" \
+            --subtree "${{ env.DATASET_NAME }}/backfill_scrape/runs" \
+            --subtree "${{ env.DATASET_NAME }}/backfill_scrape/seen.json" \
+            --subtree "${{ env.DATASET_NAME }}/backfill_scrape/logs" \
+            -- denbust run --dataset "${{ env.DATASET_NAME }}" --job "${{ env.JOB_NAME }}" --config "${{ env.JOB_CONFIG_PATH }}" --overlay "${{ env.JOB_CONFIG_OVERLAY }}"

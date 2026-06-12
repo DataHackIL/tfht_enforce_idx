@@ -229,11 +229,40 @@ The workflow family:
 - checks out this repo
 - checks out the state repo into `state_repo/`
 - sets dataset/job env such as `DATASET_NAME=news_items` and `JOB_NAME=discover` or `ingest`
-- runs `denbust run --dataset news_items --job <job> --config agents/news/local_search_brave_exa.yaml
-  --overlay agents/news/ci.overlay.yaml` (the shared base config plus the CI overlay; the overlay
-  is the single auditable place CI differs — Supabase store, emailed report, leaner reach)
-- points persistence at the checked-out state repo via `DENBUST_STATE_ROOT=state_repo`
-- commits and pushes the updated namespaced state files only if files changed
+- runs the job and persists state through the shared `scripts/state-run.sh` wrapper (see below),
+  e.g. `bash scripts/state-run.sh --subtree news_items/<job>/... --message "..." -- denbust run
+  --dataset news_items --job <job> --config agents/news/local_search_brave_exa.yaml --overlay
+  agents/news/ci.overlay.yaml` (the shared base config plus the CI overlay; the overlay is the
+  single auditable place CI differs — Supabase store, emailed report, leaner reach)
+
+#### The `scripts/state-run.sh` wrapper
+
+Every state-writing workflow (and local runs) funnels the pull -> run -> commit -> push cycle
+through one wrapper so that logic lives in exactly one place instead of being copy-pasted into each
+workflow. Given `--subtree` paths, a `--message`, and a command after `--`, it:
+
+- brings the state repo to canonical HEAD (clone if missing, else fetch + reset to
+  `origin/<branch>`) so a run always starts from the single source of truth;
+- runs the command with `DENBUST_STATE_ROOT` pointed at the state repo;
+- stages only the named subtrees and commits **only when they actually changed**;
+- does a plain `git push` (which already refuses to clobber a concurrent commit — a
+  non-fast-forward is rejected), and on rejection **refetches, rebases its commit onto the new
+  tip, and retries**, so a race recovers instead of failing the run;
+- persists partial state even when the command fails, then exits with the command's status code.
+
+Concurrency is handled in layers: a portable same-machine lock (atomic `mkdir`, with stale-lock
+recovery via the holder's PID, so a crashed run does not wedge future ones) serializes local
+writers; the GitHub Actions `state-run` concurrency group serializes CI; and the fetch-before-run
+plus push-retry handle a local-vs-CI race (different machines, where the lock cannot reach).
+`--force-with-lease` is deliberately **not** used — the wrapper never wants to overwrite the
+remote, and a stale lease over a shallow fetch could.
+
+Configuration is via env (`STATE_REPO_DIR`, `STATE_REPO_URL`/`STATE_REPO_SLUG`/`STATE_REPO_TOKEN`,
+`STATE_REPO_BRANCH`). In CI the repo is already checked out by `actions/checkout`, so the wrapper
+reuses that configured remote — no token plumbing needed (a local `STATE_REPO_TOKEN` is passed via
+an in-memory `http.extraheader`, never baked into the repo URL). Locally, `--offline` skips the
+fetch/push for fast iteration against an existing checkout. `scripts/state-run.sh --help` documents
+the full interface.
 
 Operational workflow ownership after `DL-PR-11`:
 
