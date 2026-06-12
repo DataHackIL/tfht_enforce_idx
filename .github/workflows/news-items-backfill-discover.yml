@@ -18,8 +18,7 @@ env:
   DATASET_NAME: news_items
   JOB_NAME: backfill_discover
   JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
-  DENBUST_OPERATIONAL_PROVIDER: supabase
-  DENBUST_OUTPUT_FORMATS: cli,email
+  JOB_CONFIG_OVERLAY: agents/news/ci.overlay.yaml
   STATE_JOB_DIR: state_repo/news_items/discover
   BACKFILL_DISCOVER_STATE_DIR: state_repo/news_items/backfill_discover
 
@@ -60,7 +59,7 @@ jobs:
           DENBUST_BACKFILL_DATE_FROM: ${{ inputs.date_from }}
           DENBUST_BACKFILL_DATE_TO: ${{ inputs.date_to }}
           DENBUST_BACKFILL_BATCH_ID: ${{ inputs.batch_id }}
-        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }} --overlay ${{ env.JOB_CONFIG_OVERLAY }}
 
       - name: Commit and push backfill discovery state changes
         if: ${{ always() }}

@@ -61,6 +61,15 @@ def run(
         Path | None,
         typer.Option("--config", "-c", help="Path to YAML config file"),
     ] = None,
+    overlay: Annotated[
+        Path | None,
+        typer.Option(
+            "--overlay",
+            help="Optional YAML overlay deep-merged onto --config before validation."
+            " Use it to express the small set of keys where a runtime (e.g. CI) differs"
+            " from the shared base config, without duplicating the whole file.",
+        ),
+    ] = None,
     days: Annotated[
         int | None,
         typer.Option("--days", "-d", help="Days back to search (ingest only)"),
@@ -115,6 +124,7 @@ def run(
         config_path=config_path,
         dataset_name=dataset,
         job_name=job,
+        config_overlay_path=overlay,
         days_override=days,
         scrape_pub_date_from=pub_date_from,
         scrape_balanced_batch_size=balanced_batch,

@@ -69,6 +69,7 @@ class TestCli:
             config_path: Path,
             dataset_name: DatasetName,
             job_name: JobName,
+            config_overlay_path: Path | None = None,
             days_override: int | None = None,
             scrape_pub_date_from: str | None = None,  # noqa: ARG001
             scrape_balanced_batch_size: int | None = None,  # noqa: ARG001
@@ -79,6 +80,7 @@ class TestCli:
             captured["config_path"] = config_path
             captured["dataset_name"] = dataset_name
             captured["job_name"] = job_name
+            captured["config_overlay_path"] = config_overlay_path
             captured["days_override"] = days_override
 
         monkeypatch.setattr("denbust.pipeline.run_job", fake_run_job)
@@ -93,6 +95,8 @@ class TestCli:
                 "ingest",
                 "--config",
                 "agents/custom.yaml",
+                "--overlay",
+                "agents/ci.overlay.yaml",
                 "--days",
                 "9",
             ],
@@ -103,6 +107,7 @@ class TestCli:
             "config_path": Path("agents/custom.yaml"),
             "dataset_name": DatasetName.NEWS_ITEMS,
             "job_name": JobName.INGEST,
+            "config_overlay_path": Path("agents/ci.overlay.yaml"),
             "days_override": 9,
         }
 

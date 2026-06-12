@@ -4059,6 +4059,7 @@ class TestRunPipeline:
             "config_path": Path("agents/news/local.yaml"),
             "dataset_name": DatasetName.NEWS_ITEMS,
             "job_name": JobName.INGEST,
+            "config_overlay_path": None,
             "days_override": 5,
             "operational_store": None,
             "scrape_pub_date_from": None,

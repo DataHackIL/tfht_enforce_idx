@@ -96,24 +96,6 @@ class OutputConfig(BaseModel):
     format: OutputFormat = OutputFormat.CLI
     formats: list[OutputFormat] = Field(default_factory=list)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _apply_env_overrides(cls, data: object) -> object:
-        """Override output formats from ``DENBUST_OUTPUT_FORMATS`` (comma-separated)."""
-        if data is None:
-            normalized: dict[str, object] = {}
-        elif isinstance(data, dict):
-            normalized = dict(data)
-        else:
-            return data
-        env_formats = os.environ.get("DENBUST_OUTPUT_FORMATS")
-        if env_formats:
-            formats = [value.strip() for value in env_formats.split(",") if value.strip()]
-            if formats:
-                normalized["format"] = formats[0]
-                normalized["formats"] = formats
-        return normalized
-
     @model_validator(mode="after")
     def _normalize_formats(self) -> "OutputConfig":
         """Normalize legacy single-format config into a de-duplicated formats list."""
@@ -179,26 +161,6 @@ class OperationalConfig(BaseModel):
 
     provider: OperationalProvider = OperationalProvider.NONE
     root_dir: Path | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _apply_env_overrides(cls, data: object) -> object:
-        """Override the persistence provider from ``DENBUST_OPERATIONAL_PROVIDER``.
-
-        Lets one config file serve both local (``local_json``) and CI
-        (``supabase``) without duplicating the file.
-        """
-        if data is None:
-            normalized: dict[str, object] = {}
-        elif isinstance(data, dict):
-            normalized = dict(data)
-        else:
-            return data
-        env_provider = os.environ.get("DENBUST_OPERATIONAL_PROVIDER")
-        if env_provider:
-            normalized["provider"] = env_provider
-        return normalized
-
     supabase_schema: str = "public"
     news_items_table: str = "news_items"
     ingestion_runs_table: str = "ingestion_runs"
@@ -675,26 +637,58 @@ class Config(BaseModel):
         return os.environ.get("DENBUST_OBJECT_STORE_SECRET_ACCESS_KEY")
 
 
-def load_config(path: Path) -> Config:
-    """Load configuration from YAML file.
+def _deep_merge(base: dict[str, object], overlay: Mapping[str, object]) -> dict[str, object]:
+    """Recursively merge ``overlay`` onto ``base``.
+
+    Nested mappings are merged key-by-key; any non-mapping value (scalar or list)
+    in ``overlay`` replaces the corresponding value in ``base`` wholesale. This is
+    the deployment-overlay semantics used to express the small, explicit set of
+    keys where one runtime (e.g. CI) differs from the shared base config.
+    """
+    merged: dict[str, object] = dict(base)
+    for key, value in overlay.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, Mapping):
+            merged[key] = _deep_merge(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_yaml_mapping(path: Path, *, kind: str) -> dict[str, object]:
+    """Load a YAML file that must parse to a mapping (or empty)."""
+    if not path.exists():
+        raise FileNotFoundError(f"{kind} file not found: {path}")
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{kind} must be a YAML mapping: {path}")
+    return data
+
+
+def load_config(path: Path, *, overlay_path: Path | None = None) -> Config:
+    """Load configuration from YAML file, optionally merged with an overlay.
 
     Args:
-        path: Path to YAML config file.
+        path: Path to the base YAML config file.
+        overlay_path: Optional path to a deployment overlay whose keys are
+            deep-merged onto the base config before validation. This is how one
+            shared config can serve multiple runtimes (e.g. local vs CI) without
+            duplicating the whole file: the overlay holds only the differing keys.
 
     Returns:
         Parsed Config object.
 
     Raises:
-        FileNotFoundError: If config file doesn't exist.
-        ValueError: If config is invalid.
+        FileNotFoundError: If the config or overlay file doesn't exist.
+        ValueError: If the config or overlay is invalid.
     """
-    if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+    data = _load_yaml_mapping(path, kind="Config")
 
-    with open(path) as f:
-        data = yaml.safe_load(f)
-
-    if data is None:
-        data = {}
+    if overlay_path is not None:
+        overlay = _load_yaml_mapping(overlay_path, kind="Config overlay")
+        data = _deep_merge(data, overlay)
 
     return Config.model_validate(data)

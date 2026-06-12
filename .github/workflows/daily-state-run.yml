@@ -18,8 +18,7 @@ env:
   DATASET_NAME: news_items
   JOB_NAME: ingest
   JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
-  DENBUST_OPERATIONAL_PROVIDER: supabase
-  DENBUST_OUTPUT_FORMATS: cli,email
+  JOB_CONFIG_OVERLAY: agents/news/ci.overlay.yaml
   STATE_JOB_DIR: state_repo/news_items/ingest
 
 jobs:
@@ -66,7 +65,7 @@ jobs:
           DENBUST_EMAIL_USE_TLS: ${{ secrets.DENBUST_EMAIL_USE_TLS }}
           DENBUST_EMAIL_SUBJECT: ${{ secrets.DENBUST_EMAIL_SUBJECT }}
           DENBUST_STATE_ROOT: state_repo
-        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }} --overlay ${{ env.JOB_CONFIG_OVERLAY }}
 
       - name: Commit and push state changes
         if: ${{ always() }}

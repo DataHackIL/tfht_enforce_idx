@@ -18,8 +18,7 @@ env:
   DATASET_NAME: news_items
   JOB_NAME: monthly_report
   JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
-  DENBUST_OPERATIONAL_PROVIDER: supabase
-  DENBUST_OUTPUT_FORMATS: cli,email
+  JOB_CONFIG_OVERLAY: agents/news/ci.overlay.yaml
   STATE_JOB_DIR: state_repo/news_items/monthly_report
 
 jobs:
@@ -51,7 +50,7 @@ jobs:
           DENBUST_SUPABASE_URL: ${{ secrets.DENBUST_SUPABASE_URL }}
           DENBUST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.DENBUST_SUPABASE_SERVICE_ROLE_KEY }}
           DENBUST_MONTHLY_REPORT_MONTH: ${{ github.event.inputs.month || '' }}
-        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }}
+        run: denbust run --dataset ${{ env.DATASET_NAME }} --job ${{ env.JOB_NAME }} --config ${{ env.JOB_CONFIG_PATH }} --overlay ${{ env.JOB_CONFIG_OVERLAY }}
 
       - name: Commit and push monthly report state changes
         if: ${{ always() }}

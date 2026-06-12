@@ -18,8 +18,6 @@ env:
   STATE_REPO: DataHackIL/tfht_enforce_idx_state
   STATE_JOB_DIR: state_repo/news_items/ingest
   JOB_CONFIG_PATH: agents/news/local_search_brave_exa.yaml
-  DENBUST_OPERATIONAL_PROVIDER: supabase
-  DENBUST_OUTPUT_FORMATS: cli,email
   DENBUST_REVIEW_WORKFLOW_NAME: daily-state-run
 
 jobs:

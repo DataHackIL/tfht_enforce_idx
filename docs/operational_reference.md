@@ -229,9 +229,9 @@ The workflow family:
 - checks out this repo
 - checks out the state repo into `state_repo/`
 - sets dataset/job env such as `DATASET_NAME=news_items` and `JOB_NAME=discover` or `ingest`
-- runs `denbust run --dataset news_items --job <job> --config agents/news/local_search_brave_exa.yaml`
-  (the single canonical config; CI selects the Supabase store and email output via
-  `DENBUST_OPERATIONAL_PROVIDER=supabase` and `DENBUST_OUTPUT_FORMATS=cli,email`)
+- runs `denbust run --dataset news_items --job <job> --config agents/news/local_search_brave_exa.yaml
+  --overlay agents/news/ci.overlay.yaml` (the shared base config plus the CI overlay; the overlay
+  is the single auditable place CI differs — Supabase store, emailed report, leaner reach)
 - points persistence at the checked-out state repo via `DENBUST_STATE_ROOT=state_repo`
 - commits and pushes the updated namespaced state files only if files changed
 
@@ -753,11 +753,14 @@ To run release locally without Supabase, either:
 
 ### GitHub operational mode
 
-GitHub ingest reuses the single canonical config and selects the Supabase operational
-store at runtime via the `DENBUST_OPERATIONAL_PROVIDER=supabase` env override (with
-`DENBUST_OUTPUT_FORMATS=cli,email` for the emailed report):
+GitHub ingest reuses the shared base config and layers the CI overlay on top via
+`--overlay`. The overlay is the single, auditable place where CI differs from local
+runs — it flips the operational store to Supabase, adds the emailed report, and pins
+CI's leaner cost surface (`max_articles`, source-targeted-only backfill), inheriting
+everything else (sources, keywords, budget caps, prefilter) unchanged:
 
-- `agents/news/local_search_brave_exa.yaml`
+- base: `agents/news/local_search_brave_exa.yaml`
+- overlay: `agents/news/ci.overlay.yaml`
 
 Release and backup jobs rely on dedicated configs:
 

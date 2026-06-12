@@ -3461,12 +3461,12 @@ async def run_job_async(
                     )
 
 
-def _load_config_or_exit(config_path: Path) -> Config:
-    """Load a config file and exit with a helpful message on failure."""
+def _load_config_or_exit(config_path: Path, overlay_path: Path | None = None) -> Config:
+    """Load a config file (optionally with an overlay) and exit helpfully on failure."""
     try:
-        return load_config(config_path)
-    except FileNotFoundError:
-        print(f"Error: Config file not found: {config_path}")
+        return load_config(config_path, overlay_path=overlay_path)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
         sys.exit(1)
     except Exception as exc:
         print(f"Error loading config: {exc}")
@@ -3478,6 +3478,7 @@ def _run_job_from_config(
     config_path: Path,
     dataset_name: DatasetName | None,
     job_name: JobName | None,
+    config_overlay_path: Path | None = None,
     days_override: int | None = None,
     operational_store: OperationalStore | None = None,
     scrape_pub_date_from: str | None = None,
@@ -3488,7 +3489,7 @@ def _run_job_from_config(
 ) -> RunSnapshot:
     """Shared sync wrapper for CLI-triggered job runs."""
     setup_logging()
-    config = _load_config_or_exit(config_path)
+    config = _load_config_or_exit(config_path, config_overlay_path)
 
     update: dict[str, object] = {}
     if dataset_name is not None:
@@ -3595,6 +3596,7 @@ def run_job(
     config_path: Path,
     dataset_name: DatasetName,
     job_name: JobName,
+    config_overlay_path: Path | None = None,
     days_override: int | None = None,
     operational_store: OperationalStore | None = None,
     scrape_pub_date_from: str | None = None,
@@ -3608,6 +3610,7 @@ def run_job(
         config_path=config_path,
         dataset_name=dataset_name,
         job_name=job_name,
+        config_overlay_path=config_overlay_path,
         days_override=days_override,
         operational_store=operational_store,
         scrape_pub_date_from=scrape_pub_date_from,
