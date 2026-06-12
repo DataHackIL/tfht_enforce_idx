@@ -26,7 +26,11 @@ if [[ -z "${STATE_REPO_URL:-}" && -n "${STATE_REPO_TOKEN:-}" ]]; then
   state_repo_git_auth=(-c "http.extraheader=Authorization: Basic ${_state_repo_basic}")
 fi
 
-git_state() { git "${state_repo_git_auth[@]}" -C "$STATE_REPO_DIR" "$@"; }
+# The `${arr[@]+"${arr[@]}"}` form expands to nothing when the array is empty
+# without tripping `set -u` on bash 3.2 (still /bin/bash on macOS).
+git_state() {
+  git "${state_repo_git_auth[@]+"${state_repo_git_auth[@]}"}" -C "$STATE_REPO_DIR" "$@"
+}
 
 state_repo_url() {
   if [[ -n "${STATE_REPO_URL:-}" ]]; then
@@ -76,8 +80,8 @@ ensure_canonical_state_checkout() {
     git_state fetch --depth=1 origin "$STATE_REPO_BRANCH"
     git_state reset --hard FETCH_HEAD
   else
-    git "${state_repo_git_auth[@]}" clone --depth=1 --branch "$STATE_REPO_BRANCH" \
-      "$(state_repo_url)" "$STATE_REPO_DIR"
+    git "${state_repo_git_auth[@]+"${state_repo_git_auth[@]}"}" clone --depth=1 \
+      --branch "$STATE_REPO_BRANCH" "$(state_repo_url)" "$STATE_REPO_DIR"
   fi
   mkdir -p "$STATE_REPO_DIR"
 }

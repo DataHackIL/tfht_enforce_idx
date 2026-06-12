@@ -83,6 +83,21 @@ def test_squash_flattens_history_preserving_current_tree(tmp_path: Path) -> None
     assert _remote_file(remote, "news_items/discover/latest.jsonl") == "v5"
 
 
+def test_squash_captures_only_tracked_tree_not_untracked_cruft(tmp_path: Path) -> None:
+    """The squash snapshots the tracked tree, never untracked working-dir files."""
+    remote = _make_remote(tmp_path, commits=3)
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", "-q", remote.as_uri(), str(work)], check=True)
+    # A stray untracked file that must NOT be baked into the canonical state.
+    (work / "news_items" / "discover" / "stray.tmp").write_text("junk\n")
+    result = _run(SQUASH, _env(work, remote))
+    assert result.returncode == 0, result.stderr
+    assert _remote_commits(remote) == 1
+    tracked = _git(remote, "ls-tree", "-r", "--name-only", "main").splitlines()
+    assert "news_items/discover/stray.tmp" not in tracked
+    assert "news_items/discover/latest.jsonl" in tracked
+
+
 def test_squash_is_noop_when_already_flat(tmp_path: Path) -> None:
     """Squashing a single-commit branch does nothing (no new root commit)."""
     remote = _make_remote(tmp_path, commits=1)

@@ -66,7 +66,10 @@ git_state config user.email "${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@us
 # history before deciding whether a squash is worthwhile (cheap once flat; the
 # job is infrequent, so paying for full history on a bloated repo is fine).
 if [[ "$(git_state rev-parse --is-shallow-repository 2>/dev/null || echo false)" == "true" ]]; then
-  git_state fetch --unshallow origin "$STATE_REPO_BRANCH" 2>/dev/null || true
+  if ! git_state fetch --unshallow origin "$STATE_REPO_BRANCH" 2>/dev/null; then
+    echo "state-squash: warning: could not deepen history; skipping (cannot tell if flat)." >&2
+    exit 0
+  fi
 fi
 
 # Already a single commit? Then history is as flat as it gets; nothing to do.
@@ -76,17 +79,19 @@ if [[ "$commits" -le 1 ]]; then
   exit 0
 fi
 
-# Build a fresh root commit holding exactly the current tree.
-git_state checkout --orphan state-squash-tmp
-git_state add -A
-git_state commit -q -m "${message:-chore(state): squash history}"
+# Build a fresh root commit holding EXACTLY the tracked tree, via plumbing. Using
+# `commit-tree HEAD^{tree}` (rather than `checkout --orphan` + `git add -A`) means
+# the snapshot never picks up untracked working-tree cruft and creates no temp
+# branch (so repeated runs in a persistent checkout don't collide).
+tree="$(git_state rev-parse 'HEAD^{tree}')"
+squashed="$(git_state commit-tree "$tree" -m "${message:-chore(state): squash history}")"
 
 if [[ $dry_run -eq 1 ]]; then
-  echo "state-squash: dry run — squashed ${commits} commits into 1 locally (not pushed)."
+  echo "state-squash: dry run — built squashed root ${squashed} from ${commits} commits (not pushed)."
   exit 0
 fi
 
 # Replace the branch with the squashed root. --force is intentional (history
 # rewrite); a racing state-run recovers via its push retry.
-git_state push --force origin "HEAD:refs/heads/$STATE_REPO_BRANCH"
+git_state push --force origin "${squashed}:refs/heads/$STATE_REPO_BRANCH"
 echo "state-squash: squashed ${commits} commits into 1 and force-pushed to ${STATE_REPO_BRANCH}."
