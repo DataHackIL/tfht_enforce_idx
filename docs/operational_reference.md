@@ -308,6 +308,15 @@ tfht_enforce_idx_state/
             └── source_suggestions_latest.json
 ```
 
+State files are kept as **plain JSONL** on purpose — do not pre-compress them (e.g. to
+`*.jsonl.gz`) for storage in the state repo. Git already delta+zlib-compresses blobs, so
+gzipping first is redundant on any single snapshot (~1.01x vs git's own packing) and actively
+harmful across runs: pre-compressed blobs cannot be delta-compressed against the previous
+revision, which was measured to grow the candidate store's history roughly **15x**. Gzip also
+embeds a wall-clock mtime, so byte-identical state produces a different blob every run, breaking
+"skip the commit when nothing changed". The repo is bounded instead by the `state-run` wrapper
+(shallow/treeless clone + commit-only-on-change) and a periodic orphan-squash.
+
 Bootstrap notes:
 
 - `seen.json` may be absent initially; it is created once a run marks at least one URL as seen
