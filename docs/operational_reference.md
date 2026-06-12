@@ -805,12 +805,21 @@ To run release locally without Supabase, either:
 
 GitHub ingest reuses the shared base config and layers the CI overlay on top via
 `--overlay`. The overlay is the single, auditable place where CI differs from local
-runs — it flips the operational store to Supabase, adds the emailed report, and pins
-CI's leaner cost surface (`max_articles`, source-targeted-only backfill), inheriting
-everything else (sources, keywords, budget caps, prefilter) unchanged:
+runs — it flips the operational store to Supabase, adds the emailed report, pins
+CI's leaner cost surface (`max_articles`, source-targeted-only backfill), and sets
+`scraping_enabled: false`, inheriting everything else (sources, keywords, budget
+caps, prefilter) unchanged:
 
 - base: `agents/news/local_search_brave_exa.yaml`
 - overlay: `agents/news/ci.overlay.yaml`
+
+`scraping_enabled: false` is the **GH-never-scrapes** guardrail: GitHub's datacenter
+IPs are bot-blocked by Israeli news sites, so CI never fetches article bodies or
+source pages — the candidate-materialization path (`scrape_candidates`) and the ingest
+source fetch both no-op. The canonical state is scraped by local runs; GH still
+searches (Brave/Exa), classifies, and runs the deterministic phases (prefilter, gates,
+balanced selection, budget math). Because the operational workflows are still
+`workflow_dispatch`-only, this is a guardrail that takes effect when they are enabled.
 
 Release and backup jobs rely on dedicated configs:
 

@@ -8,6 +8,12 @@
 # the two runtimes cannot drift on shared settings.
 #
 # Why each key differs in CI:
+
+# GitHub Actions never scrapes: its datacenter IPs are bot-blocked by Israeli news
+# sites, so body-fetching is left to local runs (the canonical state is scraped
+# locally). GH still searches, classifies, and runs the deterministic phases.
+scraping_enabled: false
+
 operational:
   # Local runs persist to the git state repo as local JSON; CI additionally mirrors
   # operational records into Supabase. (Deployment identity, not a tuning knob.)
@@ -19,9 +25,8 @@ output:
     - cli
     - email
 
-# Cost-surface guards: keep CI's historically lean reach until the planned GH/local
-# partition (UNIFY-PR-04) deliberately retunes it. The base config is broader on
-# purpose for local operator coverage, where the budget ledger gates spend.
+# Cost-surface guards: keep CI's historically lean reach. The base config is broader
+# on purpose for local operator coverage, where the budget ledger gates spend.
 max_articles: 30
 backfill:
   # Restrict CI backfill discovery to source-targeted queries on native domains,

@@ -453,6 +453,11 @@ class Config(BaseModel):
     job_name: JobName = JobName.INGEST
     days: int = Field(default=3, ge=1)
     max_articles: int = Field(default=30, ge=1)
+    # Master switch for fetching from source sites / article bodies. Set False on
+    # GitHub Actions (datacenter IPs are bot-blocked by Israeli news sites), where
+    # the canonical state is scraped locally; GH still searches, classifies, and
+    # runs the deterministic phases. See agents/news/ci.overlay.yaml.
+    scraping_enabled: bool = True
     scrape_pub_date_from: datetime | None = None
     scrape_balanced_batch_size: int | None = Field(default=None, ge=1)
     scrape_min_domain_frequency: int | None = Field(default=None, ge=1)

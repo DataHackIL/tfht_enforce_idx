@@ -2363,11 +2363,18 @@ async def run_news_ingest_job(
     seen_store = create_seen_store(config.state_paths.seen_path)
     result.seen_count_before = seen_store.count
 
-    all_articles, source_errors = await fetch_all_sources(
-        sources=sources,
-        days=days,
-        keywords=config.keywords,
-    )
+    if config.scraping_enabled:
+        all_articles, source_errors = await fetch_all_sources(
+            sources=sources,
+            days=days,
+            keywords=config.keywords,
+        )
+    else:
+        # GitHub Actions etc.: never fetch from source sites (datacenter IPs are
+        # bot-blocked). Source candidates are produced by local runs instead.
+        logger.info("Scraping disabled (scraping_enabled=false); skipping source fetch.")
+        all_articles, source_errors = [], []
+        result.warnings.append("scraping_disabled=true")
     result.raw_article_count = len(all_articles)
     result.errors.extend(source_errors)
     if source_errors:

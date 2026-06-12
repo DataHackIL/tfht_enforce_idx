@@ -1323,6 +1323,33 @@ class TestRunPipelineAsync:
         assert result.seen_count_after == 4
 
     @pytest.mark.asyncio
+    async def test_run_pipeline_async_skips_source_fetch_when_scraping_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With scraping_enabled=False the ingest job never fetches from sources."""
+
+        def fake_create_deduplicator(*, threshold: float) -> MagicMock:
+            del threshold
+            return MagicMock()
+
+        def _must_not_fetch(**_kwargs: object) -> None:
+            raise AssertionError("fetch_all_sources must not run when scraping is disabled")
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources", AsyncMock(side_effect=_must_not_fetch)
+        )
+
+        result = await run_pipeline_async(Config(scraping_enabled=False), days=3)
+
+        assert result.raw_article_count == 0
+        assert "scraping_disabled=true" in result.warnings
+
+    @pytest.mark.asyncio
     async def test_run_pipeline_async_handles_all_seen(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

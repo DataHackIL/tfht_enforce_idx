@@ -573,6 +573,7 @@ store:
         assert local.output.formats == [OutputFormat.CLI]
         assert local.max_articles == 100
         assert local.backfill.query_kinds is None  # falls back to the 4-kind default
+        assert local.scraping_enabled is True  # local scrapes article bodies
 
         # CI runtime: base + overlay, merged before validation.
         ci = load_config(base_path, overlay_path=overlay_path)
@@ -580,6 +581,7 @@ store:
         assert ci.output.formats == [OutputFormat.CLI, OutputFormat.EMAIL]
         assert ci.max_articles == 30
         assert ci.backfill.query_kinds == [DiscoveryQueryKind.SOURCE_TARGETED]
+        assert ci.scraping_enabled is False  # GH never scrapes (bot-blocked IPs)
 
         # Shared keys are inherited unchanged — the two runtimes cannot drift on them.
         assert ci.discovery.engines.brave.enabled is True
