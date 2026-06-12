@@ -49,6 +49,9 @@
 #                      Commit identity (default: the github-actions bot).
 set -euo pipefail
 
+# shellcheck source=scripts/state-repo-common.sh
+source "$(dirname "$0")/state-repo-common.sh"
+
 usage() {
   cat >&2 <<'EOF'
 Shared state-run wrapper: bring the git state repo to canonical HEAD, run a
@@ -98,59 +101,6 @@ if [[ ${#cmd[@]} -eq 0 ]]; then
   exit 2
 fi
 
-STATE_REPO_DIR="${STATE_REPO_DIR:-state_repo}"
-STATE_REPO_SLUG="${STATE_REPO_SLUG:-DataHackIL/tfht_enforce_idx_state}"
-STATE_REPO_BRANCH="${STATE_REPO_BRANCH:-main}"
-
-# Auth: prefer an in-memory extraheader so a token is never persisted into the
-# clone's .git/config URL (where it would leak in error output and on disk).
-git_auth=()
-if [[ -z "${STATE_REPO_URL:-}" && -n "${STATE_REPO_TOKEN:-}" ]]; then
-  _basic="$(printf 'x-access-token:%s' "$STATE_REPO_TOKEN" | base64 | tr -d '\n')"
-  git_auth=(-c "http.extraheader=Authorization: Basic ${_basic}")
-fi
-
-git_state() { git "${git_auth[@]}" -C "$STATE_REPO_DIR" "$@"; }
-
-resolve_url() {
-  if [[ -n "${STATE_REPO_URL:-}" ]]; then
-    printf '%s' "$STATE_REPO_URL"
-  else
-    printf 'https://github.com/%s.git' "$STATE_REPO_SLUG"
-  fi
-}
-
-# Portable single-writer lock via atomic mkdir (flock is absent on macOS), with
-# stale-lock recovery: the holder records its PID, and a lock left by a dead
-# process (kill -9, reboot) is broken instead of wedging every future run.
-lock_dir="${STATE_REPO_DIR%/}.lock"
-release_lock() { rm -rf "$lock_dir" 2>/dev/null || true; }
-acquire_lock() {
-  local waited=0
-  while ! mkdir "$lock_dir" 2>/dev/null; do
-    local holder
-    holder="$(cat "$lock_dir/pid" 2>/dev/null || true)"
-    if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
-      echo "state-run: breaking stale lock $lock_dir (dead PID $holder)" >&2
-      rm -rf "$lock_dir"
-      continue
-    fi
-    if [[ $waited -ge 300 ]]; then
-      echo "state-run: timed out acquiring lock $lock_dir after ${waited}s (held by PID ${holder:-unknown})" >&2
-      exit 1
-    fi
-    sleep 2
-    waited=$((waited + 2))
-  done
-  # Clean the lock on exit. Trapping INT/TERM to `exit` (rather than to the
-  # cleanup directly) makes Ctrl-C / SIGTERM actually terminate the script and
-  # fire the EXIT trap — a bare `trap ... INT` would run cleanup and then resume.
-  trap 'release_lock' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  printf '%s' "$$" >"$lock_dir/pid"
-}
-
 # Plain push, with refetch+rebase retry on rejection. A plain push already
 # refuses to clobber a concurrent commit (non-fast-forward is rejected); the
 # retry rebases our single commit onto the new tip so a race recovers rather
@@ -173,19 +123,14 @@ push_state() {
   done
 }
 
-acquire_lock
+acquire_state_repo_lock
 
 # 1. Bring the state repo to canonical HEAD.
 if [[ $offline -eq 0 && $no_fetch -eq 0 ]]; then
-  if [[ -d "$STATE_REPO_DIR/.git" ]]; then
-    git_state fetch --depth=1 origin "$STATE_REPO_BRANCH"
-    git_state reset --hard FETCH_HEAD
-  else
-    git "${git_auth[@]}" clone --depth=1 --branch "$STATE_REPO_BRANCH" \
-      "$(resolve_url)" "$STATE_REPO_DIR"
-  fi
+  ensure_canonical_state_checkout
+else
+  mkdir -p "$STATE_REPO_DIR"
 fi
-mkdir -p "$STATE_REPO_DIR"
 
 # 2. Run the state-producing command against the state repo.
 export DENBUST_STATE_ROOT="$STATE_REPO_DIR"

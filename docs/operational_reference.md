@@ -262,7 +262,19 @@ Configuration is via env (`STATE_REPO_DIR`, `STATE_REPO_URL`/`STATE_REPO_SLUG`/`
 reuses that configured remote — no token plumbing needed (a local `STATE_REPO_TOKEN` is passed via
 an in-memory `http.extraheader`, never baked into the repo URL). Locally, `--offline` skips the
 fetch/push for fast iteration against an existing checkout. `scripts/state-run.sh --help` documents
-the full interface.
+the full interface. The auth/lock/canonical-checkout helpers live in
+`scripts/lib/state_repo_common.sh`, shared with the squash job below.
+
+#### History bounding: `scripts/state-squash.sh`
+
+State files are plain JSONL so per-run blobs stay tiny, but the *number* of commits grows one per
+run. The `state-repo-squash` workflow (intended cadence: weekly) periodically flattens history via
+`scripts/state-squash.sh`: it replaces the branch with a single fresh root commit holding the
+current tree, so a clone never pays for the full run-by-run history. It is a force-push by nature
+(a history rewrite) but safe against concurrent writers — it holds the same same-machine lock and
+shares the `state-run` GitHub Actions concurrency group, and a state-run that races a squash simply
+resets to the squashed root on its next run. `--dry-run` builds the squashed commit without pushing;
+a branch that is already a single commit is left untouched.
 
 Operational workflow ownership after `DL-PR-11`:
 
