@@ -2535,6 +2535,23 @@ async def run_news_discover_job(
         result.errors.append("No sources configured")
         return result.finish("fatal: no sources configured")
 
+    # Search backstop (GitHub Actions): only issue open-web search queries when no
+    # run already searched this UTC day. Local runs search on their own cadence and
+    # take priority; GH searches only on a day local was idle, so the day's search
+    # budget is spent at most once. Source-native discovery is unaffected.
+    if config.discovery.search_backstop_only and (
+        brave_can_run or exa_can_run or google_cse_can_run
+    ):
+        run_day = result.run_timestamp.astimezone(UTC).date()
+        ledger = SearchBudgetLedger(config.discovery_state_paths.search_budget_path)
+        if ledger.searched_on(day=run_day):
+            logger.info(
+                "Search backstop: a search was already recorded on %s; skipping engine search.",
+                run_day.isoformat(),
+            )
+            result.warnings.append("search_backstop_skipped=true")
+            brave_can_run = exa_can_run = google_cse_can_run = False
+
     persisted_runs: list[tuple[str, PersistedSourceDiscovery]] = []
     run_base = result.run_timestamp.astimezone(UTC).isoformat()
 
@@ -2647,7 +2664,9 @@ async def run_news_discover_job(
     )
     result.unified_item_count = len(merged_candidate_ids)
 
-    if failed_runs == len(persisted_runs):
+    # Fatal only when runs were attempted and all failed — not when nothing ran
+    # (e.g. the search backstop intentionally skipped engine search for the day).
+    if persisted_runs and failed_runs == len(persisted_runs):
         result.fatal = True
 
     result.finish(

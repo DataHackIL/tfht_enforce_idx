@@ -14,6 +14,12 @@
 # locally). GH still searches, classifies, and runs the deterministic phases.
 scraping_enabled: false
 
+discovery:
+  # Search backstop: GH issues Brave/Exa queries only when no run already searched
+  # that UTC day (per the search-budget ledger). Local runs search on their own
+  # cadence and take priority; GH covers only the days local was idle.
+  search_backstop_only: true
+
 operational:
   # Local runs persist to the git state repo as local JSON; CI additionally mirrors
   # operational records into Supabase. (Deployment identity, not a tuning knob.)

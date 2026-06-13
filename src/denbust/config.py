@@ -354,6 +354,11 @@ class DiscoveryConfig(BaseModel):
     # When set, the highest-priority query kinds (broad/taxonomy open-web first)
     # are kept up to this many queries; the rest are dropped.
     max_queries_per_run: int | None = Field(default=None, ge=1)
+    # Backstop mode (set True on GitHub Actions): issue open-web search-engine
+    # queries only when no run already searched that UTC calendar day, per the
+    # search-budget ledger. Local runs search on their own cadence and take
+    # priority; GH only searches on a day local was idle. See ci.overlay.yaml.
+    search_backstop_only: bool = False
 
 
 class SourceDiscoveryProducerConfig(BaseModel):

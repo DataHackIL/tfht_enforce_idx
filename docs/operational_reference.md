@@ -831,6 +831,15 @@ The `daily-review` workflow runs `diagnose-sources --artifacts-only`, which does
 source fetch, so it does not scrape on GH either. Because the operational workflows are
 still `workflow_dispatch`-only, this is a guardrail that takes effect when they are enabled.
 
+The overlay also sets `discovery.search_backstop_only: true` — the **search backstop**.
+Brave/Exa are a paid, ~1,000-free-queries/month resource, so the day's search budget should
+be spent once. With this flag, the `discover` job issues open-web search queries only when
+the search-budget ledger shows **no search recorded that UTC calendar day** (by any run,
+local or CI). Local runs search on their own cadence and take priority; GH searches only on
+a day local was idle, then records its spend so a later GH run the same day also skips. When
+the backstop skips, the job completes normally (non-fatal) with `search_backstop_skipped=true`
+in its warnings; source-native discovery and the deterministic phases are unaffected.
+
 Release and backup jobs rely on dedicated configs:
 
 - `agents/release/news_items.yaml`

@@ -2813,6 +2813,72 @@ class TestRunPipelineAsync:
         assert '"dataset_name": "news_items"' in diagnostics_payload
 
     @pytest.mark.asyncio
+    async def test_discover_search_backstop_skips_when_already_searched_today(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """With search_backstop_only, GH skips engine search if a run already searched today."""
+        from datetime import UTC, datetime
+
+        from denbust.discovery.search_budget import SearchBudgetLedger
+
+        config = Config(
+            store={"state_root": tmp_path},
+            source_discovery={"enabled": False},
+            discovery={
+                "enabled": True,
+                "engines": {"brave": {"enabled": True}},
+                "search_backstop_only": True,
+            },
+        )
+        # A local run already searched earlier today.
+        SearchBudgetLedger(config.discovery_state_paths.search_budget_path).record(
+            engine="brave", queries=20, run_id="local-run", now=datetime.now(UTC)
+        )
+        brave = AsyncMock()
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr("denbust.pipeline._run_brave_discovery", brave)
+
+        result = await run_news_discover_job(config)
+
+        brave.assert_not_called()
+        assert result.fatal is False
+        assert "search_backstop_skipped=true" in result.warnings
+
+    @pytest.mark.asyncio
+    async def test_discover_search_backstop_runs_when_no_search_today(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """With search_backstop_only, GH still searches on a day no run has searched yet."""
+        config = Config(
+            store={"state_root": tmp_path},
+            source_discovery={"enabled": False},
+            discovery={
+                "enabled": True,
+                "engines": {"brave": {"enabled": True}},
+                "search_backstop_only": True,
+            },
+        )
+        brave = AsyncMock(
+            return_value=PersistedSourceDiscovery(
+                run=DiscoveryRun(
+                    run_id="run-discover:brave",
+                    dataset_name=DatasetName.NEWS_ITEMS,
+                    job_name=JobName.DISCOVER,
+                    status=DiscoveryRunStatus.SUCCEEDED,
+                ),
+                candidates=[],
+                provenance=[],
+            )
+        )
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [])
+        monkeypatch.setattr("denbust.pipeline._run_brave_discovery", brave)
+
+        result = await run_news_discover_job(config)  # empty ledger → no search today
+
+        brave.assert_awaited_once()
+        assert "search_backstop_skipped=true" not in result.warnings
+
+    @pytest.mark.asyncio
     async def test_run_news_discover_job_supports_exa_only_and_writes_metrics(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

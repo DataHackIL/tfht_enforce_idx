@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from denbust.discovery.search_budget import (
@@ -140,3 +140,32 @@ def test_ledger_missing_file_is_empty(tmp_path: Path) -> None:
     ledger = SearchBudgetLedger(tmp_path / "missing.jsonl")
     assert ledger.load() == []
     assert ledger.month_spend(year_month="2026-06") == (0, 0.0)
+
+
+def test_searched_on_detects_a_same_day_search(tmp_path: Path) -> None:
+    """searched_on backs the GitHub search backstop: only days with a real search count."""
+    ledger = SearchBudgetLedger(tmp_path / "b.jsonl")
+    assert ledger.searched_on(day=date(2026, 6, 13)) is False  # empty ledger
+
+    ledger.record(engine="brave", queries=10, run_id="r1", now=datetime(2026, 6, 13, 9, tzinfo=UTC))
+    # A budget-skipped run that recorded 0 queries does not count as "searched".
+    ledger.record(engine="exa", queries=0, run_id="r2", now=datetime(2026, 6, 13, 10, tzinfo=UTC))
+
+    assert ledger.searched_on(day=date(2026, 6, 13)) is True
+    assert ledger.searched_on(day=date(2026, 6, 12)) is False  # a different day
+    assert ledger.searched_on(day=date(2026, 6, 13), engine="brave") is True
+    assert ledger.searched_on(day=date(2026, 6, 13), engine="exa") is False  # exa logged 0
+
+
+def test_searched_on_compares_in_utc(tmp_path: Path) -> None:
+    """A timestamp is bucketed by its UTC calendar day."""
+    ledger = SearchBudgetLedger(tmp_path / "b.jsonl")
+    # 2026-06-13T23:30-05:00 is 2026-06-14T04:30Z.
+    ledger.record(
+        engine="brave",
+        queries=5,
+        run_id="r",
+        now=datetime.fromisoformat("2026-06-13T23:30:00-05:00"),
+    )
+    assert ledger.searched_on(day=date(2026, 6, 14)) is True
+    assert ledger.searched_on(day=date(2026, 6, 13)) is False

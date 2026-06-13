@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -83,6 +83,22 @@ class SearchBudgetLedger:
             handle.write(record.model_dump_json())
             handle.write("\n")
         return record
+
+    def searched_on(self, *, day: date, engine: str | None = None) -> bool:
+        """True if a search (queries > 0) was recorded on the UTC calendar day *day*.
+
+        Used by the GitHub search backstop: GH issues open-web queries only when no
+        run — local or CI — already searched that day, so the day's search budget is
+        spent at most once and local takes priority on its own cadence.
+        """
+        for record in self.load():
+            if record.queries <= 0:
+                continue
+            if engine is not None and record.engine != engine:
+                continue
+            if record.recorded_at.astimezone(UTC).date() == day:
+                return True
+        return False
 
     def month_spend(self, *, year_month: str, engine: str | None = None) -> tuple[int, float]:
         """Return ``(queries, usd)`` spent in *year_month* (``YYYY-MM``)."""
