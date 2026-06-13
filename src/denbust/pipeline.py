@@ -870,6 +870,15 @@ async def _run_source_native_backfill_discovery(
     enabled_sources = [
         source for source in sources if _source_discovery_enabled_for_source(config, source.name)
     ]
+    if not config.scraping_enabled:
+        # Source-native discovery fetches from source sites; disabled on GitHub
+        # Actions (bot-blocked datacenter IPs). Search engines still run.
+        logger.info(
+            "Scraping disabled (scraping_enabled=false); skipping source-native backfill "
+            "discovery for %s source(s).",
+            len(enabled_sources),
+        )
+        enabled_sources = []
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
@@ -931,6 +940,15 @@ async def _run_source_native_discovery(
     enabled_sources = [
         source for source in sources if _source_discovery_enabled_for_source(config, source.name)
     ]
+    if not config.scraping_enabled:
+        # Source-native discovery fetches from source sites; disabled on GitHub
+        # Actions (bot-blocked datacenter IPs). Search engines still run.
+        logger.info(
+            "Scraping disabled (scraping_enabled=false); skipping source-native discovery "
+            "for %s source(s).",
+            len(enabled_sources),
+        )
+        enabled_sources = []
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
@@ -2363,11 +2381,18 @@ async def run_news_ingest_job(
     seen_store = create_seen_store(config.state_paths.seen_path)
     result.seen_count_before = seen_store.count
 
-    all_articles, source_errors = await fetch_all_sources(
-        sources=sources,
-        days=days,
-        keywords=config.keywords,
-    )
+    if config.scraping_enabled:
+        all_articles, source_errors = await fetch_all_sources(
+            sources=sources,
+            days=days,
+            keywords=config.keywords,
+        )
+    else:
+        # GitHub Actions etc.: never fetch from source sites (datacenter IPs are
+        # bot-blocked). Source candidates are produced by local runs instead.
+        logger.info("Scraping disabled (scraping_enabled=false); skipping source fetch.")
+        all_articles, source_errors = [], []
+        result.warnings.append("scraping_disabled=true")
     result.raw_article_count = len(all_articles)
     result.errors.extend(source_errors)
     if source_errors:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -26,6 +27,8 @@ from denbust.discovery.source_families import source_family_name_for_url
 from denbust.discovery.storage import DiscoveryPersistence
 from denbust.news_items.normalize import canonicalize_news_url, deduplicate_strings
 from denbust.sources.base import Source
+
+logger = logging.getLogger(__name__)
 
 SCRAPEABLE_CANDIDATE_STATUSES: tuple[CandidateStatus, ...] = (
     CandidateStatus.NEW,
@@ -470,6 +473,15 @@ async def scrape_candidates(
 ) -> CandidateScrapeBatch:
     """Attempt to materialize durable candidates into raw articles."""
     if not candidates:
+        return CandidateScrapeBatch([], [], [], [], [], [])
+
+    if not config.scraping_enabled:
+        # Body-fetching is disabled (e.g. on GitHub Actions, whose datacenter IPs
+        # are bot-blocked); leave the candidates for a local run to materialize.
+        logger.info(
+            "Scraping disabled (scraping_enabled=false); skipping %s candidate(s).",
+            len(candidates),
+        )
         return CandidateScrapeBatch([], [], [], [], [], [])
 
     queued_candidates = queue_candidates_for_scrape(candidates)

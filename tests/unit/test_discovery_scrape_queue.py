@@ -481,6 +481,32 @@ async def test_scrape_candidates_records_success_and_updates_candidate(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_scrape_candidates_no_op_when_scraping_disabled(tmp_path: Path) -> None:
+    """With scraping_enabled=False the fetch phase is skipped entirely — no source
+    adapter or partial-page fetch runs and the candidate is left for a local run."""
+    store = build_store(tmp_path)
+    candidate = build_candidate("candidate-1", status=CandidateStatus.NEW)
+    store.upsert_candidates([candidate])
+    # A source whose fetch raises: if the gate works it is never touched.
+    source = FailingSource("ynet", RuntimeError("must not fetch when scraping disabled"))
+
+    batch = await scrape_candidates(
+        config=Config(scraping_enabled=False, store={"state_root": tmp_path}),
+        persistence=store,
+        candidates=[candidate],
+        sources=[source],
+    )
+
+    assert batch.raw_articles == []
+    assert batch.attempts == []
+    assert batch.selected_candidates == []
+    # The candidate is untouched (not re-queued / failed), left for local scraping.
+    stored = store.get_candidate("candidate-1")
+    assert stored is not None
+    assert stored.candidate_status is CandidateStatus.NEW
+
+
+@pytest.mark.asyncio
 async def test_backfill_scrape_candidates_skips_source_adapter_fetch(tmp_path: Path) -> None:
     """Backfill candidate drains should avoid current-window source adapter searches."""
     store = build_store(tmp_path)

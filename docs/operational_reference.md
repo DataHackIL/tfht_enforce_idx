@@ -805,12 +805,31 @@ To run release locally without Supabase, either:
 
 GitHub ingest reuses the shared base config and layers the CI overlay on top via
 `--overlay`. The overlay is the single, auditable place where CI differs from local
-runs — it flips the operational store to Supabase, adds the emailed report, and pins
-CI's leaner cost surface (`max_articles`, source-targeted-only backfill), inheriting
-everything else (sources, keywords, budget caps, prefilter) unchanged:
+runs — it flips the operational store to Supabase, adds the emailed report, pins
+CI's leaner cost surface (`max_articles`, source-targeted-only backfill), and sets
+`scraping_enabled: false`, inheriting everything else (sources, keywords, budget
+caps, prefilter) unchanged:
 
 - base: `agents/news/local_search_brave_exa.yaml`
 - overlay: `agents/news/ci.overlay.yaml`
+
+`scraping_enabled: false` is the **GH-never-scrapes** guardrail: GitHub's datacenter
+IPs are bot-blocked by Israeli news sites, so CI never fetches article bodies or
+source pages. Every source-site fetch path no-ops when it is false:
+
+- candidate materialization — `scrape_candidates()` (the ingest source-native,
+  `scrape_candidates`, and `backfill_scrape` paths all route through it);
+- the ingest job's `fetch_all_sources` call;
+- **source-native discovery** in the `discover` and `backfill_discover` jobs
+  (`_run_source_native_discovery` / `_run_source_native_backfill_discovery`) — these
+  fetch source sites even though the job is "discovery", so they are skipped too while
+  the Brave/Exa search engines still run.
+
+The canonical state is scraped by local runs; GH still searches (Brave/Exa), classifies,
+and runs the deterministic phases (prefilter, gates, balanced selection, budget math).
+The `daily-review` workflow runs `diagnose-sources --artifacts-only`, which does no live
+source fetch, so it does not scrape on GH either. Because the operational workflows are
+still `workflow_dispatch`-only, this is a guardrail that takes effect when they are enabled.
 
 Release and backup jobs rely on dedicated configs:
 

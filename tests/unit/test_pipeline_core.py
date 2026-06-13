@@ -823,6 +823,50 @@ class TestRunPipelineAsync:
         assert captured["closed"] is True
 
     @pytest.mark.asyncio
+    async def test_run_source_native_discovery_skips_source_fetch_when_scraping_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Source-native discovery is a source-site fetch, so it is skipped when
+        scraping is disabled (the GH guardrail) — search engines are untouched."""
+        captured: dict[str, object] = {}
+
+        class FakePersistence:
+            def close(self) -> None:
+                captured["closed"] = True
+
+        def fake_persist_discovered_candidates(
+            *, run, discovered_candidates, persistence, finalize: bool = True
+        ):
+            del persistence, finalize
+            captured["run"] = run
+            captured["candidates"] = discovered_candidates
+            return PersistedSourceDiscovery(run=run, candidates=[], provenance=[])
+
+        class _RaisingSource:
+            name = "ynet"
+
+            async def fetch(self, **_kwargs: object) -> list:
+                raise AssertionError("source.fetch must not run when scraping is disabled")
+
+        monkeypatch.setattr(
+            "denbust.pipeline.create_discovery_persistence", lambda _config: FakePersistence()
+        )
+        monkeypatch.setattr(
+            "denbust.pipeline.persist_discovered_candidates", fake_persist_discovered_candidates
+        )
+
+        persisted = await _run_source_native_discovery(
+            config=Config(scraping_enabled=False),
+            sources=[_RaisingSource()],  # type: ignore[list-item]
+            run_id="run-native",
+            days=4,
+        )
+
+        assert persisted.candidates == []
+        assert captured["candidates"] == []  # nothing discovered (no fetch happened)
+        assert cast(DiscoveryRun, captured["run"]).query_count == 0  # no enabled sources
+
+    @pytest.mark.asyncio
     async def test_run_brave_discovery_records_missing_api_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1321,6 +1365,33 @@ class TestRunPipelineAsync:
         assert result.raw_article_count == 0
         assert result.seen_count_before == 4
         assert result.seen_count_after == 4
+
+    @pytest.mark.asyncio
+    async def test_run_pipeline_async_skips_source_fetch_when_scraping_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With scraping_enabled=False the ingest job never fetches from sources."""
+
+        def fake_create_deduplicator(*, threshold: float) -> MagicMock:
+            del threshold
+            return MagicMock()
+
+        def _must_not_fetch(**_kwargs: object) -> None:
+            raise AssertionError("fetch_all_sources must not run when scraping is disabled")
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("denbust.pipeline.create_sources", lambda _config: [MagicMock()])
+        monkeypatch.setattr("denbust.pipeline.create_classifier", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr("denbust.pipeline.create_deduplicator", fake_create_deduplicator)
+        monkeypatch.setattr("denbust.pipeline.create_seen_store", lambda _path: MagicMock(count=0))
+        monkeypatch.setattr(
+            "denbust.pipeline.fetch_all_sources", AsyncMock(side_effect=_must_not_fetch)
+        )
+
+        result = await run_pipeline_async(Config(scraping_enabled=False), days=3)
+
+        assert result.raw_article_count == 0
+        assert "scraping_disabled=true" in result.warnings
 
     @pytest.mark.asyncio
     async def test_run_pipeline_async_handles_all_seen(
