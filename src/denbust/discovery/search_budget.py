@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -84,19 +84,26 @@ class SearchBudgetLedger:
             handle.write("\n")
         return record
 
-    def searched_on(self, *, day: date, engine: str | None = None) -> bool:
-        """True if a search (queries > 0) was recorded on the UTC calendar day *day*.
+    def searched_since(self, *, since: datetime, engine: str | None = None) -> bool:
+        """True if a search (queries > 0) was recorded at or after *since*.
 
-        Used by the GitHub search backstop: GH issues open-web queries only when no
-        run — local or CI — already searched that day, so the day's search budget is
-        spent at most once and local takes priority on its own cadence.
+        Backs the GitHub search backstop: GH issues open-web queries only when no
+        run — local or CI — searched within the trailing window (the discover job
+        uses the last 24h). A rolling window (rather than a calendar day) means GH
+        defers to a recent local search regardless of clock-time ordering: as long
+        as local runs at least daily, GH always skips and only searches once local
+        has been idle for longer than the window. ``since`` is compared in an aware
+        fashion; a tz-naive ``recorded_at`` is treated as UTC.
         """
         for record in self.load():
             if record.queries <= 0:
                 continue
             if engine is not None and record.engine != engine:
                 continue
-            if record.recorded_at.astimezone(UTC).date() == day:
+            recorded_at = record.recorded_at
+            if recorded_at.tzinfo is None:
+                recorded_at = recorded_at.replace(tzinfo=UTC)
+            if recorded_at >= since:
                 return True
         return False
 

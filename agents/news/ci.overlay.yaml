@@ -15,9 +15,11 @@
 scraping_enabled: false
 
 discovery:
-  # Search backstop: GH issues Brave/Exa queries only when no run already searched
-  # that UTC day (per the search-budget ledger). Local runs search on their own
-  # cadence and take priority; GH covers only the days local was idle.
+  # Search backstop: GH issues Brave/Exa queries only when no run (local or CI)
+  # searched in the prior 24h, per the search-budget ledger. The rolling window
+  # means GH defers to a recent local search regardless of clock ordering — so as
+  # long as local runs at least daily, GH always skips and only searches once local
+  # has been idle for more than a day. Schedule GH discover to run at least daily.
   search_backstop_only: true
 
 operational:

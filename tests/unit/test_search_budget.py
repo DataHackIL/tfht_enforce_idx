@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from denbust.discovery.search_budget import (
@@ -142,30 +142,40 @@ def test_ledger_missing_file_is_empty(tmp_path: Path) -> None:
     assert ledger.month_spend(year_month="2026-06") == (0, 0.0)
 
 
-def test_searched_on_detects_a_same_day_search(tmp_path: Path) -> None:
-    """searched_on backs the GitHub search backstop: only days with a real search count."""
+def test_searched_since_window(tmp_path: Path) -> None:
+    """searched_since backs the GitHub backstop: only real searches in-window count."""
     ledger = SearchBudgetLedger(tmp_path / "b.jsonl")
-    assert ledger.searched_on(day=date(2026, 6, 13)) is False  # empty ledger
+    cutoff = datetime(2026, 6, 13, 0, tzinfo=UTC)
+    assert ledger.searched_since(since=cutoff) is False  # empty ledger
 
-    ledger.record(engine="brave", queries=10, run_id="r1", now=datetime(2026, 6, 13, 9, tzinfo=UTC))
-    # A budget-skipped run that recorded 0 queries does not count as "searched".
-    ledger.record(engine="exa", queries=0, run_id="r2", now=datetime(2026, 6, 13, 10, tzinfo=UTC))
+    # Before the window — does not count.
+    ledger.record(engine="brave", queries=9, run_id="old", now=datetime(2026, 6, 12, 9, tzinfo=UTC))
+    assert ledger.searched_since(since=cutoff) is False
 
-    assert ledger.searched_on(day=date(2026, 6, 13)) is True
-    assert ledger.searched_on(day=date(2026, 6, 12)) is False  # a different day
-    assert ledger.searched_on(day=date(2026, 6, 13), engine="brave") is True
-    assert ledger.searched_on(day=date(2026, 6, 13), engine="exa") is False  # exa logged 0
+    # In window, but a budget-skipped 0-query run does not count as "searched".
+    ledger.record(engine="exa", queries=0, run_id="zero", now=datetime(2026, 6, 13, 9, tzinfo=UTC))
+    assert ledger.searched_since(since=cutoff) is False
 
-
-def test_searched_on_compares_in_utc(tmp_path: Path) -> None:
-    """A timestamp is bucketed by its UTC calendar day."""
-    ledger = SearchBudgetLedger(tmp_path / "b.jsonl")
-    # 2026-06-13T23:30-05:00 is 2026-06-14T04:30Z.
+    # In window with real queries — counts.
     ledger.record(
-        engine="brave",
-        queries=5,
-        run_id="r",
-        now=datetime.fromisoformat("2026-06-13T23:30:00-05:00"),
+        engine="brave", queries=5, run_id="now", now=datetime(2026, 6, 13, 10, tzinfo=UTC)
     )
-    assert ledger.searched_on(day=date(2026, 6, 14)) is True
-    assert ledger.searched_on(day=date(2026, 6, 13)) is False
+    assert ledger.searched_since(since=cutoff) is True
+    assert ledger.searched_since(since=cutoff, engine="brave") is True
+    assert ledger.searched_since(since=cutoff, engine="exa") is False  # exa logged 0
+    # A cutoff after that search excludes it again.
+    assert ledger.searched_since(since=datetime(2026, 6, 13, 11, tzinfo=UTC)) is False
+
+
+def test_searched_since_treats_naive_timestamp_as_utc(tmp_path: Path) -> None:
+    """A tz-naive recorded_at is compared as UTC rather than mis-bucketed to local."""
+    path = tmp_path / "b.jsonl"
+    # Hand-write a record with a naive recorded_at (no offset).
+    path.write_text(
+        '{"run_id":"r","engine":"brave","queries":5,'
+        '"estimated_cost_usd":0.025,"recorded_at":"2026-06-13T12:00:00"}\n',
+        encoding="utf-8",
+    )
+    ledger = SearchBudgetLedger(path)
+    assert ledger.searched_since(since=datetime(2026, 6, 13, 11, tzinfo=UTC)) is True
+    assert ledger.searched_since(since=datetime(2026, 6, 13, 13, tzinfo=UTC)) is False
