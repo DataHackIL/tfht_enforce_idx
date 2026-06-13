@@ -870,6 +870,15 @@ async def _run_source_native_backfill_discovery(
     enabled_sources = [
         source for source in sources if _source_discovery_enabled_for_source(config, source.name)
     ]
+    if not config.scraping_enabled:
+        # Source-native discovery fetches from source sites; disabled on GitHub
+        # Actions (bot-blocked datacenter IPs). Search engines still run.
+        logger.info(
+            "Scraping disabled (scraping_enabled=false); skipping source-native backfill "
+            "discovery for %s source(s).",
+            len(enabled_sources),
+        )
+        enabled_sources = []
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
@@ -931,6 +940,15 @@ async def _run_source_native_discovery(
     enabled_sources = [
         source for source in sources if _source_discovery_enabled_for_source(config, source.name)
     ]
+    if not config.scraping_enabled:
+        # Source-native discovery fetches from source sites; disabled on GitHub
+        # Actions (bot-blocked datacenter IPs). Search engines still run.
+        logger.info(
+            "Scraping disabled (scraping_enabled=false); skipping source-native discovery "
+            "for %s source(s).",
+            len(enabled_sources),
+        )
+        enabled_sources = []
     discovery_run = DiscoveryRun(
         run_id=run_id,
         dataset_name=config.dataset_name,
