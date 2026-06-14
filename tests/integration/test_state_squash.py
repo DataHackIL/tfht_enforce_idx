@@ -58,6 +58,9 @@ def _env(work: Path, remote: Path) -> dict[str, str]:
         "STATE_REPO_BRANCH": "main",
         "GIT_AUTHOR_NAME": "tester",
         "GIT_AUTHOR_EMAIL": "tester@example.com",
+        # These tests exercise squash/coexistence mechanics, not the secret-scan
+        # guard (which fails closed without gitleaks); opt out so they run anywhere.
+        "STATE_RUN_SKIP_SECRET_SCAN": "1",
     }
 
 

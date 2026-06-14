@@ -57,6 +57,7 @@ def _run_wrapper(
     message: str | None = None,
     offline: bool = False,
     no_fetch: bool = False,
+    scan_secrets: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     args: list[str] = ["bash", str(WRAPPER)]
     for subtree in subtrees:
@@ -76,6 +77,10 @@ def _run_wrapper(
         "GIT_AUTHOR_NAME": "tester",
         "GIT_AUTHOR_EMAIL": "tester@example.com",
     }
+    # The secret-scan guard fails closed when gitleaks is absent; tests that
+    # exercise wrapper mechanics (not the guard) opt out so they run anywhere.
+    if not scan_secrets:
+        env["STATE_RUN_SKIP_SECRET_SCAN"] = "1"
     return subprocess.run(args, env=env, capture_output=True, text=True)
 
 
@@ -253,3 +258,72 @@ def test_rejected_push_recovers_via_refetch_rebase(tmp_path: Path) -> None:
     assert _remote_commit_count(remote) == 3
     assert _remote_file(remote, "news_items/discover/other.jsonl") == "other"  # not clobbered
     assert _remote_file(remote, "news_items/discover/mine.jsonl") == "mine"
+
+
+_GITLEAKS = shutil.which("gitleaks") is not None
+# A correctly-shaped fake Google key (AIza + 35 chars) — matches the strict rule
+# in .gitleaks.toml. No real key is in this file.
+_FAKE_GOOGLE_KEY = "AIza" + "B1cD3fGh4JkLmN0pQrStUvWxYz123456789"
+
+
+@pytest.mark.skipif(not _GITLEAKS, reason="gitleaks not installed")
+def test_secret_in_state_is_blocked_before_push(tmp_path: Path) -> None:
+    """A secret written into state is caught by gitleaks; nothing is committed/pushed."""
+    remote = _make_remote(tmp_path)
+    result = _run_wrapper(
+        work=tmp_path / "work",
+        remote=remote,
+        scan_secrets=True,
+        subtrees=["news_items/discover"],
+        command=[
+            "bash",
+            "-c",
+            f'echo \'{{"errors":["?key={_FAKE_GOOGLE_KEY}"]}}\' '
+            '> "$DENBUST_STATE_ROOT/news_items/discover/run.json"',
+        ],
+    )
+    assert result.returncode != 0
+    assert "SECRET DETECTED" in result.stderr
+    assert _remote_commit_count(remote) == 1  # push blocked
+    assert _FAKE_GOOGLE_KEY not in result.stdout + result.stderr  # not echoed (redacted)
+
+
+@pytest.mark.skipif(not _GITLEAKS, reason="gitleaks not installed")
+def test_clean_state_passes_the_secret_scan(tmp_path: Path) -> None:
+    """Clean state passes the scan and is pushed normally."""
+    remote = _make_remote(tmp_path)
+    result = _run_wrapper(
+        work=tmp_path / "work",
+        remote=remote,
+        scan_secrets=True,
+        subtrees=["news_items/discover"],
+        command=[
+            "bash",
+            "-c",
+            'echo \'{"status":"ok","errors":[]}\' '
+            '> "$DENBUST_STATE_ROOT/news_items/discover/run.json"',
+        ],
+    )
+    assert result.returncode == 0, result.stderr
+    assert _remote_commit_count(remote) == 2  # clean push succeeded
+
+
+@pytest.mark.skipif(not _GITLEAKS, reason="gitleaks not installed")
+def test_bulk_candidate_data_is_not_false_flagged(tmp_path: Path) -> None:
+    """News candidate data (allowlisted) must not trip the scan even if it looks key-ish."""
+    remote = _make_remote(tmp_path)
+    result = _run_wrapper(
+        work=tmp_path / "work",
+        remote=remote,
+        scan_secrets=True,
+        subtrees=["news_items/discover"],
+        command=[
+            "bash",
+            "-c",
+            'mkdir -p "$DENBUST_STATE_ROOT/news_items/discover/candidates"; '
+            f'echo \'{{"url":"https://x.dk/a?key={_FAKE_GOOGLE_KEY}"}}\' '
+            '> "$DENBUST_STATE_ROOT/news_items/discover/candidates/latest_candidates.jsonl"',
+        ],
+    )
+    assert result.returncode == 0, result.stderr  # allowlisted path → not flagged
+    assert _remote_commit_count(remote) == 2

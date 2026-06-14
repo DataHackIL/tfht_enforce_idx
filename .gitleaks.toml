@@ -1,0 +1,36 @@
+# gitleaks config for denbust — used by the git pre-push hook, the Claude Code
+# pre-push hook, and the state-run push guard (scripts/state-run.sh).
+#
+# Strategy: the industry default ruleset, plus a strict (no-entropy) rule for
+# Google API keys (the kind that leaked — gitleaks' default rule applies an
+# entropy gate that can miss them), plus an allowlist for the bulk news-candidate
+# data files, which are article content (URLs/titles/snippets) — scanning them
+# only yields false positives, and any secret echoed into an error string is
+# already scrubbed at write time by denbust.discovery.redaction.
+
+title = "denbust"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "google-api-key-strict"
+description = "Google API key (e.g. Custom Search) — matched without an entropy gate"
+regex = '''AIza[0-9A-Za-z\-_]{35}'''
+keywords = ["AIza"]
+
+[allowlist]
+description = "Skip news content + test fixtures (third-party tokens, not our secrets)"
+paths = [
+  # Bulk news-candidate data (article URLs/titles/snippets), scanned only as noise.
+  '''.*/candidates/latest_candidates\.jsonl$''',
+  '''.*/candidates/retry_queue\.jsonl$''',
+  '''.*/candidates/backfill_queue\.jsonl$''',
+  '''.*/candidates/candidate_provenance\.jsonl$''',
+  '''.*/candidates/scrape_attempts\.jsonl$''',
+  '''.*/candidates/triage_decisions\.jsonl$''',
+  '''.*/candidates/engine_query_cache/.*''',
+  '''.*/prefilter/.*''',
+  # Captured-page test fixtures carry third-party ad/analytics tokens (not ours).
+  '''tests/fixtures/.*''',
+]

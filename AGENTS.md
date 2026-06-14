@@ -144,6 +144,32 @@ scraping budget. Full protocol: `docs/batch_scraping_protocol.md`.
   - `DENBUST_*`
 - Never add secrets to fixtures, examples, docs, or workflow YAML.
 
+## Secret Scanning (defense in depth)
+
+Secrets are scanned with [gitleaks](https://github.com/gitleaks/gitleaks) (the
+industry tool, not ad-hoc regex). Install it before pushing:
+
+```bash
+brew install gitleaks   # or: see github.com/gitleaks/gitleaks releases
+```
+
+Configuration lives in the repo-root `.gitleaks.toml` (default ruleset + a
+no-entropy Google API-key rule + an allowlist for bulk news-candidate data and
+captured-page test fixtures, which only yield third-party false positives).
+
+Three independent guards run gitleaks against this config:
+
+1. **git pre-push hook** (`pre-commit`, `stages: [pre-push]`) — gates what leaves
+   the machine. Enable with `pre-commit install --install-hooks` (the repo sets
+   `default_install_hook_types: [pre-commit, pre-push]`).
+2. **state-run push guard** (`scripts/state-run.sh`) — scans the state worktree
+   before each commit/push to the public state repo. It **fails closed**: if
+   gitleaks is not installed it refuses to push. Override only in an emergency
+   with `STATE_RUN_SKIP_SECRET_SCAN=1` (not recommended).
+3. **Claude Code pre-push hook** (`.claude/settings.json` → `scripts/hooks/gitleaks_prepush_guard.py`) —
+   a `PreToolUse`/`Bash` hook that blocks any agent-issued `git push` when
+   gitleaks finds secrets in tracked content.
+
 ## Testing Constraints
 
 - No live network calls in tests.

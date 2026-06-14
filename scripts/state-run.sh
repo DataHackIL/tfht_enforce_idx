@@ -123,6 +123,41 @@ push_state() {
   done
 }
 
+# Secret-scan guard: refuse to commit/push state that gitleaks flags. The leak
+# that motivated this rode in a discovery error string; redaction scrubs those at
+# write time, and this is the defense-in-depth net at the push boundary. Bulk
+# news-candidate data is allowlisted in .gitleaks.toml to avoid false positives.
+scan_state_for_secrets() {
+  if [[ "${STATE_RUN_SKIP_SECRET_SCAN:-0}" == "1" ]]; then
+    echo "state-run: WARNING — secret scan skipped (STATE_RUN_SKIP_SECRET_SCAN=1)." >&2
+    return 0
+  fi
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "state-run: gitleaks not installed — refusing to push state unscanned." >&2
+    echo "  install it (e.g. 'brew install gitleaks') or, only if you must," >&2
+    echo "  set STATE_RUN_SKIP_SECRET_SCAN=1 to override (NOT recommended)." >&2
+    return 1
+  fi
+  local cfg cfg_arg=() targets=() target
+  cfg="$(cd "$(dirname "$0")/.." && pwd)/.gitleaks.toml"
+  [[ -f "$cfg" ]] && cfg_arg=(--config "$cfg")
+  if [[ ${#subtrees[@]} -gt 0 ]]; then
+    for target in "${subtrees[@]}"; do
+      [[ -e "$STATE_REPO_DIR/$target" ]] && targets+=("$STATE_REPO_DIR/$target")
+    done
+  else
+    targets+=("$STATE_REPO_DIR")
+  fi
+  for target in "${targets[@]}"; do
+    if ! gitleaks dir "$target" "${cfg_arg[@]}" --no-banner --redact >/dev/null 2>&1; then
+      echo "state-run: SECRET DETECTED in state ($target) — refusing to commit/push." >&2
+      gitleaks dir "$target" "${cfg_arg[@]}" --no-banner --redact 2>&1 \
+        | grep -iE "Finding|File:|RuleID|Line:" | head -40 >&2 || true
+      return 1
+    fi
+  done
+}
+
 acquire_state_repo_lock
 
 # 1. Bring the state repo to canonical HEAD.
@@ -149,6 +184,10 @@ fi
 if [[ -z "$(git_state diff --cached --name-only)" ]]; then
   echo "state-run: no state changes to commit."
 else
+  if ! scan_state_for_secrets; then
+    echo "state-run: aborting before commit/push — secret scan failed." >&2
+    exit 1
+  fi
   git_state config user.name "${GIT_AUTHOR_NAME:-github-actions[bot]}"
   git_state config user.email "${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
   git_state commit -m "${message:-chore(state): update ${subtrees[*]:-state}}"
