@@ -73,6 +73,7 @@ from denbust.discovery.models import (
 )
 from denbust.discovery.queries import build_discovery_queries, select_run_queries
 from denbust.discovery.query_yield import QueryYieldStore
+from denbust.discovery.redaction import redact_secrets
 from denbust.discovery.scrape_queue import (
     SCRAPEABLE_CANDIDATE_STATUSES,
     CandidateScrapeBatch,
@@ -484,7 +485,7 @@ async def fetch_all_sources(
             logger.info("Found %s articles from %s", len(articles), source.name)
         except Exception as exc:
             logger.exception("Error fetching from %s: %s", source.name, exc)
-            errors.append(f"{source.name}: {exc}")
+            errors.append(redact_secrets(f"{source.name}: {exc}"))
 
     logger.info("Total raw articles: %s", len(all_articles))
     return all_articles, errors
@@ -915,7 +916,7 @@ async def _run_source_native_backfill_discovery(
                 logger.exception(
                     "Error discovering backfill candidates from %s: %s", source.name, exc
                 )
-                errors.append(f"{source.name}: {exc}")
+                errors.append(redact_secrets(f"{source.name}: {exc}"))
 
         discovery_run.errors = errors
         persisted = persist_discovered_candidates(
@@ -972,7 +973,7 @@ async def _run_source_native_discovery(
                 discovered_candidates.extend(await adapter.discover_candidates(context))
             except Exception as exc:
                 logger.exception("Error discovering candidates from %s: %s", source.name, exc)
-                errors.append(f"{source.name}: {exc}")
+                errors.append(redact_secrets(f"{source.name}: {exc}"))
 
         discovery_run.errors = errors
         persisted = persist_discovered_candidates(
@@ -1132,7 +1133,9 @@ async def _run_brave_discovery(
                 try:
                     fresh = await engine.discover([query], context)
                 except Exception as exc:
-                    discovery_run.errors.append(f"brave: {type(exc).__name__}: {exc}")
+                    discovery_run.errors.append(
+                        redact_secrets(f"brave: {type(exc).__name__}: {exc}")
+                    )
                     fresh = []
                 save_cached_candidates(cp, fresh)
                 batch.extend(fresh)
@@ -1234,7 +1237,7 @@ async def _run_exa_discovery(
                 try:
                     fresh = await engine.discover([query], context)
                 except Exception as exc:
-                    discovery_run.errors.append(f"exa: {type(exc).__name__}: {exc}")
+                    discovery_run.errors.append(redact_secrets(f"exa: {type(exc).__name__}: {exc}"))
                     fresh = []
                 save_cached_candidates(cp, fresh)
                 batch.extend(fresh)
@@ -1344,7 +1347,9 @@ async def _run_google_cse_discovery(
                 try:
                     fresh = await engine.discover([query], context)
                 except Exception as exc:
-                    discovery_run.errors.append(f"google_cse: {type(exc).__name__}: {exc}")
+                    discovery_run.errors.append(
+                        redact_secrets(f"google_cse: {type(exc).__name__}: {exc}")
+                    )
                     fresh = []
                 save_cached_candidates(cp, fresh)
                 batch.extend(fresh)
@@ -1519,7 +1524,9 @@ async def _run_backfill_engine_discovery(
                 ]
             )
         except Exception as exc:
-            discovery_run.errors.append(f"{engine_name}: {type(exc).__name__}: {exc}")
+            discovery_run.errors.append(
+                redact_secrets(f"{engine_name}: {type(exc).__name__}: {exc}")
+            )
             discovered_candidates = []
         return persist_discovered_candidates(
             run=discovery_run,
