@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from denbust.discovery.models import PersistentCandidate
+from denbust.discovery.redaction import redact_secrets
 from denbust.models.common import DatasetName, JobName
 from denbust.store.run_snapshots import snapshot_filename
 
@@ -88,11 +89,18 @@ def discovery_snapshot_filename(run_timestamp: datetime) -> str:
 def write_discovery_run_snapshot(
     runs_dir: Path, payload: dict[str, Any], *, run_timestamp: datetime
 ) -> Path:
-    """Write a per-run discovery artifact to disk."""
+    """Write a per-run discovery artifact to disk.
+
+    The serialized snapshot is passed through ``redact_secrets`` as a safety net:
+    run snapshots hold error strings (and other run metadata), which can carry a
+    credential echoed in an API error URL. Snapshots never contain candidate
+    bodies, so blanket redaction here is safe.
+    """
     runs_dir.mkdir(parents=True, exist_ok=True)
     path = runs_dir / discovery_snapshot_filename(run_timestamp)
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False)
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write(redact_secrets(serialized))
         handle.write("\n")
     return path
 
