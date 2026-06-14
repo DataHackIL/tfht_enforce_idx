@@ -126,18 +126,24 @@ def write_model_jsonl(path: Path, rows: Sequence[BaseModel]) -> Path:
 
 
 def write_json_snapshot(path: Path, payload: dict[str, Any]) -> Path:
-    """Write one JSON snapshot file."""
+    """Write one JSON snapshot file (e.g. a backfill batch record).
+
+    Redacted before writing as a safety net: these snapshots hold run/batch
+    metadata (including error strings) but no candidate bodies.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False)
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write(redact_secrets(serialized))
         handle.write("\n")
     return path
 
 
 def write_metrics_snapshot(path: Path, payload: dict[str, Any]) -> Path:
-    """Write a JSON metrics artifact for discovery diagnostics."""
+    """Write a JSON metrics artifact for discovery diagnostics (redacted)."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False)
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write(redact_secrets(serialized))
         handle.write("\n")
     return path
