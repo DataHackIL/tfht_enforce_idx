@@ -140,3 +140,42 @@ def test_ledger_missing_file_is_empty(tmp_path: Path) -> None:
     ledger = SearchBudgetLedger(tmp_path / "missing.jsonl")
     assert ledger.load() == []
     assert ledger.month_spend(year_month="2026-06") == (0, 0.0)
+
+
+def test_searched_since_window(tmp_path: Path) -> None:
+    """searched_since backs the GitHub backstop: only real searches in-window count."""
+    ledger = SearchBudgetLedger(tmp_path / "b.jsonl")
+    cutoff = datetime(2026, 6, 13, 0, tzinfo=UTC)
+    assert ledger.searched_since(since=cutoff) is False  # empty ledger
+
+    # Before the window — does not count.
+    ledger.record(engine="brave", queries=9, run_id="old", now=datetime(2026, 6, 12, 9, tzinfo=UTC))
+    assert ledger.searched_since(since=cutoff) is False
+
+    # In window, but a budget-skipped 0-query run does not count as "searched".
+    ledger.record(engine="exa", queries=0, run_id="zero", now=datetime(2026, 6, 13, 9, tzinfo=UTC))
+    assert ledger.searched_since(since=cutoff) is False
+
+    # In window with real queries — counts.
+    ledger.record(
+        engine="brave", queries=5, run_id="now", now=datetime(2026, 6, 13, 10, tzinfo=UTC)
+    )
+    assert ledger.searched_since(since=cutoff) is True
+    assert ledger.searched_since(since=cutoff, engine="brave") is True
+    assert ledger.searched_since(since=cutoff, engine="exa") is False  # exa logged 0
+    # A cutoff after that search excludes it again.
+    assert ledger.searched_since(since=datetime(2026, 6, 13, 11, tzinfo=UTC)) is False
+
+
+def test_searched_since_treats_naive_timestamp_as_utc(tmp_path: Path) -> None:
+    """A tz-naive recorded_at is compared as UTC rather than mis-bucketed to local."""
+    path = tmp_path / "b.jsonl"
+    # Hand-write a record with a naive recorded_at (no offset).
+    path.write_text(
+        '{"run_id":"r","engine":"brave","queries":5,'
+        '"estimated_cost_usd":0.025,"recorded_at":"2026-06-13T12:00:00"}\n',
+        encoding="utf-8",
+    )
+    ledger = SearchBudgetLedger(path)
+    assert ledger.searched_since(since=datetime(2026, 6, 13, 11, tzinfo=UTC)) is True
+    assert ledger.searched_since(since=datetime(2026, 6, 13, 13, tzinfo=UTC)) is False

@@ -574,6 +574,7 @@ store:
         assert local.max_articles == 100
         assert local.backfill.query_kinds is None  # falls back to the 4-kind default
         assert local.scraping_enabled is True  # local scrapes article bodies
+        assert local.discovery.search_backstop_only is False  # local always searches
 
         # CI runtime: base + overlay, merged before validation.
         ci = load_config(base_path, overlay_path=overlay_path)
@@ -582,6 +583,7 @@ store:
         assert ci.max_articles == 30
         assert ci.backfill.query_kinds == [DiscoveryQueryKind.SOURCE_TARGETED]
         assert ci.scraping_enabled is False  # GH never scrapes (bot-blocked IPs)
+        assert ci.discovery.search_backstop_only is True  # GH searches only when local was idle
 
         # Shared keys are inherited unchanged — the two runtimes cannot drift on them.
         assert ci.discovery.engines.brave.enabled is True

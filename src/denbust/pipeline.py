@@ -9,7 +9,7 @@ import os
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TypedDict
 from uuid import uuid4
@@ -2535,6 +2535,24 @@ async def run_news_discover_job(
         result.errors.append("No sources configured")
         return result.finish("fatal: no sources configured")
 
+    # Search backstop (GitHub Actions): only issue open-web search queries when no
+    # run searched in the trailing 24h. A rolling window means GH defers to a recent
+    # local search regardless of clock-time ordering — as long as local runs at least
+    # daily, GH always skips and only searches once local has been idle longer than
+    # the window, so the search budget is spent at most once. Source-native discovery
+    # and the deterministic phases are unaffected.
+    if config.discovery.search_backstop_only and (
+        brave_can_run or exa_can_run or google_cse_can_run
+    ):
+        since = result.run_timestamp - timedelta(hours=24)
+        ledger = SearchBudgetLedger(config.discovery_state_paths.search_budget_path)
+        if ledger.searched_since(since=since):
+            logger.info(
+                "Search backstop: a search was recorded within the last 24h; skipping engine search."
+            )
+            result.warnings.append("search_backstop_skipped=true")
+            brave_can_run = exa_can_run = google_cse_can_run = False
+
     persisted_runs: list[tuple[str, PersistedSourceDiscovery]] = []
     run_base = result.run_timestamp.astimezone(UTC).isoformat()
 
@@ -2647,7 +2665,9 @@ async def run_news_discover_job(
     )
     result.unified_item_count = len(merged_candidate_ids)
 
-    if failed_runs == len(persisted_runs):
+    # Fatal only when runs were attempted and all failed — not when nothing ran
+    # (e.g. the search backstop intentionally skipped engine search for the day).
+    if persisted_runs and failed_runs == len(persisted_runs):
         result.fatal = True
 
     result.finish(
