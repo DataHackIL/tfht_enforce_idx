@@ -264,6 +264,14 @@ _GITLEAKS = shutil.which("gitleaks") is not None
 # A correctly-shaped fake Google key (AIza + 35 chars) — matches the strict rule
 # in .gitleaks.toml. No real key is in this file.
 _FAKE_GOOGLE_KEY = "AIza" + "B1cD3fGh4JkLmN0pQrStUvWxYz123456789"
+# A structurally-valid but meaningless JWT (the Supabase-JWT incident class).
+_FAKE_JWT = (
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+)
+# A high-entropy assignment that trips gitleaks' catch-all `generic-api-key`
+# rule — the kind of false positive news text produces. Suppressed on candidate
+# paths, so it must NOT block a push.
+_GENERIC_NOISE = "api_key = 8f3Hq9ZxR2bN7vKpL4wYtCgD6sErA1mU0oP"
 
 
 @pytest.mark.skipif(not _GITLEAKS, reason="gitleaks not installed")
@@ -309,8 +317,9 @@ def test_clean_state_passes_the_secret_scan(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _GITLEAKS, reason="gitleaks not installed")
-def test_bulk_candidate_data_is_not_false_flagged(tmp_path: Path) -> None:
-    """News candidate data (allowlisted) must not trip the scan even if it looks key-ish."""
+def test_generic_noise_in_candidate_data_is_not_false_flagged(tmp_path: Path) -> None:
+    """The generic-api-key catch-all is suppressed on candidate paths, so key-ish
+    news text does not block a push."""
     remote = _make_remote(tmp_path)
     result = _run_wrapper(
         work=tmp_path / "work",
@@ -321,9 +330,35 @@ def test_bulk_candidate_data_is_not_false_flagged(tmp_path: Path) -> None:
             "bash",
             "-c",
             'mkdir -p "$DENBUST_STATE_ROOT/news_items/discover/candidates"; '
-            f'echo \'{{"url":"https://x.dk/a?key={_FAKE_GOOGLE_KEY}"}}\' '
+            f'echo \'{{"snippet":"{_GENERIC_NOISE}"}}\' '
             '> "$DENBUST_STATE_ROOT/news_items/discover/candidates/latest_candidates.jsonl"',
         ],
     )
-    assert result.returncode == 0, result.stderr  # allowlisted path → not flagged
+    assert result.returncode == 0, result.stderr  # generic noise suppressed → not flagged
     assert _remote_commit_count(remote) == 2
+
+
+@pytest.mark.skipif(not _GITLEAKS, reason="gitleaks not installed")
+def test_real_key_in_candidate_data_is_blocked(tmp_path: Path) -> None:
+    """Regression for the seed-time incident: a real key/JWT captured *into*
+    candidate data — the exact leak vector — must still be caught. Only the
+    generic catch-all is suppressed on these paths, not the provider rules."""
+    remote = _make_remote(tmp_path)
+    for secret in (_FAKE_GOOGLE_KEY, _FAKE_JWT):
+        result = _run_wrapper(
+            work=tmp_path / f"work_{secret[:8]}",
+            remote=remote,
+            scan_secrets=True,
+            subtrees=["news_items/discover"],
+            command=[
+                "bash",
+                "-c",
+                'mkdir -p "$DENBUST_STATE_ROOT/news_items/discover/candidates"; '
+                f'echo \'{{"url":"x","errors":["403 ?key={secret}"]}}\' '
+                '> "$DENBUST_STATE_ROOT/news_items/discover/candidates/latest_candidates.jsonl"',
+            ],
+        )
+        assert result.returncode != 0, f"{secret[:8]} not blocked"
+        assert "SECRET DETECTED" in result.stderr
+        assert _remote_commit_count(remote) == 1  # push blocked, nothing committed
+        assert secret not in result.stdout + result.stderr  # redacted

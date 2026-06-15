@@ -153,22 +153,32 @@ industry tool, not ad-hoc regex). Install it before pushing:
 brew install gitleaks   # or: see github.com/gitleaks/gitleaks releases
 ```
 
-Configuration lives in the repo-root `.gitleaks.toml` (default ruleset + a
-no-entropy Google API-key rule + an allowlist for bulk news-candidate data and
-captured-page test fixtures, which only yield third-party false positives).
+Configuration lives in the repo-root `.gitleaks.toml`: the default ruleset plus
+a no-entropy Google API-key rule. Allowlisting is **deliberately narrow** —
+because the seed-time leak rode in *inside* the candidate-data JSONL, those
+paths are **not** blanket-skipped. We suppress only the catch-all
+`generic-api-key` rule there (it false-positives on news URLs/titles/snippets);
+every provider rule (the strict Google rule, `jwt`, AWS/GitHub/Slack/…) stays
+active, so a real key or JWT captured into the candidate stream is still caught.
 
-Three independent guards run gitleaks against this config:
+Three guards run gitleaks against this config:
 
-1. **git pre-push hook** (`pre-commit`, `stages: [pre-push]`) — gates what leaves
-   the machine. Enable with `pre-commit install --install-hooks` (the repo sets
-   `default_install_hook_types: [pre-commit, pre-push]`).
-2. **state-run push guard** (`scripts/state-run.sh`) — scans the state worktree
-   before each commit/push to the public state repo. It **fails closed**: if
-   gitleaks is not installed it refuses to push. Override only in an emergency
-   with `STATE_RUN_SKIP_SECRET_SCAN=1` (not recommended).
+1. **state-run push guard** (`scripts/state-run.sh`) — the **enforced** layer
+   (runs locally *and* in CI). Scans the *staged* diff before each commit/push to
+   the public state repo and **fails closed**: if gitleaks is missing or
+   `.gitleaks.toml` cannot be found it refuses to push rather than degrade to
+   gitleaks' weaker defaults. Override only in an emergency with
+   `STATE_RUN_SKIP_SECRET_SCAN=1` (not recommended).
+2. **git pre-push hook** (`pre-commit`, `stages: [pre-push]`) — best-effort, gates
+   ordinary `git push`. Enable with `pre-commit install --install-hooks` (the
+   repo sets `default_install_hook_types: [pre-commit, pre-push]`).
 3. **Claude Code pre-push hook** (`.claude/settings.json` → `scripts/hooks/gitleaks_prepush_guard.py`) —
-   a `PreToolUse`/`Bash` hook that blocks any agent-issued `git push` when
-   gitleaks finds secrets in tracked content.
+   best-effort; a `PreToolUse`/`Bash` hook that blocks an agent-issued `git push`
+   when gitleaks finds secrets in the pushed repo's tracked content.
+
+The guard's blocking behaviour is regression-tested in
+`tests/integration/test_state_run.py`; CI installs gitleaks so those tests run
+rather than skip.
 
 ## Testing Constraints
 

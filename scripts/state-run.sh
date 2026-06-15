@@ -124,9 +124,16 @@ push_state() {
 }
 
 # Secret-scan guard: refuse to commit/push state that gitleaks flags. The leak
-# that motivated this rode in a discovery error string; redaction scrubs those at
-# write time, and this is the defense-in-depth net at the push boundary. Bulk
-# news-candidate data is allowlisted in .gitleaks.toml to avoid false positives.
+# that motivated this rode in as a key inside a discovery `errors[]` field;
+# redaction scrubs those at write time, and this is the enforced defense-in-depth
+# net at the push boundary. It scans the *staged* diff (what is about to be
+# committed), not the whole working tree, so it does not block on a pre-existing
+# secret in an unchanged file and does not re-scan the full candidate store.
+#
+# Fails closed: if gitleaks is missing or the config cannot be found, it refuses
+# to push rather than degrade to gitleaks' default ruleset (which misses the
+# low-entropy Google key class our strict rule exists for). Override only in an
+# emergency with STATE_RUN_SKIP_SECRET_SCAN=1.
 scan_state_for_secrets() {
   if [[ "${STATE_RUN_SKIP_SECRET_SCAN:-0}" == "1" ]]; then
     echo "state-run: WARNING — secret scan skipped (STATE_RUN_SKIP_SECRET_SCAN=1)." >&2
@@ -138,24 +145,37 @@ scan_state_for_secrets() {
     echo "  set STATE_RUN_SKIP_SECRET_SCAN=1 to override (NOT recommended)." >&2
     return 1
   fi
-  local cfg cfg_arg=() targets=() target
-  cfg="$(cd "$(dirname "$0")/.." && pwd)/.gitleaks.toml"
-  [[ -f "$cfg" ]] && cfg_arg=(--config "$cfg")
-  if [[ ${#subtrees[@]} -gt 0 ]]; then
-    for target in "${subtrees[@]}"; do
-      [[ -e "$STATE_REPO_DIR/$target" ]] && targets+=("$STATE_REPO_DIR/$target")
-    done
-  else
-    targets+=("$STATE_REPO_DIR")
+  local repo_root cfg
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  cfg="$repo_root/.gitleaks.toml"
+  if [[ ! -f "$cfg" ]]; then
+    echo "state-run: .gitleaks.toml not found at $cfg — refusing to push." >&2
+    echo "  scanning with gitleaks defaults would miss the low-entropy Google key" >&2
+    echo "  class this config exists to catch. Restore the file before pushing." >&2
+    return 1
   fi
-  for target in "${targets[@]}"; do
-    if ! gitleaks dir "$target" "${cfg_arg[@]}" --no-banner --redact >/dev/null 2>&1; then
-      echo "state-run: SECRET DETECTED in state ($target) — refusing to commit/push." >&2
-      gitleaks dir "$target" "${cfg_arg[@]}" --no-banner --redact 2>&1 \
-        | grep -iE "Finding|File:|RuleID|Line:" | head -40 >&2 || true
-      return 1
-    fi
-  done
+
+  local report rc=0
+  report="$(mktemp -t state-run-gitleaks.XXXXXX.json)"
+  # Scan only what is staged. gitleaks exit: 0 = clean, 1 = leaks found, other =
+  # operational error (which we also treat as fail-closed).
+  gitleaks git --staged "$STATE_REPO_DIR" \
+    --config "$cfg" --no-banner --redact \
+    --report-format json --report-path "$report" >/dev/null 2>&1 || rc=$?
+
+  if [[ "$rc" -eq 0 ]]; then
+    rm -f "$report"
+    return 0
+  fi
+
+  if [[ -s "$report" ]] && grep -q '"RuleID"' "$report" 2>/dev/null; then
+    echo "state-run: SECRET DETECTED in staged state — refusing to commit/push." >&2
+    grep -oE '"(RuleID|File|StartLine)": *[^,}]*' "$report" | head -40 >&2 || true
+  else
+    echo "state-run: gitleaks errored (exit $rc) — refusing to push (fail-closed)." >&2
+  fi
+  rm -f "$report"
+  return 1
 }
 
 acquire_state_repo_lock
