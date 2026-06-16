@@ -9,3 +9,9 @@
 
 alter table public.discovery_runs
     add column if not exists skipped_query_count integer not null default 0;
+
+-- Deploy note: the runtime error is PGRST204 ("not found in the schema cache"),
+-- so this must be applied to the live project (supabase db push) AND PostgREST
+-- must reload its schema cache before the write succeeds. PostgREST reloads
+-- automatically on most managed deploys; if the 400 persists, force it with:
+--   notify pgrst, 'reload schema';
