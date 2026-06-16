@@ -123,6 +123,61 @@ push_state() {
   done
 }
 
+# Secret-scan guard: refuse to commit/push state that gitleaks flags. The leak
+# that motivated this rode in as a key inside a discovery `errors[]` field;
+# redaction scrubs those at write time, and this is the enforced defense-in-depth
+# net at the push boundary. It scans the *staged* diff (what is about to be
+# committed), not the whole working tree, so it does not block on a pre-existing
+# secret in an unchanged file and does not re-scan the full candidate store.
+#
+# Fails closed: if gitleaks is missing or the config cannot be found, it refuses
+# to push rather than degrade to gitleaks' default ruleset (which misses the
+# low-entropy Google key class our strict rule exists for). Override only in an
+# emergency with STATE_RUN_SKIP_SECRET_SCAN=1.
+scan_state_for_secrets() {
+  if [[ "${STATE_RUN_SKIP_SECRET_SCAN:-0}" == "1" ]]; then
+    echo "state-run: WARNING — secret scan skipped (STATE_RUN_SKIP_SECRET_SCAN=1)." >&2
+    return 0
+  fi
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "state-run: gitleaks not installed — refusing to push state unscanned." >&2
+    echo "  install it (e.g. 'brew install gitleaks') or, only if you must," >&2
+    echo "  set STATE_RUN_SKIP_SECRET_SCAN=1 to override (NOT recommended)." >&2
+    return 1
+  fi
+  local repo_root cfg
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  cfg="$repo_root/.gitleaks.toml"
+  if [[ ! -f "$cfg" ]]; then
+    echo "state-run: .gitleaks.toml not found at $cfg — refusing to push." >&2
+    echo "  scanning with gitleaks defaults would miss the low-entropy Google key" >&2
+    echo "  class this config exists to catch. Restore the file before pushing." >&2
+    return 1
+  fi
+
+  local report rc=0
+  report="$(mktemp -t state-run-gitleaks.XXXXXX.json)"
+  # Scan only what is staged. gitleaks exit: 0 = clean, 1 = leaks found, other =
+  # operational error (which we also treat as fail-closed).
+  gitleaks git --staged "$STATE_REPO_DIR" \
+    --config "$cfg" --no-banner --redact \
+    --report-format json --report-path "$report" >/dev/null 2>&1 || rc=$?
+
+  if [[ "$rc" -eq 0 ]]; then
+    rm -f "$report"
+    return 0
+  fi
+
+  if [[ -s "$report" ]] && grep -q '"RuleID"' "$report" 2>/dev/null; then
+    echo "state-run: SECRET DETECTED in staged state — refusing to commit/push." >&2
+    grep -oE '"(RuleID|File|StartLine)": *[^,}]*' "$report" | head -40 >&2 || true
+  else
+    echo "state-run: gitleaks errored (exit $rc) — refusing to push (fail-closed)." >&2
+  fi
+  rm -f "$report"
+  return 1
+}
+
 acquire_state_repo_lock
 
 # 1. Bring the state repo to canonical HEAD.
@@ -149,6 +204,10 @@ fi
 if [[ -z "$(git_state diff --cached --name-only)" ]]; then
   echo "state-run: no state changes to commit."
 else
+  if ! scan_state_for_secrets; then
+    echo "state-run: aborting before commit/push — secret scan failed." >&2
+    exit 1
+  fi
   git_state config user.name "${GIT_AUTHOR_NAME:-github-actions[bot]}"
   git_state config user.email "${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
   git_state commit -m "${message:-chore(state): update ${subtrees[*]:-state}}"

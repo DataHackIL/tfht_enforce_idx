@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks/gitleaks_prepush_guard.py\"",
+            "if": "Bash(git push:*)",
+            "statusMessage": "Secret-scanning before push (gitleaks)…"
+          }
+        ]
+      }
+    ]
+  }
+}

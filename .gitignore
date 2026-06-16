@@ -211,8 +211,10 @@ __marimo__/
 # Local agent overrides
 LOCAL_AGENTS.md
 
-# Claude Code
-.claude/
+# Claude Code — ignore everything under .claude/ except the shared, checked-in
+# settings.json (which carries the team-wide secret-scan pre-push hook).
+.claude/*
+!.claude/settings.json
 
 .DS_Store
 

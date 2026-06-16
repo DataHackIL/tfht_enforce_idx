@@ -144,6 +144,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # Required so the gitleaks-gated secret-scan guard tests actually run in CI
+      # instead of silently skipping (they assert the guard blocks real keys).
+      - name: Install gitleaks
+        run: |
+          VERSION=8.30.1
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
       - name: Run integration tests
         run: pytest -q tests/integration --cov --cov-report=
 

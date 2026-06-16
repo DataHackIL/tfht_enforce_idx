@@ -19,6 +19,14 @@ repos:
       - id: ruff
       - id: ruff-format
 
+  # Secret scan before push (the "general git" pre-push hook). gitleaks uses the
+  # repo-root .gitleaks.toml. Runs on pre-push so it gates what leaves the machine.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        stages: [pre-push]
+
   - repo: local
     hooks:
       - id: mypy

@@ -1,0 +1,51 @@
+# gitleaks config for denbust — used by the git pre-push hook, the Claude Code
+# pre-push hook, and the state-run push guard (scripts/state-run.sh).
+#
+# Strategy: the industry default ruleset, plus a strict (no-entropy) rule for
+# Google API keys (the kind that leaked — gitleaks' default rule applies an
+# entropy gate that can miss them).
+#
+# Allowlisting is deliberately NARROW. The seed-time leak rode in as a Google
+# key inside a discovery `errors[]` field — i.e. *inside* the candidate-data
+# JSONL. So we must NOT blanket-skip those files: a blanket path allowlist would
+# blind the scanner at exactly the incident's location. Instead we suppress only
+# the catch-all `generic-api-key` rule (which false-positives on news URLs/titles/
+# snippets) on the bulk data paths, while every high-signal provider rule — our
+# strict Google rule, `jwt` (the Supabase-JWT incident class), AWS/GitHub/Slack/
+# etc. — stays ACTIVE there. Captured third-party HTML fixtures additionally trip
+# `jwt` (foreign ad/analytics tokens, not our secrets), so they suppress both.
+
+title = "denbust"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "google-api-key-strict"
+description = "Google API key (e.g. Custom Search) — matched without an entropy gate"
+regex = '''AIza[0-9A-Za-z\-_]{35}'''
+keywords = ["AIza"]
+
+# Bulk news-candidate data (article URLs/titles/snippets). Suppress ONLY the
+# generic/entropy catch-all; keep every provider-key rule active so a real key or
+# JWT captured into this stream — the incident vector — is still caught.
+[[allowlists]]
+description = "News-candidate data — suppress generic-api-key noise only"
+targetRules = ["generic-api-key"]
+paths = [
+  '''.*/candidates/latest_candidates\.jsonl$''',
+  '''.*/candidates/retry_queue\.jsonl$''',
+  '''.*/candidates/backfill_queue\.jsonl$''',
+  '''.*/candidates/candidate_provenance\.jsonl$''',
+  '''.*/candidates/scrape_attempts\.jsonl$''',
+  '''.*/candidates/triage_decisions\.jsonl$''',
+  '''.*/candidates/engine_query_cache/.*''',
+  '''.*/prefilter/.*''',
+]
+
+# Captured-page test fixtures carry third-party ad/analytics tokens (not ours)
+# that trip both the generic catch-all and the JWT rule.
+[[allowlists]]
+description = "Captured-page test fixtures — third-party tokens, not our secrets"
+targetRules = ["generic-api-key", "jwt"]
+paths = ['''tests/fixtures/.*''']
