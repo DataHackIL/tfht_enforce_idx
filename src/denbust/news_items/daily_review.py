@@ -385,12 +385,23 @@ def review_latest_daily_run(
     labels: list[str] | None = None,
     source_diagnostics_path: Path | None = None,
 ) -> int:
-    """Review the latest daily run and create any missing issues."""
-    artifacts = latest_daily_review_artifacts(
-        state_root=state_root,
-        workflow_name=workflow_name,
-        source_diagnostics_path=source_diagnostics_path,
-    )
+    """Review the latest daily run and create any missing issues.
+
+    Returns the number of issues created. When no matching ``daily-state-run``
+    ingest artifacts exist yet (e.g. ingest runs locally/on-demand and has not
+    produced state, so there is nothing to review), this is a clean no-op that
+    returns 0 rather than failing the workflow — a scheduled review with nothing
+    to review should not surface as a red run.
+    """
+    try:
+        artifacts = latest_daily_review_artifacts(
+            state_root=state_root,
+            workflow_name=workflow_name,
+            source_diagnostics_path=source_diagnostics_path,
+        )
+    except FileNotFoundError as exc:
+        print(f"No daily ingest artifacts to review ({exc}); skipping.")
+        return 0
     reviewer = AnthropicDailyReviewer(api_key=anthropic_api_key, model=model)
     review = reviewer.review(artifacts)
     if not review.issues:

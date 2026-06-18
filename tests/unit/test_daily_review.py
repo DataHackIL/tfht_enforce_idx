@@ -198,6 +198,20 @@ class TestDailyReviewHelpers:
         with pytest.raises(FileNotFoundError, match="No complete news_items/ingest artifacts"):
             latest_daily_review_artifacts(state_root=tmp_path)
 
+    def test_review_latest_daily_run_is_a_noop_when_no_ingest_artifacts(
+        self, tmp_path: Path
+    ) -> None:
+        """With no ingest artifacts to review (ingest runs locally/on-demand),
+        the review is a clean no-op: it returns 0 and never reaches the Anthropic
+        or GitHub clients, so a scheduled run does not fail."""
+        created = review_latest_daily_run(
+            state_root=tmp_path,  # empty: no news_items/ingest at all
+            repository="DataHackIL/tfht_enforce_idx",
+            anthropic_api_key="unused",
+            github_token="unused",
+        )
+        assert created == 0
+
     def test_compact_for_prompt_truncates_large_lists_and_strings(self) -> None:
         """Large debug payloads should be compacted before prompting."""
         compact = _compact_for_prompt(
