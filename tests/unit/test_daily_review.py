@@ -13,6 +13,7 @@ from denbust.news_items.daily_review import (
     AnthropicDailyReviewer,
     GitHubIssueClient,
     IssueCandidate,
+    NoDailyReviewArtifacts,
     ReviewArtifacts,
     ReviewResult,
     _compact_for_prompt,
@@ -182,10 +183,11 @@ class TestDailyReviewHelpers:
         with pytest.raises(ValueError, match="Expected JSON object"):
             _load_json(path)
 
-    def test_latest_daily_review_artifacts_raises_when_daily_artifacts_missing(
+    def test_latest_daily_review_artifacts_raises_no_artifacts_when_incomplete(
         self, tmp_path: Path
     ) -> None:
-        """Missing or incomplete daily artifacts should fail clearly."""
+        """A present state tree with no complete matching run raises the benign,
+        narrow NoDailyReviewArtifacts — not a bare FileNotFoundError."""
         logs_dir = tmp_path / "news_items" / "ingest" / "logs"
         _write_json(
             logs_dir / "2026-03-21T04-00-00-000000Z.summary.json",
@@ -195,22 +197,53 @@ class TestDailyReviewHelpers:
             },
         )
 
-        with pytest.raises(FileNotFoundError, match="No complete news_items/ingest artifacts"):
+        with pytest.raises(NoDailyReviewArtifacts, match="No complete news_items/ingest artifacts"):
             latest_daily_review_artifacts(state_root=tmp_path)
 
-    def test_review_latest_daily_run_is_a_noop_when_no_ingest_artifacts(
+    def test_latest_daily_review_artifacts_raises_filenotfound_when_state_root_missing(
         self, tmp_path: Path
     ) -> None:
-        """With no ingest artifacts to review (ingest runs locally/on-demand),
-        the review is a clean no-op: it returns 0 and never reaches the Anthropic
-        or GitHub clients, so a scheduled run does not fail."""
+        """A missing state_root (broken checkout / misconfig) is NOT the benign
+        case — it raises FileNotFoundError so it surfaces loudly, and is not a
+        subclass of NoDailyReviewArtifacts."""
+        missing = tmp_path / "does-not-exist"
+        with pytest.raises(FileNotFoundError) as excinfo:
+            latest_daily_review_artifacts(state_root=missing)
+        assert not isinstance(excinfo.value, NoDailyReviewArtifacts)
+
+    def test_review_latest_daily_run_noop_makes_no_client_calls(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The empty case returns 0 and never constructs the Anthropic or GitHub
+        clients (the no-network guarantee), so a scheduled run cannot fail."""
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("no client should be constructed on the empty path")
+
+        monkeypatch.setattr("denbust.news_items.daily_review.AnthropicDailyReviewer", _boom)
+        monkeypatch.setattr("denbust.news_items.daily_review.GitHubIssueClient", _boom)
+
+        ingest = tmp_path / "news_items" / "ingest" / "logs"
+        ingest.mkdir(parents=True)  # state tree exists, but holds no runs
+
         created = review_latest_daily_run(
-            state_root=tmp_path,  # empty: no news_items/ingest at all
+            state_root=tmp_path,
             repository="DataHackIL/tfht_enforce_idx",
             anthropic_api_key="unused",
             github_token="unused",
         )
         assert created == 0
+
+    def test_review_latest_daily_run_propagates_missing_state_root(self, tmp_path: Path) -> None:
+        """A missing state_root must NOT be silently no-op'd — it propagates so a
+        broken state checkout fails the workflow loudly."""
+        with pytest.raises(FileNotFoundError):
+            review_latest_daily_run(
+                state_root=tmp_path / "nope",
+                repository="DataHackIL/tfht_enforce_idx",
+                anthropic_api_key="unused",
+                github_token="unused",
+            )
 
     def test_compact_for_prompt_truncates_large_lists_and_strings(self) -> None:
         """Large debug payloads should be compacted before prompting."""
