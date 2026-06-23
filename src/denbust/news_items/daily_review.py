@@ -168,6 +168,16 @@ def _render_source_diagnostics_section(source_diagnostics: dict[str, Any] | None
     )
 
 
+class NoDailyReviewArtifacts(Exception):
+    """No matching daily-ingest run exists yet to review.
+
+    This is a *benign* condition (e.g. ingest runs locally/on-demand and has not
+    produced state), distinct from a genuine filesystem/configuration failure
+    such as a missing ``state_root`` — which keeps raising ``FileNotFoundError``
+    so it surfaces loudly instead of being silently swallowed.
+    """
+
+
 def latest_daily_review_artifacts(
     *,
     state_root: Path,
@@ -176,7 +186,19 @@ def latest_daily_review_artifacts(
     workflow_name: str = "daily-state-run",
     source_diagnostics_path: Path | None = None,
 ) -> ReviewArtifacts:
-    """Find the latest daily-ingest artifacts from the state repo."""
+    """Find the latest daily-ingest artifacts from the state repo.
+
+    Raises:
+        FileNotFoundError: if ``state_root`` itself is missing or not a directory
+            (a broken state checkout / misconfigured ``DENBUST_STATE_ROOT`` — a
+            real failure that must not be mistaken for "nothing to review").
+        NoDailyReviewArtifacts: if the state tree is present but holds no
+            complete run matching ``workflow_name`` (the benign empty case).
+    """
+    if not state_root.is_dir():
+        raise FileNotFoundError(
+            f"state_root {str(state_root)!r} does not exist or is not a directory"
+        )
     runs_dir = state_root / dataset_name / job_name / "runs"
     logs_dir = state_root / dataset_name / job_name / "logs"
     candidates = sorted(logs_dir.glob("*.summary.json"), reverse=True)
@@ -204,7 +226,7 @@ def latest_daily_review_artifacts(
             debug_log=_load_json(debug_log_path),
         )
 
-    raise FileNotFoundError(
+    raise NoDailyReviewArtifacts(
         f"No complete {dataset_name}/{job_name} artifacts found for workflow '{workflow_name}'"
     )
 
@@ -374,6 +396,15 @@ class GitHubIssueClient:
         response.raise_for_status()
 
 
+def _emit_review_notice(message: str) -> None:
+    """Surface a non-fatal review notice. Under GitHub Actions, also emit a
+    ``::warning::`` annotation so a no-op run is visible at a glance rather than
+    buried in stdout."""
+    print(message)
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        print(f"::warning title=daily-review::{message}")
+
+
 def review_latest_daily_run(
     *,
     state_root: Path,
@@ -385,12 +416,27 @@ def review_latest_daily_run(
     labels: list[str] | None = None,
     source_diagnostics_path: Path | None = None,
 ) -> int:
-    """Review the latest daily run and create any missing issues."""
-    artifacts = latest_daily_review_artifacts(
-        state_root=state_root,
-        workflow_name=workflow_name,
-        source_diagnostics_path=source_diagnostics_path,
-    )
+    """Review the latest daily run and create any missing issues.
+
+    Returns the number of issues created. When no matching ``daily-state-run``
+    ingest artifacts exist yet (e.g. ingest runs locally/on-demand and has not
+    produced state, so there is nothing to review), this is a clean no-op that
+    returns 0 rather than failing the workflow — a scheduled review with nothing
+    to review should not surface as a red run.
+    """
+    try:
+        artifacts = latest_daily_review_artifacts(
+            state_root=state_root,
+            workflow_name=workflow_name,
+            source_diagnostics_path=source_diagnostics_path,
+        )
+    except NoDailyReviewArtifacts as exc:
+        # Benign: nothing to review yet. Make it observable (not a bare stdout
+        # line) so a scheduled no-op is distinguishable from a healthy review,
+        # but do not fail the workflow. A genuinely missing state_root raises
+        # FileNotFoundError instead and is deliberately NOT caught here.
+        _emit_review_notice(f"No daily ingest artifacts to review: {exc}")
+        return 0
     reviewer = AnthropicDailyReviewer(api_key=anthropic_api_key, model=model)
     review = reviewer.review(artifacts)
     if not review.issues:
