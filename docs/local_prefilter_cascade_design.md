@@ -83,10 +83,10 @@ The cascade exposes a `PrefilterDecision` to the rest of the pipeline:
 class PrefilterDecision:
     verdict: Literal["pass", "drop"]
     stopped_at_stage: Literal["A", "B", "C", "D", "passed_all"]
-    stage_scores: dict[str, float]   # per-stage P(negative)
+    stage_scores: dict[str, float]  # per-stage P(negative)
     stage_thresholds: dict[str, float]
-    reason: str                       # human-readable, e.g. "stage_A:domain_reputation=0.992>=0.95"
-    model_versions: dict[str, str]    # which trained/snapshot models participated
+    reason: str  # human-readable, e.g. "stage_A:domain_reputation=0.992>=0.95"
+    model_versions: dict[str, str]  # which trained/snapshot models participated
 ```
 
 Decisions are written to the operational store as a new `prefilter_decisions` table (or state-repo JSONL in local mode) so we can audit and recompute downstream metrics.
