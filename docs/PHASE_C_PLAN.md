@@ -183,12 +183,14 @@ class SubcategoryDef:
     index_relevant: bool
     example_urls: list[str]
 
+
 @dataclass(frozen=True)
 class CategoryDef:
     id: str
     label_he: str
     label_en: str
     subcategories: list[SubcategoryDef]
+
 
 @dataclass(frozen=True)
 class Typology:
@@ -199,6 +201,7 @@ class Typology:
     def is_index_relevant(self, cat_id: str, sub_id: str) -> bool: ...
     def all_subcategory_ids(self) -> list[str]: ...
     def index_relevant_subcategory_ids(self) -> list[str]: ...
+
 
 def load_typology(path: Path | None = None) -> Typology:
     """Load from taxonomy/tfht_typology_v1.yaml by default."""
@@ -243,7 +246,7 @@ Replace the `Category` and `SubCategory` `StrEnum`s with:
 
 ```python
 # Thin wrappers — validate against loaded taxonomy at parse time.
-CategoryId = str   # one of the taxonomy category IDs
+CategoryId = str  # one of the taxonomy category IDs
 SubcategoryId = str  # one of the taxonomy subcategory IDs
 ```
 
