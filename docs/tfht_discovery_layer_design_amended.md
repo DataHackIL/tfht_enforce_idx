@@ -222,8 +222,7 @@ class DiscoveryEngine(Protocol):
         self,
         queries: list["DiscoveryQuery"],
         context: "DiscoveryContext",
-    ) -> list["DiscoveredCandidate"]:
-        ...
+    ) -> list["DiscoveredCandidate"]: ...
 ```
 
 ### Requirements
@@ -250,8 +249,7 @@ class SourceCandidateProducer(Protocol):
     async def discover_candidates(
         self,
         context: "SourceDiscoveryContext",
-    ) -> list["DiscoveredCandidate"]:
-        ...
+    ) -> list["DiscoveredCandidate"]: ...
 ```
 
 This lets the system treat:
@@ -281,6 +279,7 @@ live-network-dependent CI tests remain outside this narrow source-health path.
 
 ```python
 from pydantic import Field
+
 
 class DiscoveryQuery(BaseModel):
     query_text: str
