@@ -132,6 +132,7 @@ Each PR section below specifies: goal, scope, files added/changed, dependencies 
     StageName = Literal["A", "B", "C", "D"]
     StoppedAt = Literal["A", "B", "C", "D", "passed_all"]
 
+
     @dataclass(frozen=True)
     class StageScore:
         stage: StageName
@@ -141,6 +142,7 @@ Each PR section below specifies: goal, scope, files added/changed, dependencies 
         reason: str
         model_version: str
 
+
     @dataclass(frozen=True)
     class PrefilterDecision:
         candidate_id: str
@@ -148,8 +150,8 @@ Each PR section below specifies: goal, scope, files added/changed, dependencies 
         verdict: Verdict
         stopped_at_stage: StoppedAt
         stage_scores: tuple[StageScore, ...]
-        decided_at: str           # ISO-8601 UTC
-        config_hash: str          # sha1 of resolved PrefilterConfig
+        decided_at: str  # ISO-8601 UTC
+        config_hash: str  # sha1 of resolved PrefilterConfig
     ```
 
   - `config.py`: `PrefilterConfig`, `StageConfig`, `PrefilterMode` enum (`OFF | SHADOW | ENFORCE`).
@@ -158,11 +160,12 @@ Each PR section below specifies: goal, scope, files added/changed, dependencies 
     ```python
     @dataclass(frozen=True)
     class PrefilterStatePaths:
-        root: Path                  # data/<dataset>/<job>/prefilter
-        labels_path: Path           # root/labels.parquet
-        models_dir: Path            # root/models
-        decisions_dir: Path         # root/decisions
-        calibration_dir: Path       # root/calibration
+        root: Path  # data/<dataset>/<job>/prefilter
+        labels_path: Path  # root/labels.parquet
+        models_dir: Path  # root/models
+        decisions_dir: Path  # root/decisions
+        calibration_dir: Path  # root/calibration
+
 
     def resolve_prefilter_state_paths(
         state_root: Path, dataset_name: DatasetName, job_name: JobName
@@ -223,6 +226,7 @@ Stratify into train / validation / test splits. Persist split assignments inside
   class LabelSource:
       name: Literal["triage_manual", "triage_auto", "claude_classifier"]
 
+
   @dataclass(frozen=True)
   class LabeledCandidate:
       candidate_id: str
@@ -230,12 +234,13 @@ Stratify into train / validation / test splits. Persist split assignments inside
       url: str
       title: str
       snippet: str
-      article_body: str | None       # may be None pre-scrape
+      article_body: str | None  # may be None pre-scrape
       label: Literal["positive", "negative"]
       label_source: LabelSource
       split: Literal["train", "val", "test"]
-      labeled_at: str                # ISO-8601 UTC
-      decision_hash: str             # sha1 of the source row to detect dedup conflicts
+      labeled_at: str  # ISO-8601 UTC
+      decision_hash: str  # sha1 of the source row to detect dedup conflicts
+
 
   def assemble_labels(
       state_paths: DiscoveryStatePaths,
@@ -244,6 +249,7 @@ Stratify into train / validation / test splits. Persist split assignments inside
       val_fraction: float = 0.15,
       test_fraction: float = 0.15,
   ) -> list[LabeledCandidate]: ...
+
 
   def write_labels_parquet(rows: list[LabeledCandidate], out_path: Path) -> None: ...
   def read_labels_parquet(path: Path) -> list[LabeledCandidate]: ...
@@ -299,7 +305,8 @@ Fixtures: hand-crafted small JSONL (≤ 30 rows) covering the priority-conflict 
   @dataclass(frozen=True)
   class LexiconEntry:
       term: str
-      log_weight_negative: float   # log P(neg | term has hit)
+      log_weight_negative: float  # log P(neg | term has hit)
+
 
   @dataclass(frozen=True)
   class DomainReputation:
@@ -309,19 +316,25 @@ Fixtures: hand-crafted small JSONL (≤ 30 rows) covering the priority-conflict 
       p_post_mean: float
       p_post_upper_95: float
 
+
   class LexiconScorer:
       def __init__(self, entries: list[LexiconEntry]) -> None: ...
-      def score(self, title: str, snippet: str) -> float: ...   # p_negative
+      def score(self, title: str, snippet: str) -> float: ...  # p_negative
+
 
   class DomainReputationScorer:
       def __init__(self, table: dict[str, DomainReputation], min_observations: int) -> None: ...
       def score(self, domain: str) -> float: ...
 
+
   class UrlHeuristicScorer:
       def score(self, url: str) -> float: ...
 
+
   class StageAScorer:
-      def __init__(self, lex: LexiconScorer, dom: DomainReputationScorer, url: UrlHeuristicScorer) -> None: ...
+      def __init__(
+          self, lex: LexiconScorer, dom: DomainReputationScorer, url: UrlHeuristicScorer
+      ) -> None: ...
       def evaluate(self, candidate: CandidateView) -> StageScore: ...
   ```
 
@@ -379,14 +392,18 @@ Fixtures: hand-crafted small JSONL (≤ 30 rows) covering the priority-conflict 
   @dataclass(frozen=True)
   class StageBModelMeta:
       model_kind: Literal["naive_bayes", "setfit"]
-      model_version: str   # sha1 of trained artifact + label data
+      model_version: str  # sha1 of trained artifact + label data
       trained_at: str
       n_train: int
       n_val: int
 
+
   class StageBScorer:
       def __init__(self, model_kind: Literal["naive_bayes"], model_dir: Path) -> None: ...
-      def evaluate(self, candidate: CandidateView, pass_kind: Literal["thin", "thick"]) -> StageScore: ...
+      def evaluate(
+          self, candidate: CandidateView, pass_kind: Literal["thin", "thick"]
+      ) -> StageScore: ...
+
 
   def train_naive_bayes(
       labels_path: Path, out_dir: Path, seed: int = 20260521
@@ -488,9 +505,17 @@ Document `pip install -e ".[dev,prefilter]"` in `AGENTS.md` under the Environmen
 
   ```python
   class StageCScorer:
-      def __init__(self, embedder: SentenceEmbedder, centroid_path: Path, faiss_index_path: Path,
-                   sigmoid_temperature: float) -> None: ...
-      def evaluate(self, candidate: CandidateView, pass_kind: Literal["thin","thick"]) -> StageScore: ...
+      def __init__(
+          self,
+          embedder: SentenceEmbedder,
+          centroid_path: Path,
+          faiss_index_path: Path,
+          sigmoid_temperature: float,
+      ) -> None: ...
+      def evaluate(
+          self, candidate: CandidateView, pass_kind: Literal["thin", "thick"]
+      ) -> StageScore: ...
+
 
   def rebuild_positive_artifacts(labels_path: Path, out_dir: Path) -> StageCArtifactMeta: ...
   ```
@@ -544,14 +569,21 @@ Document `pip install -e ".[dev,prefilter]"` in `AGENTS.md` under the Environmen
   class StageDPrompt:
       version: str
       system: str
-      user_template: str       # contains {title} and {body} placeholders
-      yes_token: str           # "כן"
-      no_token: str            # "לא"
+      user_template: str  # contains {title} and {body} placeholders
+      yes_token: str  # "כן"
+      no_token: str  # "לא"
+
 
   class SlmJudge:
-      def __init__(self, model_id: str, backend: Literal["mlx","llama_cpp"],
-                   prompt: StageDPrompt, batch_size: int, timeout_seconds: float,
-                   temperature: float) -> None: ...
+      def __init__(
+          self,
+          model_id: str,
+          backend: Literal["mlx", "llama_cpp"],
+          prompt: StageDPrompt,
+          batch_size: int,
+          timeout_seconds: float,
+          temperature: float,
+      ) -> None: ...
       def evaluate(self, candidate: CandidateView, body: str | None) -> StageScore: ...
       def evaluate_batch(self, items: list[tuple[CandidateView, str | None]]) -> list[StageScore]: ...
   ```
@@ -615,8 +647,13 @@ Document `pip install -e ".[dev,prefilter]"` in `AGENTS.md` under the Environmen
 
   ```python
   class CascadeOrchestrator:
-      def __init__(self, config: PrefilterConfig, stages: CascadeStages,
-                   writer: PrefilterDecisionWriter, config_hash: str) -> None: ...
+      def __init__(
+          self,
+          config: PrefilterConfig,
+          stages: CascadeStages,
+          writer: PrefilterDecisionWriter,
+          config_hash: str,
+      ) -> None: ...
 
       def evaluate_thin(self, candidate: CandidateView) -> PrefilterDecision: ...
       def evaluate_thick(self, candidate: CandidateView, body: str) -> PrefilterDecision: ...
